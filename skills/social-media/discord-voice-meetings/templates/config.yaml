@@ -1,0 +1,199 @@
+# Discord Voice Meeting Transcription Configuration
+#
+# Generic, framework-agnostic template for a Discord voice meeting bot.
+# Secrets are read from environment variables; see env.example in this directory.
+# Values shown here are safe defaults for a standalone meeting_bot.py implementation.
+
+# -----------------------------------------------------------------------------
+# Discord settings
+# -----------------------------------------------------------------------------
+discord:
+  # Environment variable that contains the Discord bot token.
+  # Keep the token out of this file so the config can be committed safely.
+  token_env: DISCORD_BOT_TOKEN
+
+  # Gateway intents requested by the bot. Enable only what the bot needs.
+  # - guilds: required to discover servers/channels and receive guild events.
+  # - voice_states: required to join/track voice channels and participant state.
+  # - messages: required if commands are typed in text channels.
+  # - message_content: required for prefix/text commands in many Discord bots;
+  #   must also be enabled in the Discord Developer Portal.
+  intents:
+    guilds: true
+    voice_states: true
+    messages: true
+    message_content: true
+    members: false
+    reactions: false
+
+  # Optional allow-list of Discord user IDs permitted to control recordings.
+  # Leave empty to allow any user who can invoke the bot command.
+  # User IDs must be strings to avoid integer precision issues in some parsers.
+  allowed_users:
+    - "123456789012345678"  # Example: meeting host / team lead
+    - "234567890123456789"  # Example: backup operator
+
+# -----------------------------------------------------------------------------
+# Speech-to-text (STT) settings
+# -----------------------------------------------------------------------------
+stt:
+  # STT backend to use. Typical values:
+  # - groq: hosted Whisper-compatible transcription via Groq API.
+  # - local: local fallback engine only.
+  # - auto: try hosted provider first, then local fallback on failure.
+  provider: auto
+
+  groq:
+    # Environment variable that contains the Groq API key.
+    api_key_env: GROQ_API_KEY
+
+    # Groq transcription model. Use a model supported by your Groq account.
+    # Larger models generally improve accuracy but may increase latency/cost.
+    model: whisper-large-v3-turbo
+
+    # Primary spoken language for meetings. Use ISO-639-1 when known, such as
+    # "pt", "en", "es", "fr", or "de". Set to null/empty for auto-detection.
+    # CRITICAL: if this is wrong/empty, Whisper will hallucinate in the wrong language.
+    language: pt
+
+    # Optional prompt/glossary to bias transcription toward expected names,
+    # acronyms, product terms, and technical vocabulary. This reduces common
+    # mis-hearings in domain-specific meetings.
+    prompt: |
+      The meeting is a software engineering discussion. Prefer these terms and spellings:
+      - NucliaDB, RAG, vector index, embeddings, hybrid search, reranker
+      - Kubernetes, Helm, Terraform, Postgres, Redis, S3, OpenTelemetry
+      - FastAPI, Pydantic, pytest, CI/CD, GitHub Actions, OAuth, JWT
+      - People and teams: Alice Chen, Marco Ruiz, Platform team, Search team
+      - Project names: Atlas migration, Phoenix rollout, Mercury API
+
+    # Request timeout for hosted STT calls, in seconds. Increase for long audio
+    # chunks or slow networks; decrease to fail over faster to local fallback.
+    timeout_seconds: 60
+
+    # Number of retries for transient API/network failures before fallback.
+    max_retries: 2
+
+  local_fallback:
+    # Enable local fallback if the hosted provider is unavailable or disabled.
+    enabled: true
+
+    # Local STT engine identifier used by the reference implementation.
+    # Examples: faster-whisper, whisper.cpp, openai-whisper.
+    engine: faster-whisper
+
+    # Local model size/name. Smaller models are faster; larger models are more
+    # accurate and require more CPU/GPU memory.
+    model: small
+
+    # Device used by local transcription. Common values: auto, cpu, cuda.
+    device: auto
+
+    # Compute precision for local inference. int8 is efficient on CPU; float16
+    # is common on CUDA GPUs.
+    compute_type: int8
+
+# -----------------------------------------------------------------------------
+# LLM summary generation settings
+# -----------------------------------------------------------------------------
+llm:
+  # Environment variable that contains the API key for the summary LLM provider.
+  api_key_env: LLM_API_KEY
+
+  # OpenAI-compatible API base URL for summary generation.
+  # Examples:
+  # - https://api.openai.com/v1
+  # - https://api.groq.com/openai/v1
+  # - http://localhost:11434/v1
+  base_url: https://api.openai.com/v1
+
+  # Chat/completions model used to generate meeting summaries, action items,
+  # decisions, and follow-ups.
+  model: gpt-4o-mini
+
+  # Sampling temperature. Lower values produce more deterministic summaries;
+  # higher values may be more creative but can add inconsistency.
+  temperature: 0.2
+
+  # Maximum tokens for the generated summary. Increase for long meetings or
+  # detailed minutes; decrease for shorter, cheaper outputs.
+  max_tokens: 2000
+
+# -----------------------------------------------------------------------------
+# Voice capture tuning
+# -----------------------------------------------------------------------------
+voice_capture:
+  # Seconds of continuous silence before a speaker's audio buffer is considered
+  # a completed utterance. Lower = faster splitting but may cut natural pauses.
+  # Higher = longer utterances but slower stop. Validated at 0.8s.
+  silence_threshold: 0.8
+
+  # Minimum duration, in seconds, of captured audio to process. Shorter clips
+  # are discarded as noise. 0.3s filters clicks but keeps short interjections.
+  min_speech_duration: 0.3
+
+  # Discord sends 48kHz stereo 16-bit PCM. These are the CAPTURE parameters,
+  # not the STT parameters. pcm_to_wav() converts to 16kHz mono for STT.
+  sample_rate: 48000
+
+  # Discord sends stereo (2 channels). Each channel is decoded independently
+  # by Opus. The mono downmix happens in pcm_to_wav() via ffmpeg.
+  channels: 2
+
+# -----------------------------------------------------------------------------
+# Meeting output settings
+# -----------------------------------------------------------------------------
+meeting:
+  # Directory where transcripts, summaries, metadata, and temporary audio files
+  # are written. Relative paths are resolved from the process working directory.
+  output_dir: ./meetings
+
+  # Language used for generated summaries and meeting notes (ISO 639-1).
+  language: pt
+
+  # Timezone used for filenames, timestamps, and meeting metadata.
+  # Use an IANA timezone name such as UTC, America/New_York, or Europe/Madrid.
+  timezone: UTC
+
+  # Output formats to write after each meeting. Supported values depend on the
+  # implementation; common values are txt, md, json, and srt.
+  formats:
+    - md
+    - txt
+    - json
+
+# -----------------------------------------------------------------------------
+# Advanced options
+# -----------------------------------------------------------------------------
+advanced:
+  # Interval, in seconds, for bot keepalive/status checks while connected to a
+  # voice channel. Lower values detect disconnects faster; higher values reduce
+  # background work.
+  keepalive_interval_seconds: 30
+
+  # Maximum grace period, in seconds, to wait after the last speaker leaves or
+  # speech stops before finalizing the meeting. This helps avoid cutting off
+  # brief pauses or reconnects.
+  grace_period_max_wait_seconds: 120
+
+  # Filter likely STT hallucinations from silence/noise-only segments. Enable to
+  # remove repeated filler text such as "Thanks for watching" from empty audio.
+  hallucination_filter:
+    enabled: true
+
+    # Drop transcript segments shorter than this many characters if they also
+    # match a known hallucination phrase or low-confidence condition.
+    min_text_length: 3
+
+    # Phrases commonly emitted by STT models during silence. Matching segments
+    # can be discarded or flagged depending on implementation.
+    blocklist_phrases:
+      - "thanks for watching"
+      - "thank you for watching"
+      - "please subscribe"
+      - "music"
+      - "applause"
+
+    # Optional confidence threshold. Segments below this value may be discarded
+    # when the STT provider returns confidence/probability metadata.
+    confidence_threshold: 0.35

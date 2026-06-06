@@ -121,3 +121,69 @@ skills:
           para uso como template de cliente. Vault FMercurio mantém versão
           customizada do health-check. 9 fases: charter, vault, health-check,
           pull-brain, push-brain, cron, weekly review, rhythm, client offering.
+
+  - name: discord-voice-meetings
+    status: approved
+    version: 2.0.0
+    category: social-media
+    description: >
+      Build a Discord voice meeting transcription system — capture audio,
+      identify speakers, transcribe via Groq Whisper, generate LLM-powered
+      meeting minutes/atas. Framework-agnostic reference implementation included.
+    source:
+      type: internal
+      origin: "Sessão com outro agente (FMercurio HQ)"
+      author: "Felippe M. + agente"
+      created: "2026-06-06"
+      approved: "2026-06-06"
+      approved_by: "Felippe M."
+      zip_received: "2026-06-06"
+      repository_url: null
+      no_repository_reason: "Skill interna, blueprint validado em produção"
+    installation:
+      runtime_path: null
+      repo_path: "skills/social-media/discord-voice-meetings/"
+      installed_date: null
+      installed_by: null
+      note: "Blueprint/referência — não requer instalação no runtime Hermes"
+    audit:
+      security_review: "2026-06-06"
+      security_status: "passed"
+      findings:
+        - "API keys via env vars, nunca hardcoded"
+        - "Temp files criados e deletados no finally block"
+        - "Config template contém apenas placeholders"
+        - "Audit script: fix syntax error (redacted API key strings)"
+      frontmatter_valid: true
+      company_agnostic: true
+      pitfalls_documented: true
+      fixes_applied:
+        - "Frontmatter: added author, license, metadata.hermes.tags, related_skills"
+        - "audit-meeting-pipeline.py: fixed unterminated string literals on lines 193, 205"
+    files:
+      - path: "SKILL.md"
+        size_bytes: 16445
+        status: "fixed"
+      - path: "scripts/meeting_bot.py"
+        size_bytes: 45273
+        status: "unchanged"
+      - path: "scripts/audit-meeting-pipeline.py"
+        size_bytes: 8467
+        status: "fixed"
+      - path: "references/troubleshooting.md"
+        size_bytes: 20446
+        status: "unchanged"
+      - path: "templates/config.yaml"
+        size_bytes: 8390
+        status: "unchanged"
+      - path: "templates/env.example"
+        size_bytes: 1322
+        status: "unchanged"
+    changelog:
+      - date: "2026-06-06"
+        action: "initial import with fixes"
+        details: >
+          Complete Discord voice meeting transcription blueprint. Fixes applied:
+          frontmatter compliance (author, license, metadata.hermes structure),
+          audit script syntax errors (redacted API key strings). 6 files,
+          ~100KB total. Production-validated (51s audio → 0.4s transcription).
