@@ -10,12 +10,13 @@ Design: silent by default (empty stdout = nothing delivered by cron).
 """
 
 import os
+import argparse
 import re
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
-VAULT_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_VAULT_ROOT = Path(__file__).resolve().parent.parent
 
 DAYS_INBOX_STALE = 30
 DAYS_PROJECT_STALE = 14
@@ -123,6 +124,20 @@ def check_runtime_contamination(root: Path) -> list[str]:
     return issues
 
 
+def check_sensitivity_routing(files: list[Path], root: Path) -> list[str]:
+    """Notes with sensitivity: restricted outside restricted areas."""
+    issues = []
+    for f in files:
+        rel = f.relative_to(root)
+        if str(rel).startswith("20_Areas/diretoria") or str(rel).startswith("20_Areas/restrita"):
+            continue
+        content = f.read_text(encoding="utf-8", errors="replace")
+        fm = parse_frontmatter(content)
+        if fm and fm.get("sensitivity") == "restricted":
+            issues.append(f"- `{rel}` — marked 'restricted' but outside restricted area")
+    return issues
+
+
 def count_stats(files: list[Path], root: Path) -> dict:
     """General vault statistics."""
     stats = {
@@ -159,7 +174,13 @@ def count_stats(files: list[Path], root: Path) -> dict:
 
 
 def main():
-    root = VAULT_ROOT
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--vault", default=None, help="Path to vault root (default: parent of script's parent dir)")
+    args = ap.parse_args()
+    root = Path(args.vault) if args.vault else DEFAULT_VAULT_ROOT
+    if not root.exists():
+        print(f"ERROR: vault not found: {root}", file=sys.stderr)
+        return 1
     files = collect_md_files(root)
 
     all_issues = []
@@ -179,6 +200,11 @@ def main():
     rt_issues = check_runtime_contamination(root)
     if rt_issues:
         all_issues.append(("⚠️ Possible runtime contamination", rt_issues))
+
+    # 5. Sensitivity routing
+    sens_issues = check_sensitivity_routing(files, root)
+    if sens_issues:
+        all_issues.append(("🔒 Note marked restricted outside restricted area", sens_issues))
 
     stats = count_stats(files, root)
 
