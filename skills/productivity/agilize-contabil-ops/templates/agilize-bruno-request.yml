@@ -1,0 +1,28 @@
+info:
+  name: Agilize Request Name
+  type: http
+  seq: 1
+
+http:
+  method: GET
+  url: https://app.agilize.com.br/api/v1/companies/{{company_id}}/replace-with-endpoint
+  auth:
+    type: bearer
+    token: "{{access_token}}"
+  headers:
+    - name: Accept
+      value: application/json, text/plain, */*
+    - name: Referer
+      value: https://app.agilize.com.br/
+    - name: key
+      value: "{{company_cnpj}}"
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+
+docs: |-
+  Bruno OpenCollection YAML request template for Agilize API calls.
+  Prefer short-lived variables/placeholders for bearer/cookies; do not commit live secrets.

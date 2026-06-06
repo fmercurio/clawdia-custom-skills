@@ -1,0 +1,72 @@
+# ClawdIA Custom Skills Registry
+# Fonte canônica de decisão sobre cada skill customizada.
+# Status: draft | candidate | approved | profile-overlay | deprecated | rejected
+
+skills:
+  - name: agilize-contabil-ops
+    status: approved
+    version: 1.0.0
+    category: productivity
+    description: >
+      Agilize contábil platform operations: Keycloak/OIDC PKCE authentication,
+      finance transaction classification, NFS-e evidence linking, transaction
+      splitting, pro-labore reconciliation, monthly close, and audit workflows.
+      Company-agnostic — works for any Agilize tenant.
+    source:
+      type: internal
+      origin: "Tópico Administrativo Financeiro (FMercurio HQ)"
+      author: "Agente original + melhorias por outro agente"
+      created: "2026-06-05"
+      approved: "2026-06-06"
+      approved_by: "Felippe M."
+      zip_received: "2026-06-06"
+      repository_url: null
+      no_repository_reason: "Skill interna, desenvolvida no tópico AF"
+    installation:
+      runtime_path: "~/.hermes/skills/productivity/agilize-contabil-ops/"
+      repo_path: "skills/productivity/agilize-contabil-ops/"
+      installed_date: "2026-06-06"
+      installed_by: "Hermes Agent"
+    audit:
+      security_review: "2026-06-06"
+      security_status: "passed"
+      findings:
+        - "Scripts read-only, no hardcoded secrets"
+        - "Credentials via KeePassXC/env/config, never CLI args"
+        - "Output files in /tmp, mode 0600"
+      frontmatter_valid: true
+      company_agnostic: true
+      pitfalls_documented: true
+    files:
+      - path: "SKILL.md"
+        size_bytes: 16950
+        status: "modified"
+      - path: "references/agilize-api-access.md"
+        size_bytes: 9863
+        status: "modified"
+      - path: "references/agilize-spreadsheet-reconciliation.md"
+        size_bytes: 7722
+        status: "new"
+      - path: "references/agilize-category-classification.md"
+        size_bytes: 6071
+        status: "new"
+      - path: "scripts/agilize_login.py"
+        size_bytes: 17838
+        status: "unchanged"
+      - path: "scripts/agilize_match_spreadsheet.py"
+        size_bytes: 17135
+        status: "new"
+      - path: "templates/agilize-opencollection.yml"
+        size_bytes: 127
+        status: "unchanged"
+      - path: "templates/agilize-bruno-request.yml"
+        size_bytes: 661
+        status: "unchanged"
+    changelog:
+      - date: "2026-06-06"
+        action: "initial import from zip"
+        details: >
+          Skill created in AF topic, improved by another agent. Added:
+          spreadsheet reconciliation workflow, category classification guide,
+          investment-anjo misuse pattern, closed-period pitfall, API category
+          creation limitation. 3 new files, 2 modified, 8 unchanged.
