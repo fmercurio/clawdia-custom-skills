@@ -70,3 +70,54 @@ skills:
           spreadsheet reconciliation workflow, category classification guide,
           investment-anjo misuse pattern, closed-period pitfall, API category
           creation limitation. 3 new files, 2 modified, 8 unchanged.
+
+  - name: second-brain-operations
+    status: approved
+    version: 1.0.0
+    category: note-taking
+    description: >
+      Step-by-step playbook for setting up and operating a PARA-first Second Brain
+      with Hermes — vault creation, pull/push skills, health-check cron, weekly
+      review, and operational rhythm.
+    source:
+      type: internal
+      origin: "Sessão com outro agente (FMercurio HQ)"
+      author: "Felippe M. + agente"
+      created: "2026-06-06"
+      approved: "2026-06-06"
+      approved_by: "Felippe M."
+      zip_received: "2026-06-06"
+      repository_url: null
+      no_repository_reason: "Skill interna, playbook do Segundo Cérebro FMercurio"
+    installation:
+      runtime_path: "~/.hermes/skills/note-taking/second-brain-operations/"
+      repo_path: "skills/note-taking/second-brain-operations/"
+      installed_date: "2026-06-06"
+      installed_by: "Hermes Agent"
+      already_installed: true
+    audit:
+      security_review: "2026-06-06"
+      security_status: "passed"
+      findings:
+        - "Script determinístico, read-only, sem chamadas de rede"
+        - "Sem hardcoded secrets"
+        - "Design silent-when-healthy compatível com cron"
+      frontmatter_valid: true
+      company_agnostic: true
+      pitfalls_documented: true
+    files:
+      - path: "SKILL.md"
+        size_bytes: 10213
+        status: "identical-to-installed"
+      - path: "scripts/brain-health-check.py"
+        size_bytes: 7384
+        status: "generic-template"
+        note: "Versão genérica (inglês). Vault FMercurio tem versão customizada (português + sensitivity routing + extras)"
+    changelog:
+      - date: "2026-06-06"
+        action: "registered existing skill"
+        details: >
+          Skill já instalada e operacional. Zip é versão genérica/portátil
+          para uso como template de cliente. Vault FMercurio mantém versão
+          customizada do health-check. 9 fases: charter, vault, health-check,
+          pull-brain, push-brain, cron, weekly review, rhythm, client offering.
