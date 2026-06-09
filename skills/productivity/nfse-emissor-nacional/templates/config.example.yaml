@@ -1,0 +1,50 @@
+# Copy this file outside the skill package and fill with your own data.
+# Do not commit real taxpayer IDs, credentials, certificate paths, or customer data.
+
+# Competency period for this batch run (YYYY-MM).
+# All drafts in this run will use this billing period.
+competency: "YYYY-MM"
+
+portal:
+  base_url: "https://www.nfse.gov.br/EmissorNacional"
+  credentials:
+    # Choose one strategy. Keep secrets outside this file when possible.
+    strategy: "environment" # environment | keychain | keepassxc | custom
+    username_env: "NFSE_PORTAL_USERNAME"
+    password_env: "NFSE_PORTAL_PASSWORD"
+
+provider:
+  # Local provider/prestador data. Fill in your environment only.
+  legal_name: "<YOUR_COMPANY_LEGAL_NAME>"
+  tax_id: "<YOUR_COMPANY_CNPJ_OR_CPF_DIGITS>"
+
+invoice_defaults:
+  mode: "draft_only" # Always draft_only for safety
+  service_municipality_ibge: "<IBGE_CODE>"
+  service_municipality_label: "<CITY/UF>"
+  service_code: "<SERVICE_CODE>"
+  nbs_code: "<NBS_CODE_IF_REQUIRED>"
+  description: |
+    <SERVICE_DESCRIPTION>
+  taxes:
+    iss_retention: false
+    municipal_benefit: false
+    pis_cofins_situation: "<PORTAL_OPTION_VALUE>"
+    pis_cofins_retention: "<PORTAL_OPTION_VALUE>"
+    tax_value_mode: "<PORTAL_OPTION_VALUE>"
+    simple_national_rate: "<RATE_IF_APPLICABLE>"
+
+customers:
+  - key: "customer-a"
+    legal_name: "<CUSTOMER_LEGAL_NAME>"
+    tax_id: "<CUSTOMER_CNPJ_OR_CPF_DIGITS>"
+    default_value: "0.00"
+    # Optional: override description/taxes per customer.
+    # description: |
+    #   <CUSTOM_SPECIFIC_DESCRIPTION>
+    # taxes:
+    #   iss_retention: true
+  - key: "customer-b"
+    legal_name: "<CUSTOMER_LEGAL_NAME>"
+    tax_id: "<CUSTOMER_CNPJ_OR_CPF_DIGITS>"
+    default_value: "0.00"

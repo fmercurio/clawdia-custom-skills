@@ -187,3 +187,73 @@ skills:
           frontmatter compliance (author, license, metadata.hermes structure),
           audit script syntax errors (redacted API key strings). 6 files,
           ~100KB total. Production-validated (51s audio → 0.4s transcription).
+
+  - name: nfse-emissor-nacional
+    status: candidate
+    version: 1.1.0
+    category: productivity
+    description: >
+      Safe NFS-e draft preparation in the Brazilian Emissor Nacional portal
+      (nfse.gov.br) using Playwright — taker history import, Select2/Chosen
+      widget handling, draft-only workflow with human review stop.
+    source:
+      type: external
+      origin: "Zip recebido no Skills Lab (FMercurio HQ)"
+      author: "Hermes Agent"
+      created: "2026-06-09"
+      approved: null
+      approved_by: null
+      zip_received: "2026-06-09"
+      repository_url: null
+      no_repository_reason: "Skill genérica, sem repo externo"
+    installation:
+      runtime_path: null
+      repo_path: "skills/productivity/nfse-emissor-nacional/"
+      installed_date: null
+      installed_by: null
+      note: "Blueprint genérico — instalar com config local quando necessário"
+    audit:
+      security_review: "2026-06-09"
+      security_status: "passed"
+      findings:
+        - "Zero hardcoded secrets, credentials, or taxpayer data"
+        - "Draft-only safety contract with 6 rules"
+        - "Company-agnostic — all values from external config"
+        - "Privacy/redaction policy documented"
+      frontmatter_valid: true
+      company_agnostic: true
+      pitfalls_documented: true
+      improvements_applied:
+        - "Removed stale related_skills from frontmatter"
+        - "Added Prerequisites section (Playwright/Chromium)"
+        - "Added competency field to config template (YYYY-MM)"
+        - "Added recovery-on-failure note for draft rebuild"
+        - "Added interrupted-rebuild pitfall (#8)"
+        - "Updated verification checklist with Playwright and competency items"
+        - "MANIFEST.sha256 header added for clarity"
+        - "Privacy redaction: added internal URLs to exclusion list"
+    files:
+      - path: "SKILL.md"
+        size_bytes: 12055
+        status: "new"
+      - path: "README.md"
+        size_bytes: 1317
+        status: "new"
+      - path: "MANIFEST.sha256"
+        size_bytes: 423
+        status: "new"
+      - path: "references/privacy-and-redaction.md"
+        size_bytes: 584
+        status: "new"
+      - path: "templates/config.example.yaml"
+        size_bytes: 1715
+        status: "new"
+    changelog:
+      - date: "2026-06-09"
+        action: "import with improvements"
+        details: >
+          Imported from nfse-emissor-nacional-generic.zip (v1.0.0), renamed to
+          nfse-emissor-nacional. Improvements: frontmatter cleanup, Prerequisites
+          section, competency field in config, recovery-on-failure for rebuild,
+          new pitfall #8, expanded verification checklist. 5 files, ~16KB total.
+          Status: candidate — awaiting Felippe approval.
