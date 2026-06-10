@@ -11,7 +11,7 @@ Use this reference when auditing Agilize categorization against an external cash
 
 ## Match algorithm
 
-Sheet descriptions are typically **short and clean** ("STRIPE", "C6", "MICROSOFT"). Agilize descriptions are **long and noisy** ("STRIPE BRASIL SOLUCOES DE PAGAMENTO LTDA_1", "7679404000100-BANCO TOPAZIO SA"). Pure description matching fails (~12% match rate). The working algorithm:
+Sheet descriptions are typically **short and clean** ("STRIPE", "C6", "MICROSOFT"). Agilize descriptions are **long and noisy** ("STRIPE BRASIL SOLUCOES DE PAGAMENTO LTDA_1", "<numeric-id>-BANCO TOPAZIO SA"). Pure description matching fails (~12% match rate). The working algorithm:
 
 1. **Index Agilize by `(month, abs_amount)` → list[tx]**. Group by month to limit candidate pool.
 2. **For each sheet row**, look up candidates by `(month, abs_amount)`.

@@ -117,7 +117,7 @@ When the user has already emitted NFS-e outside Agilize and asks to upload XMLs,
    - `POST /api/v1/companies/{cid}/nfses/preimportfromresource` with multipart `resources[0]`, `resources[1]`, ...
    - `POST /api/v1/companies/{cid}/nfseimportresources` to create the import resource
    - `POST /api/v1/companies/{cid}/nfses/importfromresource` with `{"nfseImportResource": "<resource.__identity>"}`
-4. Use headers `Authorization: Bearer <access_token>`, `key: <company_cnpj>`, `Referer: https://app.agilize.com.br/`, `Accept: application/json, text/plain, */*`.
+4. Use the standard authenticated API headers documented above (`key`, `Referer`, and JSON `Accept`), keeping bearer tokens redacted in logs and reports.
 5. Verify import — re-read `/nfses?competencia=YYYY-MM-01T00:00:00&count=3000` and confirm the NFS-e appears with correct number, valor, and competence.
 
 If XMLs are in OneDrive/File Provider and not visible to the agent filesystem, do not claim access; ask the user for a local accessible path, synced folder, zip, or share link. Do not encode this as a permanent OneDrive limitation — it is usually TCC/File Provider/account setup.
