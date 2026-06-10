@@ -55,8 +55,10 @@ Agilize is a Brazilian online accounting/finance platform accessed via `https://
 | Finance accounts | `GET /api/v1/companies/{cid}/finance-accounts` |
 | Closing periods | `GET /api/v1/companies/{cid}/accounting-closing-periods` |
 | NFS-e by competence | `GET /api/v1/companies/{cid}/nfses?competencia=YYYY-MM-01T00:00:00&count=3000` |
+| NFS-e XML/ZIP import | Working UI flow: `POST /api/v1/companies/{cid}/nfses/preimportfromresource` → `POST /api/v1/companies/{cid}/nfseimportresources` → `POST /api/v1/companies/{cid}/nfses/importfromresource`; multipart fields are indexed as `resources[0]`, `resources[1]`, ...; see `references/agilize-nfse-xml-upload.md`. |
+| Imported NFS-e resource download | `GET /api/v1/companies/{cid}/nfseimportresources/{resource_id}/download` — returns original imported package/file. |
 | Taxes | `GET /api/v1/companies/{cid}/taxes?year=YYYY&closed=true&count=3000` |
-| Pro-labore annual | `GET /api/v1/companies/{cid}/prolabore-anual?anoReferencia=YYYY-01-01T00:00:00P` |
+| Pro-labore annual | `GET /api/v1/companies/{cid}/prolabore-anual?anoReferencia=YYYY-01-01T00:00:00-0300` |
 | Pro-labore monthly | `GET /api/v1/companies/{cid}/prolabores?competence=YYYY-MM-01T00:00:00-0300&count=3000` |
 | Invoices (Agilize) | `GET /api/v1/companies/{cid}/invoices?competence=...&closed=true&count=3000` |
 | Partners/people | `GET /api/v1/companies/{cid}/people?type=partner&count=3000` |
@@ -104,6 +106,42 @@ Accept: application/json
 6. **Split if needed** — when a single transaction covers multiple expense categories.
 7. **Verify** — re-read transactions and confirm categories, evidence, and split children are correct.
 8. **Report** — produce audit notes with counts, totals, pending items, and rollback instructions.
+
+## NFS-e XML/ZIP import workflow
+
+When the user has already emitted NFS-e outside Agilize and asks to upload XMLs, use the **legacy 3-step resource flow** (not `importacao-lote-nfes`, which can silently fail with HTTP 201 + `quantidadeNotasProcessadas: 0`):
+
+1. Authenticate with Keycloak/PKCE and extract `company_id` from the JWT `tenant` claim when not configured.
+2. Collect only explicit `.xml` or `.zip` files/directories supplied by the user; compute SHA-256 manifest before upload.
+3. **Upload via legacy resource flow:**
+   - `POST /api/v1/companies/{cid}/nfses/preimportfromresource` with multipart `resources[0]`, `resources[1]`, ...
+   - `POST /api/v1/companies/{cid}/nfseimportresources` to create the import resource
+   - `POST /api/v1/companies/{cid}/nfses/importfromresource` with `{"nfseImportResource": "<resource.__identity>"}`
+4. Use headers `Authorization: Bearer <access_token>`, `key: <company_cnpj>`, `Referer: https://app.agilize.com.br/`, `Accept: application/json, text/plain, */*`.
+5. Verify import — re-read `/nfses?competencia=YYYY-MM-01T00:00:00&count=3000` and confirm the NFS-e appears with correct number, valor, and competence.
+
+If XMLs are in OneDrive/File Provider and not visible to the agent filesystem, do not claim access; ask the user for a local accessible path, synced folder, zip, or share link. Do not encode this as a permanent OneDrive limitation — it is usually TCC/File Provider/account setup.
+
+See `references/agilize-nfse-xml-upload.md` for exact request shape and discovery notes.
+
+### Post-emission import flow (NFS-e → Agilize)
+
+After emitting NFS-e via the municipal portal (or any external system), import the XML into Agilize so it appears in the platform and can be linked as evidence to finance transactions. This is the recommended end-to-end sequence:
+
+1. **Emit NFS-e externally** — use the municipal portal, automated script, or manual process. Confirm emission status (`cStat=100`).
+2. **Obtain the XML** — download from the portal, extract from email/OneDrive, or have the user provide a local path. If the XML comes from OneDrive, use the OneDrive acquisition pattern (Playwright preview → capture `download.aspx` response).
+3. **Validate the XML** — parse each file, confirm root namespace is NFS-e (`http://www.sped.fazenda.gov.br/nfse`), emitted status is valid, and the file is not an HTML error page saved with `.xml` extension.
+4. **Authenticate on Agilize** — run the standard Keycloak/PKCE login. Ensure `company_id` and `key` (CNPJ) are configured.
+5. **Upload via legacy resource flow** (preferred over `importacao-lote-nfes` alone):
+   - `POST /nfses/preimportfromresource` with multipart `resources[0]`, `resources[1]`, ...
+   - `POST /nfseimportresources` to create the import resource
+   - `POST /nfses/importfromresource` with `{"nfseImportResource": "<resource.__identity>"}`
+6. **Verify import** — re-read `/nfses?competencia=YYYY-MM-01T00:00:00&count=3000` and confirm the NFS-e appears with correct number, valor, and competence.
+7. **Report results** — list imported NFS-e numbers, amounts, and any failures. Provide the SHA-256 manifest for audit trail.
+
+**When to run this:** typically monthly, after all NFS-e for the competence have been emitted. Can be run per-NF (right after emission) or in batch (all XMLs at once at month-end).
+
+**Pitfall:** `importacao-lote-nfes` may return HTTP 201 with `quantidadeNotasProcessadas: 0` — the legacy 3-step resource flow is more reliable. See `references/agilize-nfse-xml-upload.md` for details.
 
 ## Transaction splitting
 
@@ -195,6 +233,8 @@ See `references/agilize-bruno-opencollection.md` and `templates/agilize-opencoll
 
 9. **Category creation is not exposed via API.** POST to `/finance-transaction-categories` returns `PARENT_IS_REQUIRED` regardless of payload structure (`parent`, `parentCategory`, `parentId`, object wrappers, etc.). If a new category is needed (e.g., "Doações recebidas"), it must be created through the Agilize web UI manually. Do not waste time trying API variants — use existing categories or ask the user to create one in the UI.
 
+10. **NFS-e XML upload: use legacy 3-step resource flow, not `importacao-lote-nfes` directly.** The `importacao-lote-nfes` endpoint may return HTTP 201 with `quantidadeNotasProcessadas: 0` (silent failure). Instead, use the 3-step flow: `POST /nfses/preimportfromresource` → `POST /nfseimportresources` → `POST /nfses/importfromresource`. See `references/agilize-nfse-xml-upload.md` for details.
+
 ## Spreadsheet reconciliation
 
 For auditing Agilize categorization against an external cash-flow spreadsheet (Excel/CSV), use the dedicated match + crosstab workflow. The script `scripts/agilize_match_spreadsheet.py` runs the full pipeline (download → parse → greedy match → crosstab → report). Full algorithm and pitfalls documented in `references/agilize-spreadsheet-reconciliation.md`.
@@ -223,13 +263,16 @@ For this domain, respond with concise operational blocks:
 - `references/agilize-prolabore-reconciliation.md` — Pro-labore annual reference, partner transfer classification, and split rules.
 - `references/agilize-monthly-close.md` — Monthly close workflow, verification checklist, and audit trail.
 - `references/agilize-bruno-opencollection.md` — Bruno request format and conversion guide for non-replayable curls.
+- `references/agilize-nfse-xml-upload.md` — Upload emitted NFS-e XML/ZIP files into Agilize via the legacy 3-step resource flow, request shape, verification, and pitfalls.
 - `references/agilize-spreadsheet-reconciliation.md` — Read-only diagnostic workflow for matching cash-flow spreadsheets against Agilize transactions, with greedy match algorithm, crosstab analysis, and report structure.
 - `references/agilize-category-classification.md` — Full Agilize category tree (root + sub-categories), revenue classification guide for grants/donations/services, evidence requirements per category, and the "Investimento anjo" misuse pattern.
+- `references/audit-2025-06-review.md` — Audit findings and pending improvements from the June 2025 review. Includes repo sync status.
 
 ## Scripts
 
 - `scripts/agilize_login.py` — Generic Agilize Keycloak/OIDC PKCE login script. Reads credentials from KeePassXC, environment variables, or a config file. Prints only redacted status metadata. Supports `--verify` and `--api-get` for authenticated reads.
 - `scripts/agilize_match_spreadsheet.py` — Match a cash-flow spreadsheet (Excel/CSV) against Agilize transactions for diagnostic reconciliation. Greedy `(month, abs_amount)` match with description-scored tie-breaker; outputs matched/unmatched JSON + crosstab.
+- `scripts/download_onedrive_shared_xmls.py` — Download XML files from a public OneDrive shared folder by opening previews and saving the `download.aspx?...tempauth=...` XML responses; useful before NFS-e XML upload.
 
 ## Templates
 

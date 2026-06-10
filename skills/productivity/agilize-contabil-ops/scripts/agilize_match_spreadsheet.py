@@ -31,17 +31,21 @@ Outputs in --output-dir (default /tmp/agilize-audit-<year>/):
 from __future__ import annotations
 
 import argparse
+import calendar
 import json
 import os
 import re
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
-# Allow importing agilize_login when run from the skill's scripts/ dir
+# Allow imports when run from the skill's scripts/ dir and support optional
+# user-local dependency installs before importing third-party packages.
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+sys.path.insert(0, os.path.expanduser("~/.local/py-lib"))
+
 import agilize_login as A  # noqa: E402
 
 try:
@@ -49,9 +53,48 @@ try:
 except ImportError:
     print("ERROR: openpyxl required. Install with: uv pip install --target ~/.local/py-lib openpyxl", file=sys.stderr)
     sys.exit(2)
-sys.path.insert(0, os.path.expanduser("~/.local/py-lib"))
 
 import requests  # noqa: E402
+
+
+# ─── Secure output helpers ────────────────────────────────────────────────────
+
+def write_secure(path: Path, data: str | bytes, *, mode: str = "text") -> None:
+    """Write audit artefacts with user-only permissions (0600)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    fd = os.open(path, flags, 0o600)
+    try:
+        if mode == "bytes":
+            os.write(fd, data if isinstance(data, bytes) else data.encode("utf-8"))
+        else:
+            os.write(fd, data.encode("utf-8") if isinstance(data, str) else data)
+    finally:
+        os.close(fd)
+
+
+def dumps_json(data: Any, **kwargs: Any) -> str:
+    return json.dumps(data, ensure_ascii=False, **kwargs)
+
+
+def mask_cnpj(cnpj: str) -> str:
+    digits = re.sub(r"\D", "", cnpj or "")
+    if len(digits) < 6:
+        return "<redacted>"
+    return f"***{digits[-6:]}"
+
+
+def request_json_with_reauth(session: requests.Session, cfg: dict, url: str, headers: dict, *, timeout: int) -> tuple[int, Any]:
+    """GET JSON; on token expiry, re-authenticate once and retry."""
+    resp = session.get(url, headers=headers, timeout=timeout)
+    if resp.status_code == 401:
+        token = A.login(cfg, A.DEFAULT_CLIENT_ID, A.DEFAULT_REDIRECT_URI, 30,
+                        "Mozilla/5.0 Chrome/124.0 Safari/537.36")
+        headers["Authorization"] = f"Bearer {token.access_token}"
+        resp = session.get(url, headers=headers, timeout=timeout)
+    if resp.status_code != 200:
+        return resp.status_code, None
+    return resp.status_code, resp.json()
 
 
 # ─── Normalization ────────────────────────────────────────────────────────────
@@ -96,8 +139,8 @@ def parse_sheet(xlsx_path: str, sheet_name: Optional[str] = None) -> list[dict]:
         ws = None
         for sn in wb.sheetnames:
             candidate = wb[sn]
-            rows = list(candidate.iter_rows(values_only=True))
-            for r in rows[:5]:
+            rows = candidate.iter_rows(max_row=5, values_only=True)
+            for r in rows:
                 if not r:
                     continue
                 cells = [str(c or "").upper() for c in r]
@@ -182,36 +225,35 @@ def fetch_year(cfg: dict, year: int, out_dir: Path) -> list[dict]:
            "Referer": "https://app.agilize.com.br/",
            "key": cnpj}
 
+    session = requests.Session()
+
     # Categories
-    r = requests.get(f"{A.API_BASE}/api/v1/companies/{cid}/finance-transaction-categories",
-                     headers=hdr, timeout=30)
-    if r.status_code == 200:
-        (out_dir / "categories.json").write_text(json.dumps(r.json(), ensure_ascii=False))
+    status, payload = request_json_with_reauth(
+        session, cfg,
+        f"{A.API_BASE}/api/v1/companies/{cid}/finance-transaction-categories",
+        hdr, timeout=30,
+    )
+    if status == 200:
+        write_secure(out_dir / "categories.json", dumps_json(payload))
 
     # Transactions per month
     all_tx = []
     for m in range(1, 13):
-        # Last day
-        if m == 2:
-            last = 28 if year % 4 else 29
-        elif m in (4, 6, 9, 11):
-            last = 30
-        else:
-            last = 31
+        last = calendar.monthrange(year, m)[1]
         url = (f"{A.API_BASE}/api/v1/companies/{cid}/finance-transactions"
                f"?from={year}-{m:02d}-01T00:00:00-0300"
                f"&to={year}-{m:02d}-{last}T23:59:59-0300"
                f"&sort=mainDate&direction=DESC&count=3000")
-        rm = requests.get(url, headers=hdr, timeout=60)
-        if rm.status_code != 200:
-            print(f"  month {m:02d}: HTTP {rm.status_code}", file=sys.stderr)
+        status, payload = request_json_with_reauth(session, cfg, url, hdr, timeout=60)
+        if status != 200:
+            print(f"  month {m:02d}: HTTP {status}", file=sys.stderr)
             continue
-        items = rm.json() if isinstance(rm.json(), list) else rm.json().get("items", [])
-        (out_dir / f"month-{m:02d}.json").write_text(json.dumps(items, ensure_ascii=False))
+        items = payload if isinstance(payload, list) else payload.get("items", [])
+        write_secure(out_dir / f"month-{m:02d}.json", dumps_json(items))
         print(f"  month {m:02d}: {len(items)} tx")
         all_tx.extend(items)
 
-    (out_dir / f"all-{year}.json").write_text(json.dumps(all_tx, ensure_ascii=False))
+    write_secure(out_dir / f"all-{year}.json", dumps_json(all_tx))
     return all_tx
 
 
@@ -292,7 +334,7 @@ def render_report(matched: list, unmatched: list, txs: list, year: int,
     R = []
     R.append(f"# Diagnóstico: Categorização Agilize {year} vs Planilha")
     R.append("")
-    R.append(f"**CNPJ:** {company_cnpj}  ")
+    R.append(f"**CNPJ:** {mask_cnpj(company_cnpj)}  ")
     R.append(f"**Período:** jan-dez/{year}  ")
     R.append(f"**Método:** match descrição+valor±2dias, read-only  ")
     R.append("")
@@ -358,13 +400,13 @@ def render_report(matched: list, unmatched: list, txs: list, year: int,
     R.append("")
     R.append("## Artefatos")
     R.append("")
-    for fname in ["all-{year}.json", "categories.json", "matched.json",
+    for fname in [f"all-{year}.json", "categories.json", "matched.json",
                   "unmatched_sheet.json", "crosstab.json", "diagnostico.md"]:
         R.append(f"- `{out_dir}/{fname}`")
     R.append("")
 
     text = "\n".join(R)
-    (out_dir / "diagnostico.md").write_text(text)
+    write_secure(out_dir / "diagnostico.md", text)
     return text
 
 
@@ -411,10 +453,10 @@ def main() -> int:
     print(f"Unmatched: {len(unmatched)}")
 
     # Save
-    (out_dir / "matched.json").write_text(json.dumps(matched, default=str, ensure_ascii=False))
-    (out_dir / "unmatched_sheet.json").write_text(json.dumps(unmatched, default=str, ensure_ascii=False))
+    write_secure(out_dir / "matched.json", dumps_json(matched, default=str))
+    write_secure(out_dir / "unmatched_sheet.json", dumps_json(unmatched, default=str))
     ct = crosstab(matched)
-    (out_dir / "crosstab.json").write_text(json.dumps(ct, indent=2, ensure_ascii=False))
+    write_secure(out_dir / "crosstab.json", dumps_json(ct, indent=2))
 
     # Report
     print(f"\n=== Generating report ===")

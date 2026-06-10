@@ -115,7 +115,7 @@ def load_env_creds() -> dict:
         "username": username,
         "password": password,
         "totp": totp,
-        "totp_secret": totp_seed,
+        "totp_secret": totp_secret,
         "company_id": company_id,
         "company_cnpj": company_cnpj,
     }

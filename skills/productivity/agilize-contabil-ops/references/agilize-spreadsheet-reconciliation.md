@@ -64,7 +64,7 @@ Spreadsheets often have a separate "bank" column for an investment account (CDB,
 
 ### Pro-labore: gross vs net mismatch
 
-Planilha values for pro-labore often record the **gross** amount per partner. Agilize typically records the **net** (after INSS/IRRF). Always validate against `/prolabore-anual?anoReferencia=YYYY-01-01T00:00:00P` which returns both `valor` (gross) and `valorLiquido` (net). The Agilize transactions should match `valorLiquido`. If the sheet shows `valor` it's the sheet that's out of sync, not Agilize.
+Planilha values for pro-labore often record the **gross** amount per partner. Agilize typically records the **net** (after INSS/IRRF). Always validate against `/prolabore-anual?anoReferencia=YYYY-01-01T00:00:00-0300` which returns both `valor` (gross) and `valorLiquido` (net). The Agilize transactions should match `valorLiquido`. If the sheet shows `valor` it's the sheet that's out of sync, not Agilize.
 
 ### Saldo inicial / transferências internas
 

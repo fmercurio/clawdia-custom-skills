@@ -1,0 +1,12 @@
+# Local/cache artefacts
+__pycache__/
+*.py[cod]
+.DS_Store
+
+# Never commit local credentials or generated audit outputs
+*.env
+.env*
+*.local.json
+agilize.json
+/tmp/
+outputs/

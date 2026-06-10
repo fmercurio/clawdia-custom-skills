@@ -7,7 +7,7 @@ Use this reference when classifying owner/partner bank transfers as pró-labore 
 Fetch the annual pro-labore data to understand each partner's monthly gross/net values:
 
 ```
-GET /api/v1/companies/{cid}/prolabore-anual?anoReferencia=YYYY-01-01T00:00:00P
+GET /api/v1/companies/{cid}/prolabore-anual?anoReferencia=YYYY-01-01T00:00:00-0300
 ```
 
 ### Response shape
