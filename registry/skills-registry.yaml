@@ -267,6 +267,10 @@ skills:
         size_bytes: 5682
         status: "new"
         note: "Generic template with <PLACEHOLDER> syntax for vault path, model name, endpoint"
+      - path: "scripts/brain_search.py"
+        size_bytes: 24893
+        status: "new"
+        note: "Generic FTS5 + semantic search engine. Vault root auto-detected via __file__. Embedding endpoint and model via env vars. Zero hardcoded paths."
     changelog:
       - date: "2026-06-15"
         action: "created generic template"
@@ -275,6 +279,14 @@ skills:
           path, embedding model name, and API endpoint. Documents FTS5 + semantic
           search architecture, integration with pull/push-brain, and customization
           checklist. Status: candidate — awaiting Skills Lab validation.
+      - date: "2026-06-16"
+        action: "added brain_search.py script"
+        details: >
+          Copied the proven brain_search.py (718 lines) from the FMercurio vault
+          into the repo. Script is fully generic: vault root auto-detected from
+          script location, embedding endpoint and model via BRAIN_EMBED_URL and
+          BRAIN_EMBED_MODEL env vars. No hardcoded paths or secrets. Makes the
+          brain-search template fully deployable end-to-end.
 
   - name: discord-voice-meetings
     status: approved
