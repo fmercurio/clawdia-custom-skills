@@ -14,6 +14,8 @@ metadata:
 
 ## Overview
 
+Action-focused deploy automation for CapRover. Uses `caprover-operations` as the reference skill for server operations (backup, diagnosis, recovery). This skill covers the deploy lifecycle only.
+
 Automated CapRover deployment that tries three methods in order of preference:
 
 1. **CapRover CLI** (`caprover deploy`) — fastest, works when CLI is installed and not broken
@@ -37,7 +39,7 @@ trigger build → poll until done → enable HTTPS + WebSocket → verify
 ## Prerequisites
 
 - **CapRover URL** (e.g. `https://captain.example.com`)
-- **CapRover password** — via env var, KeePass, or argument
+- **CapRover password** — via env var `CAPROVER_PASSWORD`, KeePass (optional), or interactive prompt
 - **GitHub token** — via `gh auth token` or env var `GITHUB_TOKEN`
 - **Python 3.9+** with `requests` (or `urllib` fallback)
 - **Playwright** (optional, for method 3) — `pip install playwright && playwright install chromium`
@@ -69,16 +71,17 @@ python3 scripts/caprover_deploy.py \
 
 The script tries these in order:
 
-1. `--caprover-password` argument
-2. `CAPROVER_PASSWORD` env var
-3. `--keepass-entry "/Caprover - MyOrg"` (reads from KeePassXC)
-4. Interactive prompt
+1. `CAPROVER_PASSWORD` env var
+2. `--keepass-entry "/Caprover - MyOrg"` (reads from KeePassXC; requires `KEEPASS_DB` and `KEEPASS_KEY` env vars)
+3. Interactive prompt
+
+Passwords are never accepted as CLI arguments (visible in `ps aux`).
 
 GitHub token:
 
 1. `GITHUB_TOKEN` env var
 2. `gh auth token` (if GitHub CLI is installed)
-3. `--github-user` + `--github-token` arguments
+3. `--github-user` argument (username only; token still via env or `gh`)
 
 ## Method Selection
 
