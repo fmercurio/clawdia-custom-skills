@@ -423,3 +423,75 @@ skills:
           section, competency field in config, recovery-on-failure for rebuild,
           new pitfall #8, expanded verification checklist. 5 files, ~16KB total.
           Status: candidate — awaiting Felippe approval.
+
+  - name: caprover-deploy
+    status: candidate
+    version: 1.0.0
+    category: devops
+    description: >
+      Automated CapRover deployment via CLI → API → Playwright fallback.
+      Handles app creation, GitHub repo config, build triggering, HTTPS/WebSocket
+      enablement, and post-deploy verification. Generic — no instance-specific data.
+    source:
+      type: internal
+      origin: "Created by another Hermes profile (FMercurio HQ)"
+      author: "Hermes Agent (TG 2709 profile)"
+      created: "2026-06-16"
+      approved: null
+      approved_by: null
+      repository_url: null
+      no_repository_reason: "Skill interna, tested against live CapRover 1.14.1"
+    installation:
+      runtime_path: null
+      repo_path: "skills/devops/caprover-deploy/"
+      installed_date: null
+      installed_by: null
+      note: "Action-focused deploy skill. Companion to caprover-operations (server ops)."
+    audit:
+      security_review: "2026-06-16"
+      security_status: "passed"
+      findings:
+        - "Zero hardcoded secrets, paths, or tenant-specific data"
+        - "Passwords never accepted as CLI args (env var, KeePass, or interactive only)"
+        - "KeePass optional — requires KEEPASS_DB and KEEPASS_KEY env vars, no hardcoded paths"
+        - "GitHub token via gh CLI or env var only"
+        - "subprocess.run uses list args, never shell=True"
+        - "Playwright login failure detected via URL check"
+      frontmatter_valid: true
+      company_agnostic: true
+      pitfalls_documented: true
+      fixes_applied:
+        - "Fixed argparse bug: --enable-https/--enable-websocket store_true with default=True (always True). Replaced with --no-https/--no-websocket store_false."
+        - "Removed hardcoded KeePress paths (/Users/Shared/hermes-keepass/...). Now env-only."
+        - "Removed --caprover-password and --github-token CLI args (visible in ps aux)."
+        - "Removed unnecessary try/except for stdlib urllib import."
+        - "Added Playwright login verification (URL check after submit)."
+        - "Generalized TOTVS/Protheus references in nginx template to ERP."
+    files:
+      - path: "SKILL.md"
+        size_bytes: 4836
+        status: "new"
+        note: "Action-focused deploy automation. Clarified auth (no CLI passwords), KeePass optional"
+      - path: "scripts/caprover_deploy.py"
+        size_bytes: 21607
+        status: "new"
+        note: "533→500+ lines. CLI→API→Playwright fallback. KeePass optional via env. No password CLI args."
+      - path: "references/api-v2-endpoints.md"
+        size_bytes: 2347
+        status: "new"
+      - path: "references/playwright-deploy-pattern.md"
+        size_bytes: 2915
+        status: "new"
+      - path: "templates/nginx-proxy.conf"
+        size_bytes: 3505
+        status: "new"
+        note: "WebSocket support, ERP buffer sizes, envsubst pattern. Generalized from tenant-specific refs."
+    changelog:
+      - date: "2026-06-16"
+        action: "created + reviewed"
+        details: >
+          Created by TG 2709 profile. Reviewed and fixed by Skills Lab:
+          argparse bug (store_true default=True), removed hardcoded KeePass paths,
+          removed password CLI args, removed unnecessary urllib try/except,
+          added Playwright login verification, generalized nginx template.
+          5 files, ~25KB total. Status: candidate — pending Felippe approval.
