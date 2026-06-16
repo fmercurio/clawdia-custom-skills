@@ -95,7 +95,7 @@ skills:
       installed_date: "2026-06-06"
       installed_by: "Hermes Agent"
       already_installed: true
-      note: "Runtime ainda em v1.0.0 — atualizar após merge do PR"
+      note: "Runtime already updated to v1.1.0"
     audit:
       security_review: "2026-06-15"
       security_status: "passed"
@@ -109,7 +109,7 @@ skills:
       pitfalls_documented: true
     files:
       - path: "SKILL.md"
-        size_bytes: 16499
+        size_bytes: 16780
         status: "modified"
         note: "v1.1.0 — added Phase 4 (Brain Search), updated pull/push phases, git push + index rebuild, URL archiving, 5 new pitfalls"
       - path: "scripts/brain-health-check.py"
