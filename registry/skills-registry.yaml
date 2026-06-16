@@ -73,12 +73,12 @@ skills:
 
   - name: second-brain-operations
     status: approved
-    version: 1.0.0
+    version: 1.1.0
     category: note-taking
     description: >
       Step-by-step playbook for setting up and operating a PARA-first Second Brain
-      with Hermes — vault creation, pull/push skills, health-check cron, weekly
-      review, and operational rhythm.
+      with Hermes — vault creation, semantic search engine, pull/push skills,
+      health-check cron, weekly review, and operational rhythm.
     source:
       type: internal
       origin: "Sessão com outro agente (FMercurio HQ)"
@@ -95,20 +95,23 @@ skills:
       installed_date: "2026-06-06"
       installed_by: "Hermes Agent"
       already_installed: true
+      note: "Runtime already updated to v1.1.0"
     audit:
-      security_review: "2026-06-06"
+      security_review: "2026-06-15"
       security_status: "passed"
       findings:
         - "Script determinístico, read-only, sem chamadas de rede"
         - "Sem hardcoded secrets"
         - "Design silent-when-healthy compatível com cron"
+        - "brain_search.py: chamadas apenas para localhost (LM Studio/Ollama)"
       frontmatter_valid: true
       company_agnostic: true
       pitfalls_documented: true
     files:
       - path: "SKILL.md"
-        size_bytes: 10213
-        status: "identical-to-installed"
+        size_bytes: 16780
+        status: "modified"
+        note: "v1.1.0 — added Phase 4 (Brain Search), updated pull/push phases, git push + index rebuild, URL archiving, 5 new pitfalls"
       - path: "scripts/brain-health-check.py"
         size_bytes: 7384
         status: "generic-template"
@@ -121,6 +124,157 @@ skills:
           para uso como template de cliente. Vault FMercurio mantém versão
           customizada do health-check. 9 fases: charter, vault, health-check,
           pull-brain, push-brain, cron, weekly review, rhythm, client offering.
+      - date: "2026-06-15"
+        action: "v1.1.0 update"
+        details: >
+          Added Phase 4: Brain Search Engine (FTS5 + semantic embeddings).
+          Updated pull-brain to use brain-search integration. Updated push-brain
+          to include git push + index rebuild + URL archiving. Renumbered phases
+          to 10 total. Added 5 new pitfalls (stale index, push without pull,
+          model name mismatch, sensitivity routing, hardcoded vault root).
+          Expanded verification checklist with brain-search items. Bumped to v1.1.0.
+
+  - name: pull-brain
+    status: candidate
+    version: 1.0.0
+    category: note-taking
+    description: >
+      Generic template — recover and load consolidated context from a PARA-first
+      Second Brain vault. Retrieves knowledge in PARA order, uses brain-search for
+      concept-level queries, and separates vault facts from session memory.
+    source:
+      type: internal
+      origin: "Promoted from FMercurio-specific runtime skill to generic template"
+      author: "Second Brain SOUL (FMercurio HQ)"
+      created: "2026-06-15"
+      approved: null
+      approved_by: null
+      repository_url: null
+      no_repository_reason: "Skill interna, generalizada do deployment FMercurio"
+    installation:
+      runtime_path: "~/.hermes/skills/note-taking/pull-brain/"
+      repo_path: "skills/note-taking/pull-brain/"
+      installed_date: null
+      installed_by: null
+      note: "Template genérico — customizar placeholders antes de instalar"
+    audit:
+      security_review: "2026-06-15"
+      security_status: "passed"
+      findings:
+        - "Read-only skill, no writes to vault or external systems"
+        - "No hardcoded secrets or paths — all parameterized"
+        - "Sensitivity routing documented"
+      frontmatter_valid: true
+      company_agnostic: true
+      pitfalls_documented: true
+    files:
+      - path: "SKILL.md"
+        size_bytes: 7152
+        status: "new"
+        note: "Generic template with <PLACEHOLDER> syntax for vault path, owner, scopes"
+    changelog:
+      - date: "2026-06-15"
+        action: "created generic template"
+        details: >
+          Promoted from FMercurio-specific pull-brain skill. Parameterized vault
+          path, owner name, scope values, and embedding model. Added brain-search
+          integration. Added customization checklist. Status: candidate — awaiting
+          Skills Lab validation.
+
+  - name: push-brain
+    status: candidate
+    version: 1.0.0
+    category: note-taking
+    description: >
+      Generic template — save, consolidate, and sync a PARA-first Second Brain
+      vault after a meaningful session. Classifies into PARA, writes durable
+      knowledge, runs health-check, commits, pushes, and rebuilds search index.
+    source:
+      type: internal
+      origin: "Promoted from FMercurio-specific runtime skill to generic template"
+      author: "Second Brain SOUL (FMercurio HQ)"
+      created: "2026-06-15"
+      approved: null
+      approved_by: null
+      repository_url: null
+      no_repository_reason: "Skill interna, generalizada do deployment FMercurio"
+    installation:
+      runtime_path: "~/.hermes/skills/note-taking/push-brain/"
+      repo_path: "skills/note-taking/push-brain/"
+      installed_date: null
+      installed_by: null
+      note: "Template genérico — customizar placeholders antes de instalar"
+    audit:
+      security_review: "2026-06-15"
+      security_status: "passed"
+      findings:
+        - "No hardcoded secrets or paths — all parameterized"
+        - "Git operations (commit/push) are explicit and logged"
+        - "Secrets handling explicitly forbidden in classification"
+        - "Sensitivity routing documented"
+      frontmatter_valid: true
+      company_agnostic: true
+      pitfalls_documented: true
+    files:
+      - path: "SKILL.md"
+        size_bytes: 9007
+        status: "new"
+        note: "Generic template with <PLACEHOLDER> syntax. Includes git push + index rebuild + URL archiving"
+    changelog:
+      - date: "2026-06-15"
+        action: "created generic template"
+        details: >
+          Promoted from FMercurio-specific push-brain skill. Parameterized vault
+          path, owner name, scope values, and embedding model. Added git push to
+          remote, index rebuild, and URL archiving sections. Added customization
+          checklist. Status: candidate — awaiting Skills Lab validation.
+
+  - name: brain-search
+    status: candidate
+    version: 1.0.0
+    category: note-taking
+    description: >
+      Generic template — FTS5 + semantic search engine for a PARA-first Second
+      Brain vault. Concept-level queries, keyword search, vault exploration, and
+      index management. Customize vault path and embedding model per deployment.
+    source:
+      type: internal
+      origin: "Promoted from FMercurio-specific runtime skill to generic template"
+      author: "Second Brain SOUL (FMercurio HQ)"
+      created: "2026-06-15"
+      approved: null
+      approved_by: null
+      repository_url: null
+      no_repository_reason: "Skill interna, generalizada do deployment FMercurio"
+    installation:
+      runtime_path: "~/.hermes/skills/note-taking/brain-search/"
+      repo_path: "skills/note-taking/brain-search/"
+      installed_date: null
+      installed_by: null
+      note: "Template genérico — customizar placeholders antes de instalar"
+    audit:
+      security_review: "2026-06-15"
+      security_status: "passed"
+      findings:
+        - "Network calls only to localhost (LM Studio/Ollama embedding endpoint)"
+        - "No hardcoded secrets — model endpoint is parameterized"
+        - "Index is local SQLite cache, gitignored, rebuildable"
+      frontmatter_valid: true
+      company_agnostic: true
+      pitfalls_documented: true
+    files:
+      - path: "SKILL.md"
+        size_bytes: 5682
+        status: "new"
+        note: "Generic template with <PLACEHOLDER> syntax for vault path, model name, endpoint"
+    changelog:
+      - date: "2026-06-15"
+        action: "created generic template"
+        details: >
+          Promoted from FMercurio-specific brain-search skill. Parameterized vault
+          path, embedding model name, and API endpoint. Documents FTS5 + semantic
+          search architecture, integration with pull/push-brain, and customization
+          checklist. Status: candidate — awaiting Skills Lab validation.
 
   - name: discord-voice-meetings
     status: approved
