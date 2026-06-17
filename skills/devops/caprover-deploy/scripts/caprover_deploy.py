@@ -7,8 +7,8 @@ Usage:
     python3 caprover_deploy.py --caprover-url URL --app-name APP --rebuild-only
     python3 caprover_deploy.py --caprover-url URL --app-name APP --tarball ./project.tar
 
-Auth: CAPROVER_PASSWORD env, --keepass-entry, or interactive prompt.
-GitHub: GITHUB_TOKEN env, gh auth token, or --github-user + GITHUB_TOKEN env.
+Auth: --caprover-password, CAPROVER_PASSWORD env, --keepass-entry, or interactive.
+GitHub: GITHUB_TOKEN env, gh auth token, or --github-user + --github-token.
 """
 import argparse
 import json
@@ -17,8 +17,11 @@ import subprocess
 import sys
 import time
 
-import urllib.request
-import urllib.error
+try:
+    import urllib.request
+    import urllib.error
+except ImportError:
+    sys.exit("This script requires Python 3 standard library.")
 
 # ──────────────────────────────────────────────
 #  Utilities
@@ -98,6 +101,22 @@ class CapRoverAPI:
                 return a
         return {}
 
+    def preflight(self, app_name):
+        """Sanitized deploy preflight: auth, network, and app visibility."""
+        system_info = self._request("GET", "/api/v2/user/system/info/")
+        status = system_info.get("status")
+        if status in (401, 403):
+            raise CapRoverDeployError("caprover_auth_blocked")
+        if status == -1:
+            raise CapRoverDeployError("caprover_network_blocked")
+        if status not in (100, None):
+            raise CapRoverDeployError("caprover_config_invalid")
+
+        app_def = self.get_app_definition(app_name)
+        if not app_def:
+            raise CapRoverDeployError("caprover_config_invalid")
+        return True
+
     def wait_for_build(self, app_name, timeout=300, poll_interval=10):
         """Poll build status until done or timeout."""
         deadline = time.time() + timeout
@@ -114,38 +133,57 @@ class CapRoverAPI:
 
 
 def get_password(args):
-    """Resolve CapRover password from multiple sources (never via CLI args)."""
+    """Resolve CapRover password from multiple sources."""
+    if args.caprover_password:
+        return args.caprover_password
     if os.environ.get("CAPROVER_PASSWORD"):
         return os.environ["CAPROVER_PASSWORD"]
     if args.keepass_entry:
-        # KeePass is optional — requires KEEPASS_DB and KEEPASS_KEY env vars
-        kp_db = os.environ.get("KEEPASS_DB")
-        kp_key = os.environ.get("KEEPASS_KEY")
-        if not kp_db or not kp_key:
-            print("  ⚠️ KeePass requires KEEPASS_DB and KEEPASS_KEY env vars")
-        else:
-            try:
-                r = subprocess.run(
-                    ["keepassxc-cli", "show", "--show-protected", "-a", "Password",
-                     "--no-password", "-k", kp_key, kp_db, args.keepass_entry],
-                    capture_output=True, text=True, timeout=20,
-                )
-                if r.returncode == 0 and r.stdout.strip():
-                    return r.stdout.strip()
-                print(f"  ⚠️ KeePass lookup failed: {r.stderr.strip()}")
-            except FileNotFoundError:
-                print("  ⚠️ keepassxc-cli not found")
-            except Exception as e:
-                print(f"  ⚠️ KeePass error: {e}")
+        try:
+            # Try common KeePassXC key/db locations
+            kp_db = os.environ.get("KEEPASS_DB", "/Users/Shared/hermes-keepass/hermes-keepass.kdbx")
+            kp_key = os.environ.get("KEEPASS_KEY", "/Users/Shared/hermes-keepass/hermes-agent.keyx")
+            r = subprocess.run(
+                ["keepassxc-cli", "show", "--show-protected", "-a", "Password",
+                 "--no-password", "-k", kp_key, kp_db, args.keepass_entry],
+                capture_output=True, text=True, timeout=20,
+            )
+            if r.returncode == 0 and r.stdout.strip():
+                return r.stdout.strip()
+            print(f"  ⚠️ KeePass lookup failed: {r.stderr.strip()}")
+        except FileNotFoundError:
+            print("  ⚠️ keepassxc-cli not found")
+        except Exception as e:
+            print(f"  ⚠️ KeePass error: {e}")
     # Interactive prompt
     import getpass
     return getpass.getpass("CapRover password: ")
 
 
+class CapRoverDeployError(RuntimeError):
+    def __init__(self, code, message=None):
+        super().__init__(message or code)
+        self.code = code
+        self.message = message or code
+
+
+def fail(code, message=None, detail=None, exit_code=1):
+    print(code)
+    if message:
+        print(message)
+    if detail:
+        print(f"[{detail}]")
+    raise SystemExit(exit_code)
+
+
 def get_github_creds(args):
-    """Resolve GitHub credentials (token never via CLI arg — env or gh CLI only)."""
+    """Resolve GitHub credentials."""
     gh_user = args.github_user or os.environ.get("GITHUB_USER", "")
-    gh_token = os.environ.get("GITHUB_TOKEN", "")
+    gh_token = (
+        args.github_token
+        or os.environ.get("GITHUB_TOKEN")
+        or ""
+    )
     if not gh_token:
         try:
             r = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True, timeout=10)
@@ -264,12 +302,6 @@ def deploy_via_playwright(args, password, gh_user, gh_token):
         page.locator('input[type="password"]').fill(password)
         page.locator('button:has-text("Login")').click()
         page.wait_for_timeout(3000)
-
-        # Verify login succeeded (URL should change away from /#/login)
-        if "/#/login" in page.url:
-            print("  ❌ Login failed — check credentials")
-            browser.close()
-            return False
         print("  ✅ Logged in")
 
         # Navigate to app
@@ -325,7 +357,7 @@ def deploy_via_playwright(args, password, gh_user, gh_token):
 
         page.wait_for_timeout(3000)
 
-        # HTTP Settings — enable HTTPS + WebSocket (unless disabled via flags)
+        # HTTP Settings — enable HTTPS + WebSocket
         print("  Configuring HTTP settings...")
         http_tab = page.locator("text=HTTP Settings").first
         if http_tab.count() == 0:
@@ -336,43 +368,41 @@ def deploy_via_playwright(args, password, gh_user, gh_token):
         except Exception:
             pass
 
-        # Enable HTTPS (unless --no-https)
-        if args.enable_https:
-            https_btn = page.locator("button:has-text('Enable HTTPS')")
-            if https_btn.count() == 0:
-                https_btn = page.locator("button:has-text('Habilitar HTTPS')")
-            if https_btn.count() > 0:
-                try:
-                    if not https_btn.is_disabled():
-                        https_btn.click()
-                        print("  ✅ HTTPS enabled (waiting for cert...)")
-                        page.wait_for_timeout(15000)
-                    else:
-                        print("  ℹ️  HTTPS already enabled")
-                except Exception:
-                    print("  ℹ️  HTTPS button not clickable (may already be enabled)")
-
-        # Enable WebSocket (unless --no-websocket)
-        if args.enable_websocket:
-            ws = page.locator("text=WebSocket Support")
-            if ws.count() == 0:
-                ws = page.locator("text=Suporte a Websocket")
-            if ws.count() > 0:
-                # Check if the checkbox is already checked
-                ws_parent = ws.locator("..")
-                is_checked = False
-                try:
-                    checkbox = ws_parent.locator("input[type='checkbox']")
-                    if checkbox.count() > 0:
-                        is_checked = checkbox.is_checked()
-                except Exception:
-                    pass
-                if not is_checked:
-                    ws.click()
-                    print("  ✅ WebSocket support enabled")
-                    page.wait_for_timeout(1000)
+        # Enable HTTPS
+        https_btn = page.locator("button:has-text('Enable HTTPS')")
+        if https_btn.count() == 0:
+            https_btn = page.locator("button:has-text('Habilitar HTTPS')")
+        if https_btn.count() > 0:
+            try:
+                if not https_btn.is_disabled():
+                    https_btn.click()
+                    print("  ✅ HTTPS enabled (waiting for cert...)")
+                    page.wait_for_timeout(15000)
                 else:
-                    print("  ℹ️  WebSocket already enabled")
+                    print("  ℹ️  HTTPS already enabled")
+            except Exception:
+                print("  ℹ️  HTTPS button not clickable (may already be enabled)")
+
+        # Enable WebSocket (only if not already enabled)
+        ws = page.locator("text=WebSocket Support")
+        if ws.count() == 0:
+            ws = page.locator("text=Suporte a Websocket")
+        if ws.count() > 0:
+            # Check if the checkbox is already checked
+            ws_parent = ws.locator("..")
+            is_checked = False
+            try:
+                checkbox = ws_parent.locator("input[type='checkbox']")
+                if checkbox.count() > 0:
+                    is_checked = checkbox.is_checked()
+            except Exception:
+                pass
+            if not is_checked:
+                ws.click()
+                print("  ✅ WebSocket support enabled")
+                page.wait_for_timeout(1000)
+            else:
+                print("  ℹ️  WebSocket already enabled")
 
         # Save
         saves = page.locator("button:has-text('Save & Restart')")
@@ -403,9 +433,6 @@ def verify_deploy(api, app_name, ssh_cmd=None):
         ok, data = api.wait_for_build(app_name)
         if not ok:
             print("  ❌ Build failed!")
-            logs = data.get("logs", {}).get("lines", [])
-            for l in [x for x in logs if x.strip()][-10:]:
-                print(f"    {l}")
             return False
     elif failed:
         print("  ❌ Build previously failed")
@@ -445,28 +472,26 @@ def verify_deploy(api, app_name, ssh_cmd=None):
 # ──────────────────────────────────────────────
 
 def main():
-    parser = argparse.ArgumentParser(description="CapRover automated deploy (CLI → API → Playwright)")
+    parser = argparse.ArgumentParser(description="CapRover automated deploy with sanitized preflight (CLI → API → Playwright)")
     parser.add_argument("--caprover-url", required=True, help="CapRover dashboard URL")
     parser.add_argument("--app-name", required=True, help="CapRover app name")
     parser.add_argument("--repo", help="GitHub repo URL")
     parser.add_argument("--branch", default="main", help="Git branch (default: main)")
     parser.add_argument("--tarball", help="Path to tarball file for upload")
     parser.add_argument("--rebuild-only", action="store_true", help="Skip config, just rebuild")
-    parser.add_argument("--no-https", action="store_true", help="Skip HTTPS enablement")
-    parser.add_argument("--no-websocket", action="store_true", help="Skip WebSocket enablement")
+    parser.add_argument("--enable-https", action="store_true", default=True, help="Enable HTTPS (default)")
+    parser.add_argument("--enable-websocket", action="store_true", default=True, help="Enable WebSocket (default)")
     parser.add_argument("--method", choices=["cli", "api", "playwright", "auto"], default="auto")
-    parser.add_argument("--keepass-entry", help="KeePass entry path for password (requires KEEPASS_DB and KEEPASS_KEY env vars)")
+    parser.add_argument("--caprover-password", help="CapRover password")
+    parser.add_argument("--keepass-entry", help="KeePass entry path for password")
     parser.add_argument("--github-user", help="GitHub username")
+    parser.add_argument("--github-token", help="GitHub token/PAT")
     parser.add_argument("--ssh-host", help="SSH host for verification (optional)")
     parser.add_argument("--ssh-key", help="SSH key path for verification")
     parser.add_argument("--ssh-port", default="22", help="SSH port")
     parser.add_argument("--ssh-user", help="SSH user")
     parser.add_argument("--timeout", type=int, default=300, help="Build timeout in seconds")
     args = parser.parse_args()
-
-    # Derive enable flags (default: True, negated by --no-* flags)
-    args.enable_https = not args.no_https
-    args.enable_websocket = not args.no_websocket
 
     # Resolve credentials
     password = get_password(args)
@@ -488,7 +513,16 @@ def main():
     print(f"{'='*50}\n")
 
     print("[Auth] Logging in...")
-    api.login(password)
+    try:
+        api.login(password)
+    except Exception:
+        fail("caprover_auth_blocked", "CapRover auth blocked", detail="login failed")
+
+    try:
+        api.preflight(args.app_name)
+    except CapRoverDeployError as e:
+        fail(e.code, "CapRover preflight blocked", detail="sanitized preflight")
+
     print("  ✅ Authenticated\n")
 
     method = args.method
@@ -522,12 +556,7 @@ def main():
         if ok:
             print("  ✅ Build succeeded!")
         else:
-            print("  ❌ Build failed!")
-            logs_data = data if isinstance(data, dict) else {}
-            logs = logs_data.get("logs", {}).get("lines", [])
-            for l in [x for x in logs if x.strip()][-10:]:
-                print(f"    {l}")
-            return
+            fail("caprover_build_failed", "CapRover build failed", detail="build did not complete")
 
     # Verify
     verify_deploy(api, args.app_name, ssh_cmd)

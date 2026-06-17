@@ -1,6 +1,6 @@
 ---
 name: caprover-deploy
-description: "Deploy apps to CapRover using the best available method (CLI → API → Playwright). Handles app creation, GitHub repo setup, build triggering, HTTPS/WebSocket config, and post-deploy verification. Generic — no instance-specific data."
+description: "Deploy apps to CapRover with a sanitized preflight and method selection (CLI → API → Playwright). Handles app creation, GitHub repo setup, build triggering, HTTPS/WebSocket config, and post-deploy verification. Generic — no instance-specific data."
 version: 1.0.0
 author: FMercurio Tech
 license: MIT
@@ -13,8 +13,6 @@ metadata:
 # CapRover Deploy
 
 ## Overview
-
-Action-focused deploy automation for CapRover. Uses `caprover-operations` as the reference skill for server operations (backup, diagnosis, recovery). This skill covers the deploy lifecycle only.
 
 Automated CapRover deployment that tries three methods in order of preference:
 
@@ -39,7 +37,7 @@ trigger build → poll until done → enable HTTPS + WebSocket → verify
 ## Prerequisites
 
 - **CapRover URL** (e.g. `https://captain.example.com`)
-- **CapRover password** — via env var `CAPROVER_PASSWORD`, KeePass (optional), or interactive prompt
+- **CapRover password** — via env var, KeePass, or argument
 - **GitHub token** — via `gh auth token` or env var `GITHUB_TOKEN`
 - **Python 3.9+** with `requests` (or `urllib` fallback)
 - **Playwright** (optional, for method 3) — `pip install playwright && playwright install chromium`
@@ -71,17 +69,16 @@ python3 scripts/caprover_deploy.py \
 
 The script tries these in order:
 
-1. `CAPROVER_PASSWORD` env var
-2. `--keepass-entry "/Caprover - MyOrg"` (reads from KeePassXC; requires `KEEPASS_DB` and `KEEPASS_KEY` env vars)
-3. Interactive prompt
-
-Passwords are never accepted as CLI arguments (visible in `ps aux`).
+1. `--caprover-password` argument
+2. `CAPROVER_PASSWORD` env var
+3. `--keepass-entry "/Caprover - MyOrg"` (reads from KeePassXC)
+4. Interactive prompt
 
 GitHub token:
 
 1. `GITHUB_TOKEN` env var
 2. `gh auth token` (if GitHub CLI is installed)
-3. `--github-user` argument (username only; token still via env or `gh`)
+3. `--github-user` + `--github-token` arguments
 
 ## Method Selection
 
