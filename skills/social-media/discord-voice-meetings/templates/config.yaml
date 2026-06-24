@@ -29,9 +29,10 @@ discord:
   # Required allow-list of Discord user IDs permitted to control recordings.
   # Leave empty to deny all meeting control commands until explicitly configured.
   # User IDs must be strings to avoid integer precision issues in some parsers.
-  allowed_users:
-    - "123456789012345678"  # Example: meeting host / team lead
-    - "234567890123456789"  # Example: backup operator
+  allowed_users: []
+  # Example after approval:
+  #   - "<DISCORD_USER_ID_FOR_MEETING_HOST>"
+  #   - "<DISCORD_USER_ID_FOR_BACKUP_OPERATOR>"
 
 # -----------------------------------------------------------------------------
 # Speech-to-text (STT) settings

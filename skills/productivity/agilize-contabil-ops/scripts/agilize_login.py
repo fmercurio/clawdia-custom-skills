@@ -66,6 +66,8 @@ API_BASE = "https://app.agilize.com.br"
 DEFAULT_CLIENT_ID = "agilize-legacy-client"
 DEFAULT_REDIRECT_URI = "https://app.agilize.com.br/"
 API_PATH_PREFIX = "/api"
+EXPECTED_SSO_SCHEME = urllib.parse.urlsplit(AUTH_URL).scheme
+EXPECTED_SSO_HOST = urllib.parse.urlsplit(AUTH_URL).netloc
 
 
 class FormParser(HTMLParser):
@@ -238,7 +240,11 @@ def hidden_fields(form: dict) -> Dict[str, str]:
 
 
 def absolute_action(action: str, current_url: str) -> str:
-    return urllib.parse.urljoin(current_url, html.unescape(action or ""))
+    resolved = urllib.parse.urljoin(current_url, html.unescape(action or ""))
+    parsed = urllib.parse.urlsplit(resolved)
+    if parsed.scheme != EXPECTED_SSO_SCHEME or parsed.netloc != EXPECTED_SSO_HOST:
+        die("auth form action left expected Agilize SSO origin")
+    return resolved
 
 
 def code_from_url(url: str, expected_state: Optional[str] = None) -> Optional[str]:

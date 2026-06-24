@@ -1,5 +1,6 @@
 import importlib.util
 import os
+import pytest
 import stat
 import sys
 import types
@@ -80,7 +81,7 @@ def test_config_loads_allowed_user_ids(monkeypatch, tmp_path):
     module = load_meeting_bot(monkeypatch, {
         "discord": {
             "token_env": "DISCORD_TOKEN_TEST",
-            "allowed_users": ["123456789012345678", 234567890123456789],
+            "allowed_users": ["345678901234567890", 456789012345678901],
         }
     })
     monkeypatch.setenv("DISCORD_TOKEN_TEST", "token")
@@ -90,7 +91,20 @@ def test_config_loads_allowed_user_ids(monkeypatch, tmp_path):
     cfg = module.MeetingConfig.load(str(cfg_path))
 
     assert cfg.bot_token == "token"
-    assert cfg.allowed_user_ids == {"123456789012345678", "234567890123456789"}
+    assert cfg.allowed_user_ids == {"345678901234567890", "456789012345678901"}
+
+
+def test_config_rejects_placeholder_allowed_user_ids(monkeypatch, tmp_path):
+    module = load_meeting_bot(monkeypatch, {
+        "discord": {
+            "allowed_users": ["123456789012345678"],
+        }
+    })
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text("discord: {}\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="placeholder example IDs"):
+        module.MeetingConfig.load(str(cfg_path))
 
 
 def test_meeting_markdown_is_saved_with_private_permissions(monkeypatch, tmp_path):
@@ -167,5 +181,6 @@ def test_config_template_documents_deny_all_until_allowlist_configured():
     text = CONFIG_TEMPLATE.read_text()
 
     assert "Leave empty to deny all meeting control commands" in text
+    assert "allowed_users: []" in text
     assert "0700" in text
     assert "0600" in text

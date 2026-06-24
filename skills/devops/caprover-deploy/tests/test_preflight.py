@@ -107,11 +107,23 @@ class TestSanitization:
 
 class TestUrlSafety:
     def test_https_url_is_normalized(self):
-        assert cd.validate_caprover_url("https://captain.example.com/") == "https://captain.example.com"
+        assert (
+            cd.validate_caprover_url(
+                "https://captain.example.com/",
+                expected_host="captain.example.com",
+            )
+            == "https://captain.example.com"
+        )
+
+    def test_non_local_https_url_requires_expected_host(self):
+        with pytest.raises(CapRoverDeployError) as exc:
+            cd.validate_caprover_url("https://attacker.example/")
+        assert exc.value.code == "caprover_config_invalid"
+        assert "expected-host" in exc.value.message
 
     def test_http_url_is_rejected_by_default(self):
         with pytest.raises(CapRoverDeployError) as exc:
-            cd.validate_caprover_url("http://captain.example.com")
+            cd.validate_caprover_url("http://captain.example.com", expected_host="captain.example.com")
         assert exc.value.code == "caprover_config_invalid"
 
     def test_http_url_requires_explicit_insecure_opt_in(self):
@@ -122,7 +134,10 @@ class TestUrlSafety:
 
     def test_url_rejects_embedded_credentials(self):
         with pytest.raises(CapRoverDeployError):
-            cd.validate_caprover_url("https://admin:secret@captain.example.com")
+            cd.validate_caprover_url(
+                "https://admin:secret@captain.example.com",
+                expected_host="captain.example.com",
+            )
 
     def test_expected_host_must_match(self):
         with pytest.raises(CapRoverDeployError):
@@ -154,6 +169,7 @@ class TestSecretSources:
         args = cd.build_arg_parser().parse_args([
             "--caprover-url", "https://captain.example.com",
             "--app-name", "my-app",
+            "--expected-host", "captain.example.com",
         ])
         assert not hasattr(args, "caprover_password")
         assert not hasattr(args, "github_token")

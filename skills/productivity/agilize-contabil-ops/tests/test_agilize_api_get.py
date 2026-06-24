@@ -91,6 +91,29 @@ def test_api_get_rejects_same_origin_non_api_path_before_request(monkeypatch):
     assert captured == {}
 
 
+def test_auth_form_action_rejects_external_absolute_origin(monkeypatch):
+    module, _ = load_script(monkeypatch)
+
+    with pytest.raises(SystemExit):
+        module.absolute_action("https://attacker.example/collect", module.AUTH_URL)
+
+
+def test_auth_form_action_rejects_protocol_relative_origin(monkeypatch):
+    module, _ = load_script(monkeypatch)
+
+    with pytest.raises(SystemExit):
+        module.absolute_action("//attacker.example/collect", module.AUTH_URL)
+
+
+def test_auth_form_action_allows_relative_sso_action(monkeypatch):
+    module, _ = load_script(monkeypatch)
+
+    assert (
+        module.absolute_action("/auth/realms/AgilizeAPPs/login-actions/authenticate", module.AUTH_URL)
+        == "https://sso.agilize.com.br/auth/realms/AgilizeAPPs/login-actions/authenticate"
+    )
+
+
 def test_config_file_with_credentials_must_not_be_group_or_world_readable(monkeypatch, tmp_path):
     module, _ = load_script(monkeypatch)
     config = tmp_path / "agilize.json"

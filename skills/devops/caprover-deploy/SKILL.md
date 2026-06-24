@@ -48,6 +48,7 @@ trigger build → poll until done → enable HTTPS + WebSocket → verify
 # Full deploy from GitHub repo
 python3 scripts/caprover_deploy.py \
   --caprover-url https://captain.example.com \
+  --expected-host captain.example.com \
   --app-name my-app \
   --repo https://github.com/org/repo \
   --branch main
@@ -55,12 +56,14 @@ python3 scripts/caprover_deploy.py \
 # Force rebuild existing app
 python3 scripts/caprover_deploy.py \
   --caprover-url https://captain.example.com \
+  --expected-host captain.example.com \
   --app-name my-app \
   --rebuild-only
 
 # Deploy tarball (no GitHub)
 python3 scripts/caprover_deploy.py \
   --caprover-url https://captain.example.com \
+  --expected-host captain.example.com \
   --app-name my-app \
   --tarball ./project.tar
 ```
@@ -83,7 +86,7 @@ Do not pass passwords or tokens through CLI arguments; process arguments are vis
 ## URL Safety
 
 - Use `https://` CapRover dashboard URLs by default.
-- Pass `--expected-host captain.example.com` when an automation must assert the intended dashboard hostname before resolving credentials.
+- Pass `--expected-host captain.example.com` for every non-local target. The script refuses to resolve credentials for a non-local CapRover URL without this host assertion.
 - `--allow-insecure` is only for local/dev targets and makes Playwright tolerate certificate errors for that run.
 
 ## Method Selection

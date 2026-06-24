@@ -73,6 +73,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger("meeting-bot")
 
+PLACEHOLDER_ALLOWED_USER_IDS = {
+    "123456789012345678",
+    "234567890123456789",
+}
+
 
 # ============================================================================
 # Configuration
@@ -132,6 +137,12 @@ class MeetingConfig:
             for user_id in discord_cfg.get("allowed_users", [])
             if str(user_id).strip()
         }
+        placeholder_ids = cfg.allowed_user_ids & PLACEHOLDER_ALLOWED_USER_IDS
+        if placeholder_ids:
+            raise ValueError(
+                "discord.allowed_users contains placeholder example IDs; "
+                "replace them with real approved Discord user IDs or leave the list empty"
+            )
 
         # STT
         stt_cfg = yaml_data.get("stt", {})
@@ -1198,7 +1209,11 @@ def main() -> None:
     parser.add_argument("--config", default="config.yaml", help="Path to config YAML")
     args = parser.parse_args()
 
-    config = MeetingConfig.load(args.config)
+    try:
+        config = MeetingConfig.load(args.config)
+    except ValueError as exc:
+        print(f"ERROR: invalid config: {exc}")
+        return
 
     if not config.bot_token:
         print("ERROR: Discord bot token not found. Set DISCORD_BOT_TOKEN env var.")
