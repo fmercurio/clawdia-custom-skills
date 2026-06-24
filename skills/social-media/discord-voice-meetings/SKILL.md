@@ -405,7 +405,7 @@ Test setup: Hetzner Cloud server, 20 vCPU, no GPU, Portuguese audio.
 
 9. **Writing API keys to .env with sed**: Inline `sed -i` with API key values
    corrupts the value due to quoting/escaping. Fix: use a Python script that
-   writes by line number.
+   writes by line number, then set `chmod 600 .env`.
 
 ## Integrating into an existing bot framework
 
