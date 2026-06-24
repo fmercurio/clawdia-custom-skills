@@ -448,13 +448,14 @@ skills:
       installed_by: null
       note: "Action-focused deploy skill. Companion to caprover-operations (server ops)."
     audit:
-      security_review: "2026-06-16"
+      security_review: "2026-06-24"
       security_status: "passed"
       findings:
         - "Zero hardcoded secrets, paths, or tenant-specific data"
         - "Passwords never accepted as CLI args (env var, KeePass, or interactive only)"
         - "KeePass optional — requires KEEPASS_DB and KEEPASS_KEY env vars, no hardcoded paths"
         - "GitHub token via gh CLI or env var only"
+        - "CapRover URL requires HTTPS by default; --allow-insecure is explicit local/dev only"
         - "subprocess.run uses list args, never shell=True"
         - "Playwright login failure detected via URL check"
       frontmatter_valid: true
@@ -462,7 +463,7 @@ skills:
       pitfalls_documented: true
       fixes_applied:
         - "Fixed argparse bug: --enable-https/--enable-websocket store_true with default=True (always True). Replaced with --no-https/--no-websocket store_false."
-        - "Removed hardcoded KeePress paths (/Users/Shared/hermes-keepass/...). Now env-only."
+        - "Removed hardcoded KeePassXC default paths. Now env-only."
         - "Removed --caprover-password and --github-token CLI args (visible in ps aux)."
         - "Removed unnecessary try/except for stdlib urllib import."
         - "Added Playwright login verification (URL check after submit)."
@@ -495,3 +496,62 @@ skills:
           removed password CLI args, removed unnecessary urllib try/except,
           added Playwright login verification, generalized nginx template.
           5 files, ~25KB total. Status: candidate — pending Felippe approval.
+
+  - name: topic-channel-soul-routing
+    status: candidate
+    version: 1.0.0
+    category: productivity
+    description: >
+      Generic runbook for configuring Telegram topics, Discord channels/threads,
+      or equivalent messaging surfaces as specialist agent souls/profiles while
+      preserving conversation-first behavior and explicit-only Kanban/task intake.
+    source:
+      type: internal
+      origin: "Generalized from Topic Soul Routing + Explicit Kanban Wizard in Skills Lab"
+      author: "Felippe M. + Hermes Agent"
+      created: "2026-06-24"
+      approved: null
+      approved_by: null
+      repository_url: null
+      no_repository_reason: "Skill interna, generalizada de wizard/runbook operacional"
+    installation:
+      runtime_path: null
+      repo_path: "skills/productivity/topic-channel-soul-routing/"
+      installed_date: null
+      installed_by: null
+      note: "Template genérico — publicar/revisar via Skills Lab antes de instalar em runtime"
+    audit:
+      security_review: "2026-06-24"
+      security_status: "passed"
+      findings:
+        - "No scripts or executable automation included"
+        - "No hardcoded secrets, tenant identifiers, chat IDs, or local paths"
+        - "Tenant/account scope required for multi-tenant route matching"
+        - "Task source references are minimal by default; raw private metadata and permalinks are opt-in only"
+        - "SOUL/profile prompts cannot grant tools, secrets, route scope, activation, or automatic task intake"
+        - "Conversation-first and explicit task intake behavior documented"
+        - "README gives non-technical step-by-step prompt for asking an agent to configure a specialist topic/profile"
+      frontmatter_valid: true
+      company_agnostic: true
+      pitfalls_documented: true
+    files:
+      - path: "SKILL.md"
+        status: "new"
+        note: "Generic operational skill with data model, wizard, behavior contract, pitfalls, and validation checklist"
+      - path: "README.md"
+        status: "new"
+        note: "User-facing step-by-step guide for asking an agent to create a specialist topic/profile"
+      - path: "templates/topic-souls.example.yaml"
+        status: "new"
+      - path: "templates/soul.example.md"
+        status: "new"
+      - path: "references/implementation-notes.md"
+        status: "new"
+    changelog:
+      - date: "2026-06-24"
+        action: "created generic template"
+        details: >
+          Promoted the Topic Soul Routing + Explicit Kanban Wizard into a reusable
+          skill package. Added a README focused on non-technical operators asking
+          their own agent to configure specialist topic/channel profiles. Status:
+          candidate — awaiting Skills Lab review/approval.

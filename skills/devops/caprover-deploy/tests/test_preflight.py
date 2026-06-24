@@ -9,6 +9,7 @@ Covers:
 - fail() exits with correct code and sanitized message
 """
 import importlib.util
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
@@ -102,3 +103,76 @@ class TestSanitization:
         assert err.code == "caprover_auth_blocked"
         assert "token" not in str(err).lower()
         assert "password" not in str(err).lower()
+
+
+class TestUrlSafety:
+    def test_https_url_is_normalized(self):
+        assert cd.validate_caprover_url("https://captain.example.com/") == "https://captain.example.com"
+
+    def test_http_url_is_rejected_by_default(self):
+        with pytest.raises(CapRoverDeployError) as exc:
+            cd.validate_caprover_url("http://captain.example.com")
+        assert exc.value.code == "caprover_config_invalid"
+
+    def test_http_url_requires_explicit_insecure_opt_in(self):
+        assert (
+            cd.validate_caprover_url("http://127.0.0.1:3000", allow_insecure=True)
+            == "http://127.0.0.1:3000"
+        )
+
+    def test_url_rejects_embedded_credentials(self):
+        with pytest.raises(CapRoverDeployError):
+            cd.validate_caprover_url("https://admin:secret@captain.example.com")
+
+    def test_expected_host_must_match(self):
+        with pytest.raises(CapRoverDeployError):
+            cd.validate_caprover_url("https://captain.evil.example", expected_host="captain.example.com")
+
+    def test_playwright_does_not_ignore_tls_by_default(self):
+        source = SCRIPT.read_text()
+        assert "ignore_https_errors=True" not in source
+        assert "ignore_https_errors=args.allow_insecure" in source
+
+
+class TestSecretSources:
+    def test_parser_no_longer_accepts_secret_argv_flags(self):
+        parser = cd.build_arg_parser()
+        with pytest.raises(SystemExit):
+            parser.parse_args([
+                "--caprover-url", "https://captain.example.com",
+                "--app-name", "my-app",
+                "--caprover-password", "secret",
+            ])
+        with pytest.raises(SystemExit):
+            parser.parse_args([
+                "--caprover-url", "https://captain.example.com",
+                "--app-name", "my-app",
+                "--github-token", "secret",
+            ])
+
+    def test_parser_has_no_secret_attributes(self):
+        args = cd.build_arg_parser().parse_args([
+            "--caprover-url", "https://captain.example.com",
+            "--app-name", "my-app",
+        ])
+        assert not hasattr(args, "caprover_password")
+        assert not hasattr(args, "github_token")
+
+    def test_caprover_password_comes_from_env(self, monkeypatch):
+        monkeypatch.setenv("CAPROVER_PASSWORD", "from-env")
+        args = SimpleNamespace(keepass_entry=None)
+        assert cd.get_password(args) == "from-env"
+
+    def test_keepass_requires_explicit_db_and_key_env(self, monkeypatch, capsys):
+        monkeypatch.delenv("CAPROVER_PASSWORD", raising=False)
+        monkeypatch.delenv("KEEPASS_DB", raising=False)
+        monkeypatch.delenv("KEEPASS_KEY", raising=False)
+        args = SimpleNamespace(keepass_entry="/CapRover")
+
+        with pytest.raises(SystemExit) as exc:
+            cd.get_password(args)
+
+        assert exc.value.code == 2
+        err = capsys.readouterr().err
+        assert "KEEPASS_DB" in err
+        assert "/Users/Shared" not in SCRIPT.read_text()

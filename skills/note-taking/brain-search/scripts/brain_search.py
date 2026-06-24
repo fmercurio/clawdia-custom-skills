@@ -62,6 +62,34 @@ MAX_CHUNK_CHARS = 800
 MIN_CHUNK_CHARS = 50
 
 
+def ensure_vault_file(path: Path) -> Path:
+    """Return a resolved in-vault, supported file path or raise ValueError."""
+    vault_root = VAULT_ROOT.resolve()
+    resolved = path.resolve()
+    try:
+        rel = resolved.relative_to(vault_root)
+    except ValueError:
+        raise ValueError("path escapes vault root")
+
+    if any(part in SKIP_DIRS for part in rel.parts):
+        raise ValueError("path is inside a skipped directory")
+    if resolved.suffix.lower() not in SUPPORTED_EXTS:
+        raise ValueError(f"unsupported file extension: {resolved.suffix or '<none>'}")
+    return resolved
+
+
+def resolve_update_path(raw_path: str) -> Path:
+    """Resolve a CLI --update path while enforcing the vault boundary."""
+    value = (raw_path or "").strip()
+    if not value:
+        raise ValueError("--update path is empty")
+
+    requested = Path(value)
+    if requested.is_absolute():
+        raise ValueError("--update requires a relative path inside the vault")
+    return ensure_vault_file(VAULT_ROOT / requested)
+
+
 # ---------------------------------------------------------------------------
 # Database schema
 # ---------------------------------------------------------------------------
@@ -242,7 +270,11 @@ def file_hash(path: Path) -> str:
 
 def index_file(path: Path, con: sqlite3.Connection, embeddings: bool = False) -> dict:
     """Index a single file into the database."""
-    relpath = str(path.relative_to(VAULT_ROOT))
+    try:
+        path = ensure_vault_file(path)
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}
+    relpath = str(path.relative_to(VAULT_ROOT.resolve()))
 
     # Read and parse
     try:
@@ -637,6 +669,14 @@ def main():
     parser.add_argument("--json", action="store_true", help="JSON output")
     args = parser.parse_args()
 
+    update_path = None
+    if args.update:
+        try:
+            update_path = resolve_update_path(args.update)
+        except ValueError as e:
+            print(f"Unsafe update path: {e}", file=sys.stderr)
+            sys.exit(2)
+
     con = init_db()
 
     if args.rebuild:
@@ -651,7 +691,7 @@ def main():
         return
 
     if args.update:
-        path = VAULT_ROOT / args.update
+        path = update_path
         if not path.exists():
             print(f"Arquivo não encontrado: {args.update}")
             sys.exit(1)

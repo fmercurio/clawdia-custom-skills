@@ -37,6 +37,7 @@ import json
 import logging
 import os
 import re
+import stat
 import struct
 import subprocess
 import tempfile
@@ -83,6 +84,7 @@ class MeetingConfig:
 
     # Discord
     bot_token: str = ""
+    allowed_user_ids: Set[str] = field(default_factory=set)
 
     # STT (Groq)
     groq_api_key: str = ""
@@ -125,6 +127,11 @@ class MeetingConfig:
         discord_cfg = yaml_data.get("discord", {})
         token_env = discord_cfg.get("token_env", "DISCORD_BOT_TOKEN")
         cfg.bot_token = os.environ.get(token_env, "")
+        cfg.allowed_user_ids = {
+            str(user_id).strip()
+            for user_id in discord_cfg.get("allowed_users", [])
+            if str(user_id).strip()
+        }
 
         # STT
         stt_cfg = yaml_data.get("stt", {})
@@ -760,10 +767,18 @@ def save_meeting_markdown(output_dir: str, meeting: dict, markdown: str) -> Path
     """Save the meeting markdown to disk and return the path."""
     safe_title = re.sub(r"[^A-Za-z0-9_.-]+", "-", meeting.get("title", "meeting")).strip("-")[:80] or "meeting"
     guild_id = str(meeting.get("guild_id", "default"))
-    out_dir = Path(output_dir) / guild_id
-    out_dir.mkdir(parents=True, exist_ok=True)
+    safe_guild_id = re.sub(r"[^A-Za-z0-9_-]+", "-", guild_id).strip("-")[:80] or "default"
+    out_dir = Path(output_dir) / safe_guild_id
+    out_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(out_dir, stat.S_IRWXU)
     path = out_dir / f"{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}-{safe_title}.md"
-    path.write_text(markdown, encoding="utf-8")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    fd = os.open(str(path), flags, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(markdown)
+    os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
     return path
 
 
@@ -811,6 +826,21 @@ class MeetingBot(discord.Client):
         # Register commands
         self._register_commands()
 
+    def _is_allowed_user(self, interaction: discord.Interaction) -> bool:
+        """Return whether the invoker may control meeting recordings."""
+        user_id = str(getattr(getattr(interaction, "user", None), "id", "")).strip()
+        return bool(user_id and user_id in self._config.allowed_user_ids)
+
+    async def _send_unauthorized(self, interaction: discord.Interaction) -> None:
+        message = (
+            "Você não está autorizado a controlar gravações. "
+            "Peça para um administrador incluir seu Discord user ID em `discord.allowed_users`."
+        )
+        if interaction.response.is_done():
+            await interaction.followup.send(message, ephemeral=True)
+        else:
+            await interaction.response.send_message(message, ephemeral=True)
+
     # ------------------------------------------------------------------
     # Event handlers
     # ------------------------------------------------------------------
@@ -850,6 +880,10 @@ class MeetingBot(discord.Client):
 
     async def _handle_start(self, interaction: discord.Interaction, raw_action: str) -> None:
         await interaction.response.defer(ephemeral=True)
+
+        if not self._is_allowed_user(interaction):
+            await self._send_unauthorized(interaction)
+            return
 
         guild_id = interaction.guild_id
         if not guild_id:
@@ -922,6 +956,7 @@ class MeetingBot(discord.Client):
             f"Entrei no canal de voz **{voice_channel.name}** e vou registrar a transcrição.\n\n"
             f"Participantes atuais:\n{participant_text}\n\n"
             "Use `/meeting status` para acompanhar e `/meeting stop` para encerrar e gerar a ata.",
+            ephemeral=True,
         )
 
     # ------------------------------------------------------------------
@@ -929,6 +964,10 @@ class MeetingBot(discord.Client):
     # ------------------------------------------------------------------
 
     async def _handle_status(self, interaction: discord.Interaction) -> None:
+        if not self._is_allowed_user(interaction):
+            await self._send_unauthorized(interaction)
+            return
+
         guild_id = interaction.guild_id
         meeting = self._meetings.get(guild_id) if guild_id else None
         if not meeting:
@@ -959,12 +998,16 @@ class MeetingBot(discord.Client):
     # ------------------------------------------------------------------
 
     async def _handle_stop(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer()
+        await interaction.response.defer(ephemeral=True)
+
+        if not self._is_allowed_user(interaction):
+            await self._send_unauthorized(interaction)
+            return
 
         guild_id = interaction.guild_id
         meeting = self._meetings.get(guild_id) if guild_id else None
         if not meeting:
-            await interaction.followup.send("Não há reunião ativa neste servidor.")
+            await interaction.followup.send("Não há reunião ativa neste servidor.", ephemeral=True)
             return
 
         # Mark as stopping — keeps meeting in sessions for in-flight transcriptions
@@ -1053,7 +1096,7 @@ class MeetingBot(discord.Client):
         preview = markdown[:1500]
         if len(markdown) > 1500:
             preview += "\n\n…\n\nTranscrição completa salva no arquivo abaixo."
-        await interaction.followup.send(f"📋 **Ata gerada**\n\n{preview}", file=file)
+        await interaction.followup.send(f"📋 **Ata gerada**\n\n{preview}", file=file, ephemeral=True)
 
     # ------------------------------------------------------------------
     # Voice listen loop
@@ -1108,10 +1151,10 @@ class MeetingBot(discord.Client):
             if not transcript:
                 return
             if is_whisper_hallucination(transcript):
-                logger.info("Hallucination filtered for user %d: %s", user_id, transcript[:60])
+                logger.info("Hallucination filtered for user %d (chars=%d)", user_id, len(transcript))
                 return
 
-            logger.info("Voice input from user %d: %s", user_id, transcript[:100])
+            logger.info("Voice input from user %d transcribed (chars=%d)", user_id, len(transcript))
 
             meeting = self._meetings.get(guild_id)
             if meeting and not meeting._stopping:

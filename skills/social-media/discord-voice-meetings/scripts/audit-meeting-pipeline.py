@@ -9,8 +9,11 @@ Usage:
     python3 scripts/audit-meeting-pipeline.py
 """
 import os
+import json
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 GATEWAY_LOG = Path.home() / ".hermes" / "logs" / "gateway.log"
@@ -43,6 +46,31 @@ def header(title):
     print(f"\n{'='*60}")
     print(f"  {title}")
     print(f"{'='*60}")
+
+
+def probe_zai_endpoint(endpoint_url, glm_key, timeout=10):
+    """Probe Z.AI without putting the bearer token in process arguments."""
+    payload = json.dumps({
+        "model": "glm-4.6",
+        "messages": [{"role": "user", "content": "ok"}],
+        "max_tokens": 5,
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        endpoint_url,
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {glm_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        return exc.read().decode("utf-8", errors="replace")
+    except Exception as exc:
+        return json.dumps({"error": str(exc)})
 
 
 # --- 1. Meetings directory ---
@@ -200,13 +228,7 @@ if glm_key:
         ("coding", "https://api.z.ai/api/coding/paas/v4/chat/completions"),
         ("regular", "https://api.z.ai/api/paas/v4/chat/completions"),
     ]:
-        result = subprocess.run(
-            ["curl", "-s", "--max-time", "10", endpoint_url,
-             "-H", f"Authorization: Bearer {glm_key}", "-H", "Content-Type: application/json",
-             "-d", '{"model":"glm-4.6","messages":[{"role":"user","content":"ok"}],"max_tokens":5}'],
-            capture_output=True, text=True
-        )
-        resp = result.stdout.strip()
+        resp = probe_zai_endpoint(endpoint_url, glm_key).strip()
         if '"error"' in resp:
             fail(f"Z.AI {endpoint_name} endpoint: {resp[:100]}")
         elif '"choices"' in resp:

@@ -1,0 +1,29 @@
+# Topic/channel specialist agent routing registry template
+# Copy this into the runtime-specific config location and replace placeholders.
+
+topic_souls:
+  version: "1"
+  entries:
+    - tenant_key: "<TENANT_KEY>"          # runtime tenant/account/project scope
+      environment: "<ENVIRONMENT>"        # dev | staging | prod
+      platform: "<PLATFORM>"              # telegram | discord | slack | other
+      workspace_id: "<WORKSPACE_ID>"      # chat id, guild id, workspace id
+      surface_id: "<SURFACE_ID>"          # topic id, channel id, thread id
+      surface_type: "<SURFACE_TYPE>"      # topic | channel | thread | dm
+      surface_name: "<SURFACE_NAME>"      # human-readable label; not a routing key
+      project: "<PROJECT_KEY>"
+      board: "<BOARD_KEY>"
+      profile: "<PROFILE_NAME>"
+      soul_id: "<SOUL_ID>"
+      mode: direct
+      kanban_intake: explicit
+      source_reference_policy: minimal
+      include_permalink: false
+      actor_reference: hashed
+      status: draft
+      activation:
+        requires_human_confirmation: true
+        approved_by: null
+        approved_at: null
+      prompt_summary: >-
+        <ONE_PARAGRAPH_SPECIALIST_SUMMARY>

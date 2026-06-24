@@ -7,8 +7,8 @@ Usage:
     python3 caprover_deploy.py --caprover-url URL --app-name APP --rebuild-only
     python3 caprover_deploy.py --caprover-url URL --app-name APP --tarball ./project.tar
 
-Auth: --caprover-password, CAPROVER_PASSWORD env, --keepass-entry, or interactive.
-GitHub: GITHUB_TOKEN env, gh auth token, or --github-user + --github-token.
+Auth: CAPROVER_PASSWORD env, --keepass-entry with KEEPASS_DB/KEEPASS_KEY, or interactive.
+GitHub: GITHUB_TOKEN env or gh auth token.
 """
 import argparse
 import json
@@ -20,6 +20,7 @@ import time
 try:
     import urllib.request
     import urllib.error
+    import urllib.parse
 except ImportError:
     sys.exit("This script requires Python 3 standard library.")
 
@@ -134,15 +135,15 @@ class CapRoverAPI:
 
 def get_password(args):
     """Resolve CapRover password from multiple sources."""
-    if args.caprover_password:
-        return args.caprover_password
     if os.environ.get("CAPROVER_PASSWORD"):
         return os.environ["CAPROVER_PASSWORD"]
     if args.keepass_entry:
         try:
-            # Try common KeePassXC key/db locations
-            kp_db = os.environ.get("KEEPASS_DB", "/Users/Shared/hermes-keepass/hermes-keepass.kdbx")
-            kp_key = os.environ.get("KEEPASS_KEY", "/Users/Shared/hermes-keepass/hermes-agent.keyx")
+            kp_db = os.environ.get("KEEPASS_DB")
+            kp_key = os.environ.get("KEEPASS_KEY")
+            if not kp_db or not kp_key:
+                print("  KeePass requested but KEEPASS_DB and KEEPASS_KEY must be set", file=sys.stderr)
+                raise SystemExit(2)
             r = subprocess.run(
                 ["keepassxc-cli", "show", "--show-protected", "-a", "Password",
                  "--no-password", "-k", kp_key, kp_db, args.keepass_entry],
@@ -150,11 +151,11 @@ def get_password(args):
             )
             if r.returncode == 0 and r.stdout.strip():
                 return r.stdout.strip()
-            print(f"  ⚠️ KeePass lookup failed: {r.stderr.strip()}")
+            print("  KeePass lookup failed; verify the entry and KeePass config", file=sys.stderr)
         except FileNotFoundError:
-            print("  ⚠️ keepassxc-cli not found")
+            print("  keepassxc-cli not found", file=sys.stderr)
         except Exception as e:
-            print(f"  ⚠️ KeePass error: {e}")
+            print(f"  KeePass error: {e}", file=sys.stderr)
     # Interactive prompt
     import getpass
     return getpass.getpass("CapRover password: ")
@@ -180,8 +181,7 @@ def get_github_creds(args):
     """Resolve GitHub credentials."""
     gh_user = args.github_user or os.environ.get("GITHUB_USER", "")
     gh_token = (
-        args.github_token
-        or os.environ.get("GITHUB_TOKEN")
+        os.environ.get("GITHUB_TOKEN")
         or ""
     )
     if not gh_token:
@@ -199,6 +199,24 @@ def get_github_creds(args):
         except FileNotFoundError:
             pass
     return gh_user, gh_token
+
+
+def validate_caprover_url(raw_url, allow_insecure=False, expected_host=None):
+    """Normalize and validate the dashboard URL before any secret is resolved."""
+    parsed = urllib.parse.urlsplit((raw_url or "").strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise CapRoverDeployError("caprover_config_invalid", "CapRover URL must include http(s) scheme and host")
+    if parsed.username or parsed.password:
+        raise CapRoverDeployError("caprover_config_invalid", "CapRover URL must not contain credentials")
+    if parsed.scheme != "https" and not allow_insecure:
+        raise CapRoverDeployError("caprover_config_invalid", "CapRover URL must use HTTPS; pass --allow-insecure only for local/dev")
+    if expected_host and (parsed.hostname or "").lower() != expected_host.lower():
+        raise CapRoverDeployError("caprover_config_invalid", "CapRover URL host does not match --expected-host")
+    if parsed.query or parsed.fragment:
+        raise CapRoverDeployError("caprover_config_invalid", "CapRover URL must not include query or fragment")
+
+    path = parsed.path.rstrip("/")
+    return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, path, "", "")).rstrip("/")
 
 
 # ──────────────────────────────────────────────
@@ -292,7 +310,7 @@ def deploy_via_playwright(args, password, gh_user, gh_token):
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        context = browser.new_context(ignore_https_errors=True)
+        context = browser.new_context(ignore_https_errors=args.allow_insecure)
         page = context.new_page()
 
         # Login
@@ -471,7 +489,7 @@ def verify_deploy(api, app_name, ssh_cmd=None):
 #  Main
 # ──────────────────────────────────────────────
 
-def main():
+def build_arg_parser():
     parser = argparse.ArgumentParser(description="CapRover automated deploy with sanitized preflight (CLI → API → Playwright)")
     parser.add_argument("--caprover-url", required=True, help="CapRover dashboard URL")
     parser.add_argument("--app-name", required=True, help="CapRover app name")
@@ -482,16 +500,32 @@ def main():
     parser.add_argument("--enable-https", action="store_true", default=True, help="Enable HTTPS (default)")
     parser.add_argument("--enable-websocket", action="store_true", default=True, help="Enable WebSocket (default)")
     parser.add_argument("--method", choices=["cli", "api", "playwright", "auto"], default="auto")
-    parser.add_argument("--caprover-password", help="CapRover password")
     parser.add_argument("--keepass-entry", help="KeePass entry path for password")
     parser.add_argument("--github-user", help="GitHub username")
-    parser.add_argument("--github-token", help="GitHub token/PAT")
+    parser.add_argument("--expected-host", help="Optional hostname assertion for the CapRover dashboard")
+    parser.add_argument("--allow-insecure", action="store_true", help="Allow non-HTTPS/self-signed local/dev CapRover targets")
     parser.add_argument("--ssh-host", help="SSH host for verification (optional)")
     parser.add_argument("--ssh-key", help="SSH key path for verification")
     parser.add_argument("--ssh-port", default="22", help="SSH port")
     parser.add_argument("--ssh-user", help="SSH user")
     parser.add_argument("--timeout", type=int, default=300, help="Build timeout in seconds")
+    return parser
+
+
+def main():
+    parser = build_arg_parser()
     args = parser.parse_args()
+
+    try:
+        args.caprover_url = validate_caprover_url(
+            args.caprover_url,
+            allow_insecure=args.allow_insecure,
+            expected_host=args.expected_host,
+        )
+    except CapRoverDeployError as e:
+        fail(e.code, e.message, detail="url validation", exit_code=2)
+    if args.allow_insecure:
+        print("  ⚠️  Insecure CapRover target allowed for local/dev use only")
 
     # Resolve credentials
     password = get_password(args)

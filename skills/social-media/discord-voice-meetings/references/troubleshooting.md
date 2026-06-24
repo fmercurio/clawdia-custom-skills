@@ -150,8 +150,8 @@ Options:
    - `Auto-mapped ssrc=X -> user=Y` — fallback mapping (no SPEAKING event)
    - `Voice input processing START for guild=X user=Y, pcm=N bytes` — check_silence emitted an utterance
    - `Voice input STT result for user X: success=True/False` — Whisper ran
-   - `Voice input from user Y: text` — confirms transcription succeeded
-   - `Voice callback received: guild=X user=Y transcript=...` — gateway callback fired
+   - `Voice input from user Y transcribed (chars=N)` — confirms transcription succeeded without logging content
+   - `Voice callback received: guild=X user=Y chars=N` — gateway callback fired without logging transcript text
    - `Meeting stop flush: buffers=..., ssrc_map=...` — buffer state at stop
    - `Flushed N pending utterance(s) on stop` — flush captured audio
 
@@ -244,12 +244,11 @@ Log shows HTTP 401 "token expired or incorrect" from Z.AI.
 
 **Diagnosis**:
 1. Check `.env` for `GLM_API_KEY` — note there may be duplicate/commented entries
-2. Test the key directly:
+2. Test the key through the audit helper. It sends the bearer header inside
+   Python rather than putting the token in `curl` command arguments:
    ```bash
-   source ~/.hermes/.env
-   curl -s https://api.z.ai/api/coding/paas/v4/chat/completions \
-     -H "Authorization: Bearer ***     -H "Content-Type: application/json" \
-     -d '{"model":"glm-4-flash","messages":[{"role":"user","content":"ok"}],"max_tokens":5}'
+   cd <installed-discord-voice-meetings-skill-dir>
+   python3 scripts/audit-meeting-pipeline.py
    ```
 3. If HTTP 401: the key in `.env` is stale. Update it to match the key
    the Hermes provider system uses.
