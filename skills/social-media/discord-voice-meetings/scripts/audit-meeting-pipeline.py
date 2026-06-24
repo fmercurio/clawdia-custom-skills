@@ -10,6 +10,7 @@ Usage:
 """
 import os
 import json
+import re
 import subprocess
 import sys
 import urllib.error
@@ -25,6 +26,9 @@ ENV_FILE = Path.home() / ".hermes" / ".env"
 WRAPPER_SCRIPT = Path.home() / ".hermes" / "scripts" / "hermes-gateway-with-1password.sh"
 
 CHECKS = []
+SECRET_ASSIGNMENT_RE = re.compile(
+    r"(?i)\b(token|secret|password|passwd|api[_-]?key|authorization|cookie)\b\s*[:=]\s*\S+"
+)
 
 
 def ok(msg):
@@ -46,6 +50,15 @@ def header(title):
     print(f"\n{'='*60}")
     print(f"  {title}")
     print(f"{'='*60}")
+
+
+def summarize_log_line(line):
+    """Summarize a log line without printing transcript text or secret values."""
+    redacted = SECRET_ASSIGNMENT_RE.sub(r"\1=<redacted>", line.strip())
+    lower = redacted.lower()
+    tags = [tag for tag in ("voice", "meeting", "opus", "flush", "ssrc") if tag in lower]
+    timestamp = redacted.split(maxsplit=1)[0] if redacted else "log"
+    return f"{timestamp} {'/'.join(tags) or 'voice/meeting'} log line (chars={len(line)})"
 
 
 def probe_zai_endpoint(endpoint_url, glm_key, timeout=10):
@@ -206,7 +219,7 @@ if GATEWAY_LOG.exists():
     if relevant:
         ok(f"{len(relevant)} voice/meeting log lines in recent output")
         for line in relevant[-5:]:
-            print(f"    {line.strip()[:120]}")
+            print(f"    {summarize_log_line(line)}")
     else:
         ok("No voice/meeting activity in recent logs")
 else:

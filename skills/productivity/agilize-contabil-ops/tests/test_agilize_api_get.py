@@ -111,6 +111,7 @@ def test_write_secure_uses_private_mode_and_does_not_follow_symlink(monkeypatch,
     module.write_secure(str(output), '{"ok":true}')
 
     assert output.read_text(encoding="utf-8") == '{"ok":true}'
+    assert stat.S_IMODE(output.parent.stat().st_mode) == 0o700
     assert stat.S_IMODE(output.stat().st_mode) == 0o600
 
     if not hasattr(os, "O_NOFOLLOW"):
@@ -125,3 +126,14 @@ def test_write_secure_uses_private_mode_and_does_not_follow_symlink(monkeypatch,
         module.write_secure(str(symlink), '{"ok":false}')
 
     assert target.read_text(encoding="utf-8") == "do not overwrite"
+
+
+def test_write_secure_rejects_symlink_output_dir(monkeypatch, tmp_path):
+    module, _ = load_script(monkeypatch)
+    real_dir = tmp_path / "real"
+    real_dir.mkdir()
+    linked_dir = tmp_path / "linked"
+    linked_dir.symlink_to(real_dir, target_is_directory=True)
+
+    with pytest.raises(OSError):
+        module.write_secure(str(linked_dir / "response.json"), '{"ok":true}')
