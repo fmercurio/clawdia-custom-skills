@@ -417,9 +417,20 @@ def api_get(token: LoginResult, path: str, company_cnpj: str, timeout: int) -> r
     return requests.get(url, headers=headers, timeout=timeout, allow_redirects=False)
 
 
+def ensure_private_dir(path: Path) -> Path:
+    path = path.expanduser()
+    if path.exists() and path.is_symlink():
+        raise OSError(f"output directory must not be a symlink: {path}")
+    path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(path, stat.S_IRWXU)
+    return path
+
+
 def write_secure(path: str, content: str) -> None:
-    p = Path(path)
-    p.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    p = Path(path).expanduser()
+    ensure_private_dir(p.parent)
+    if p.exists() and p.is_symlink():
+        raise OSError(f"refusing to overwrite symlink: {p}")
     flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW

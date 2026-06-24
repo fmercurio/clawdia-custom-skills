@@ -20,7 +20,7 @@ Sheet requirements (auto-detected sheet 'EXTRATO BANCÁRIO' or first sheet):
     Columns (case-insensitive substrings): MÊS, DATA, DESCRIÇÃO, VALOR,
     [BANCO], [STATUS], TIPO, CLASSIFICAÇÃO, [OBSERVAÇÃO]
 
-Outputs in --output-dir (default /tmp/agilize-audit-<year>/):
+Outputs in --output-dir (default /tmp/agilize-audit-<year>/, created 0700):
     all-<year>.json              — Agilize transactions
     categories.json              — Agilize categories tree
     matched.json                 — successful matches with score
@@ -35,6 +35,7 @@ import calendar
 import json
 import os
 import re
+import stat
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -59,10 +60,25 @@ import requests  # noqa: E402
 
 # ─── Secure output helpers ────────────────────────────────────────────────────
 
+def ensure_private_dir(path: Path) -> Path:
+    """Create or validate a user-only output directory."""
+    path = path.expanduser()
+    if path.exists() and path.is_symlink():
+        raise OSError(f"output directory must not be a symlink: {path}")
+    path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(path, stat.S_IRWXU)
+    return path
+
+
 def write_secure(path: Path, data: str | bytes, *, mode: str = "text") -> None:
     """Write audit artefacts with user-only permissions (0600)."""
-    path.parent.mkdir(parents=True, exist_ok=True)
+    path = path.expanduser()
+    ensure_private_dir(path.parent)
+    if path.exists() and path.is_symlink():
+        raise OSError(f"refusing to overwrite symlink: {path}")
     flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
     fd = os.open(path, flags, 0o600)
     try:
         if mode == "bytes":
@@ -71,6 +87,7 @@ def write_secure(path: Path, data: str | bytes, *, mode: str = "text") -> None:
             os.write(fd, data.encode("utf-8") if isinstance(data, str) else data)
     finally:
         os.close(fd)
+    os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
 
 
 def dumps_json(data: Any, **kwargs: Any) -> str:
@@ -419,20 +436,18 @@ def main() -> int:
     ap.add_argument("--config", default=os.path.expanduser("~/.config/agilize.json"),
                     help="Agilize config file (default ~/.config/agilize.json)")
     ap.add_argument("--output-dir", default=None,
-                    help="Output directory (default /tmp/agilize-audit-<year>/)")
+                    help="Output directory (default /tmp/agilize-audit-<year>/, mode 0700)")
     ap.add_argument("--sheet", default=None, help="Sheet name (auto-detected if omitted)")
     args = ap.parse_args()
 
     # Resolve config
-    cfg_path = Path(args.config).expanduser()
-    if not cfg_path.exists():
-        print(f"ERROR: config not found: {cfg_path}", file=sys.stderr)
-        return 2
-    cfg = json.loads(cfg_path.read_text())
+    try:
+        cfg = A.load_config_file(args.config)
+    except SystemExit as exc:
+        return int(exc.code or 1)
 
     # Output dir
-    out_dir = Path(args.output_dir or f"/tmp/agilize-audit-{args.year}")
-    out_dir.mkdir(parents=True, exist_ok=True)
+    out_dir = ensure_private_dir(Path(args.output_dir or f"/tmp/agilize-audit-{args.year}"))
     print(f"Output: {out_dir}")
 
     # Fetch Agilize

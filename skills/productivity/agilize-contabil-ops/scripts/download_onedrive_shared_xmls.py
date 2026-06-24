@@ -11,13 +11,15 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import stat
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 
 def safe_name(name: str) -> str:
-    return re.sub(r"[^A-Za-z0-9._() \-]+", "_", name)
+    safe = re.sub(r"[^A-Za-z0-9._() \-]+", "_", name).strip(" .")
+    return safe or "download.xml"
 
 
 def is_valid_nfse_xml(data: bytes) -> bool:
@@ -35,13 +37,29 @@ def is_valid_nfse_xml(data: bytes) -> bool:
     return not cstats or "100" in cstats
 
 
+def ensure_private_dir(path: Path) -> Path:
+    path = path.expanduser()
+    if path.exists() and path.is_symlink():
+        raise OSError(f"output directory must not be a symlink: {path}")
+    path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(path, stat.S_IRWXU)
+    return path
+
+
 def write_secure_bytes(path: Path, data: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    path = path.expanduser()
+    ensure_private_dir(path.parent)
+    if path.exists() and path.is_symlink():
+        raise OSError(f"refusing to overwrite symlink: {path}")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    fd = os.open(path, flags, 0o600)
     try:
         os.write(fd, data)
     finally:
         os.close(fd)
+    os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
 
 
 def main() -> int:
@@ -53,8 +71,8 @@ def main() -> int:
     ap.add_argument("--timeout-ms", type=int, default=60000)
     args = ap.parse_args()
 
-    out = Path(args.out).expanduser().resolve()
-    out.mkdir(parents=True, exist_ok=True)
+    out = Path(args.out).expanduser()
+    out = ensure_private_dir(out)
     name_re = re.compile(args.name_regex)
     saved: list[tuple[str, int]] = []
 
