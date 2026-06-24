@@ -11,7 +11,7 @@ Agilize uses Keycloak as its identity provider. The authentication flow is:
 3. **OTP/TOTP** (if 2FA enabled) — POST the TOTP code to the OTP form.
 4. **Extract authorization code** — from the redirect URL fragment.
 5. **Token exchange** — trade the code for an `access_token`.
-6. **API calls** — use `Authorization: Bearer <token>`.
+6. **API calls** — send the bearer token in memory via the helper script; never paste or store live tokens in docs, tickets, shell history, or committed files.
 
 ### Key URLs
 
@@ -44,14 +44,14 @@ python scripts/agilize_login.py --verify \
   --company-id "<uuid>" \
   --company-cnpj "<cnpj-only-digits>"
 
-# Authenticated GET, save to file:
+# Authenticated GET, save to a private file:
 python scripts/agilize_login.py \
   --api-get "/api/v1/companies/<uuid>/finance-transactions?from=2025-01-01T00:00:00-0300&to=2025-01-31T23:59:59-0300&count=3000" \
   --output /tmp/agilize-jan-2025.json \
   --company-id "<uuid>" \
   --company-cnpj "<cnpj-only-digits>"
 
-# Using environment variables:
+# Using environment variables for a short-lived local shell:
 export AGILIZE_USERNAME="user@example.com"
 export AGILIZE_PASSWORD="..."
 export AGILIZE_TOTP_SECRET="..."  # base32 TOTP seed
@@ -63,8 +63,10 @@ python scripts/agilize_login.py --verify --company-id "$AGILIZE_COMPANY_ID"
 The script:
 - Never prints password, TOTP, cookies, bearer token, refresh token, or id_token.
 - Reads credentials only into process memory.
+- Refuses `--config` files that are readable or writable by group/other; run `chmod 600 ~/.config/agilize.json`.
 - Uses dynamic Keycloak form parsing (no hard-coded `session_code`/`execution`/`tab_id`).
-- Writes API responses to `0600` mode files when `--output` is specified.
+- Writes API responses to `0600` mode files and creates parent output directories as `0700` when `--output` is specified.
+- Refuses symlinked output files/directories for authenticated responses.
 
 ## Manual PKCE flow (for reference/implementation)
 
@@ -145,7 +147,8 @@ Response:
 ### Step 7: Use the access token
 
 ```
-Authorization: Bearer *** <cnpj-only-digits>
+Authorization: Bearer <redacted-access-token>
+key: <cnpj-only-digits>
 Referer: https://app.agilize.com.br/
 Accept: application/json
 ```
@@ -154,11 +157,11 @@ Accept: application/json
 
 ## Fallback: Keycloak session cookies
 
-If the login script fails because the Keycloak flow changed, the user can provide **Keycloak session cookies** (`KEYCLOAK_IDENTITY`, `KEYCLOAK_SESSION`) saved to a local file. The agent can then replay the PKCE auth-code flow using those cookies to obtain a fresh bearer.
+If the login script fails because the Keycloak flow changed, the user can provide **Keycloak session cookies** (`KEYCLOAK_IDENTITY`, `KEYCLOAK_SESSION`) saved to a local `0600` file. The agent can then replay the PKCE auth-code flow using those cookies to obtain a fresh bearer. Never paste cookie values in chat, issues, memory, docs, or logs.
 
 ```
 GET https://sso.agilize.com.br/auth/realms/AgilizeAPPs/protocol/openid-connect/auth?...
-Cookie: KEYCLOAK_IDENTITY=...; KEYCLOAK_SESSION=...
+Cookie: KEYCLOAK_IDENTITY=<redacted>; KEYCLOAK_SESSION=<redacted>
 ```
 
 This produces a redirect with a fresh `code`, which can be exchanged normally.
@@ -182,7 +185,7 @@ import base64, json, sys, os
 sys.path.insert(0, os.path.expanduser("~/.hermes/skills/productivity/agilize-contabil-ops/scripts"))
 import agilize_login as A
 
-cfg = json.load(open(os.path.expanduser("~/.config/agilize.json")))
+cfg = A.load_config_file(os.path.expanduser("~/.config/agilize.json"))
 token = A.login(cfg, A.DEFAULT_CLIENT_ID, A.DEFAULT_REDIRECT_URI, 30,
                 "Mozilla/5.0 Chrome/124.0 Safari/537.36")
 
@@ -196,6 +199,7 @@ print(f"company_id={company_id}")
 ```
 
 Other useful claims: `preferred_username`, `email`, `name` (company/person name), `locale`.
+Treat `company_id` and CNPJ as operational metadata: keep them in local config and redact them in shared reports unless the user explicitly needs the raw value.
 
 ### Fallback: DevTools Network tab
 
@@ -224,7 +228,7 @@ Browser cookie exporters default to the current tab's domain. If a user is on `a
 - Export from `sso.agilize.com.br` (visit it directly, then export), or
 - Skip cookie fallback and use PKCE credential login (`agilize_login.py`).
 
-If a cookie dump contains only `_ga_*` / `_hjSession*` / `_dd_s` / `_gid`, do not attempt to use them — ask for credentials or for a fresh export from the SSO domain.
+If a cookie dump contains only `_ga_*` / `_hjSession*` / `_dd_s` / `_gid`, do not attempt to use them — ask for credentials or for a fresh export from the SSO domain. Store any cookie fallback file as `0600`, delete it after use, and never commit it.
 
 ## Common error patterns
 

@@ -52,13 +52,23 @@ Do **not** use this skill when:
 3. **Never invent fiscal data.** Values, descriptions, tax codes, and taker IDs must come from user-provided config or validated source systems.
 4. **Never rely on DOM injection alone.** For portal widgets, use real UI interactions and then read back field values.
 5. **Validate before advancing.** Each step must verify that mandatory fields are populated and no visible validation errors remain.
-6. **Capture evidence.** Save screenshots or logs proving each draft reached the review step.
+6. **Keep local config private.** Store filled config files outside the reusable skill package, with a private parent directory (`0700`) and config file mode `0600`.
+7. **Capture evidence privately.** Screenshots and logs may contain taxpayer, customer, address, value, and portal data. Save them only in a private run directory (`0700`) and never commit or share raw evidence.
+8. **Redact shared reports.** Shared summaries must use counts, booleans, configured customer keys, draft states, and redacted labels only. Do not paste real CNPJ/CPF, names, emails, addresses, certificate paths, credentials, portal URLs, or raw screenshot paths.
 
 ## Generic Portal Flow
 
 ### Step 0 — Configuration
 
 Create a local config from `templates/config.example.yaml` and fill it with organization-specific data outside the skill package.
+
+Store the copied config under a private project/run directory, then apply restrictive permissions before use:
+
+```bash
+mkdir -m 700 -p ~/.config/nfse-emissor
+cp templates/config.example.yaml ~/.config/nfse-emissor/config.yaml
+chmod 600 ~/.config/nfse-emissor/config.yaml
+```
 
 Recommended fields:
 
@@ -146,9 +156,9 @@ Only use CNPJ lookup/manual fallback if the taker is not in history, and clearly
 
 1. Advance to the final review screen.
 2. Verify body text indicates the review/emission step.
-3. Save screenshot evidence.
+3. Save screenshot evidence to a private run directory (`0700`).
 4. Stop. Do not click **Emitir NFS-e**.
-5. Report the draft IDs/clients and screenshot paths to the user.
+5. Report only redacted draft states, counts, configured customer keys, and whether private evidence was captured. Do not paste real taxpayer data or raw screenshot paths into shared chats, issues, or reusable docs.
 
 ## Playwright Patterns
 
@@ -252,12 +262,15 @@ body: id=<visible-row-data-id>
 5. **Assuming the draft list URL is reliable.** The Dashboard may be a more stable verification surface than direct `/Notas/Rascunhos` navigation.
 6. **Forgetting the safety stop.** The automation must halt before final issuance and require human action.
 7. **Leaking taxpayer data into reusable skills.** Keep real taxpayer IDs, names, emails, certificate paths, and credentials in local config only.
-8. **Interrupted rebuild without reporting.** If a batch rebuild fails mid-way, the user must know exactly which drafts were deleted vs. recreated.
+8. **Sharing raw evidence.** Screenshots, logs, YAML configs, and portal paths can identify customers or taxpayers. Keep raw artifacts private and share only redacted summaries.
+9. **Interrupted rebuild without reporting.** If a batch rebuild fails mid-way, the user must know which configured customer keys were deleted vs. recreated, without exposing raw taxpayer identifiers in shared reports.
 
 ## Verification Checklist
 
 - [ ] Playwright and Chromium are installed on the host.
 - [ ] Credentials were loaded from a local secret source, not embedded in code.
+- [ ] Filled config is outside the skill package and protected with `chmod 600`.
+- [ ] Evidence directory is private (`0700`) and raw screenshots/logs were not committed or pasted into shared reports.
 - [ ] Competency (`YYYY-MM`) is set from config before creating drafts.
 - [ ] New draft opened through portal UI and not by brittle direct URL when blocked.
 - [ ] Competency date set before loading provider data.
@@ -269,3 +282,4 @@ body: id=<visible-row-data-id>
 - [ ] Screenshot evidence saved.
 - [ ] Automation stopped before final issuance.
 - [ ] Final dashboard/list shows the expected draft set.
+- [ ] Shared report uses only counts, booleans, configured customer keys, draft states, and redacted labels.

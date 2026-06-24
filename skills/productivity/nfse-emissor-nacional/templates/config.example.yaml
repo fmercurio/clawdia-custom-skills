@@ -1,5 +1,7 @@
 # Copy this file outside the skill package and fill with your own data.
 # Do not commit real taxpayer IDs, credentials, certificate paths, or customer data.
+# Store the copied config in a private directory (0700) and run chmod 600 on it.
+# Keep raw evidence/screenshots in a private run directory; share redacted summaries only.
 
 # Competency period for this batch run (YYYY-MM).
 # All drafts in this run will use this billing period.

@@ -40,11 +40,13 @@ Treat local prep CSV `classified_split_*` rows as **planning notes**, not author
 ## Required headers for mutations
 
 ```
-Authorization: Bearer <token>
+Authorization: Bearer <redacted-access-token>
 key: <company_cnpj>
 Referer: https://app.agilize.com.br/
 Content-Type: application/json
 ```
+
+Keep the bearer token in process memory only. Do not paste live mutation headers into chat, issues, docs, shell history, or committed request files.
 
 ## Evidence linking after split
 
