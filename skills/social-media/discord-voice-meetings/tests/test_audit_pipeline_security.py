@@ -20,3 +20,12 @@ def test_troubleshooting_does_not_recommend_curl_with_bearer_token():
     assert "curl -s https://api.z.ai" not in text
     assert "Authorization: Bearer" not in text
     assert "audit-meeting-pipeline.py" in text
+
+
+def test_audit_helper_summarizes_recent_logs_without_raw_content():
+    source = SCRIPT.read_text()
+
+    assert "summarize_log_line" in source
+    assert "SECRET_ASSIGNMENT_RE" in source
+    assert "line.strip()[:120]" not in source
+    assert "log line (chars=" in source
