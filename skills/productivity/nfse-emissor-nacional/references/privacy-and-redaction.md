@@ -16,3 +16,9 @@ Do not include:
 - internal server URLs or IP addresses
 
 Keep real data in a private local config or secret manager. When sharing improvements to this skill, replace examples with placeholders such as `<CUSTOMER_CNPJ_OR_CPF_DIGITS>`.
+
+Filled config files should live outside the reusable skill package in a private directory (`0700`) with file mode `0600`.
+
+Screenshots, browser traces, logs, filled YAML files, and portal paths are raw evidence. Keep them in a private run directory (`0700`), do not commit them, and do not paste raw paths or values into shared issues, chats, or docs.
+
+Shared reports should use only counts, booleans, configured customer keys, draft states, and redacted labels. Confirm that evidence was captured without exposing the evidence contents.

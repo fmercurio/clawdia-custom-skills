@@ -45,28 +45,67 @@ def parse_frontmatter(content: str) -> "dict | None":
     return fm
 
 
+def safe_vault_file(path: Path, root: Path, suffix=None) -> "Path | None":
+    """Return a resolved in-vault file path, skipping symlinks and escapes."""
+    if path.is_symlink():
+        return None
+
+    root = root.resolve()
+    try:
+        resolved = path.resolve()
+        rel = resolved.relative_to(root)
+    except (OSError, ValueError):
+        return None
+
+    if not resolved.is_file():
+        return None
+    if suffix and resolved.suffix.lower() != suffix:
+        return None
+    if any(part in EXCLUDE_DIRS for part in rel.parts):
+        return None
+    if resolved.name in EXCLUDE_FILES:
+        return None
+    return resolved
+
+
+def iter_safe_vault_files(base: Path, root: Path, pattern: str = "*") -> "list[Path]":
+    """Iterate files under a vault subdirectory without following vault escapes."""
+    root = root.resolve()
+    if not base.exists() or base.is_symlink():
+        return []
+    try:
+        base.resolve().relative_to(root)
+    except (OSError, ValueError):
+        return []
+
+    files = []
+    for path in base.rglob(pattern):
+        safe = safe_vault_file(path, root)
+        if safe:
+            files.append(safe)
+    return files
+
+
 def collect_md_files(root: Path) -> list[Path]:
     """Collect all .md files in vault, excluding specific dirs."""
+    root = root.resolve()
     files = []
     for path in root.rglob("*.md"):
-        rel = path.relative_to(root)
-        parts = rel.parts
-        if any(p in EXCLUDE_DIRS for p in parts):
-            continue
-        if path.name in EXCLUDE_FILES:
-            continue
-        files.append(path)
+        safe = safe_vault_file(path, root, ".md")
+        if safe:
+            files.append(safe)
     return files
 
 
 def check_inbox_stale(root: Path) -> list[str]:
     """Items in 00_Inbox/ older than N days."""
+    root = root.resolve()
     inbox = root / "00_Inbox"
     if not inbox.exists():
         return []
     threshold = datetime.now() - timedelta(days=DAYS_INBOX_STALE)
     issues = []
-    for f in inbox.glob("*.md"):
+    for f in iter_safe_vault_files(inbox, root, "*.md"):
         mtime = datetime.fromtimestamp(f.stat().st_mtime)
         if mtime < threshold:
             days = (datetime.now() - mtime).days
@@ -76,6 +115,7 @@ def check_inbox_stale(root: Path) -> list[str]:
 
 def check_frontmatter_para(files: list[Path], root: Path) -> list[str]:
     """Files without valid PARA frontmatter."""
+    root = root.resolve()
     issues = []
     for f in files:
         rel = f.relative_to(root)
@@ -94,12 +134,13 @@ def check_frontmatter_para(files: list[Path], root: Path) -> list[str]:
 
 def check_projects_stale(root: Path) -> list[str]:
     """Active projects without recent update."""
+    root = root.resolve()
     projects = root / "10_Projects"
     if not projects.exists():
         return []
     threshold = datetime.now() - timedelta(days=DAYS_PROJECT_STALE)
     issues = []
-    for f in projects.rglob("*.md"):
+    for f in iter_safe_vault_files(projects, root, "*.md"):
         content = f.read_text(encoding="utf-8", errors="replace")
         fm = parse_frontmatter(content)
         if fm and fm.get("status") == "active":
@@ -113,12 +154,13 @@ def check_projects_stale(root: Path) -> list[str]:
 
 def check_runtime_contamination(root: Path) -> list[str]:
     """Runtime files inside _Hermes/."""
+    root = root.resolve()
     hermes = root / "_Hermes"
     if not hermes.exists():
         return []
     issues = []
-    for f in hermes.rglob("*"):
-        if f.is_file() and f.name in RUNTIME_CONTAMINATION:
+    for f in iter_safe_vault_files(hermes, root):
+        if f.name in RUNTIME_CONTAMINATION:
             rel = f.relative_to(root)
             issues.append(f"- `{rel}` — runtime file detected in vault")
     return issues
@@ -126,6 +168,7 @@ def check_runtime_contamination(root: Path) -> list[str]:
 
 def check_sensitivity_routing(files: list[Path], root: Path) -> list[str]:
     """Notes with sensitivity: restricted outside restricted areas."""
+    root = root.resolve()
     issues = []
     for f in files:
         rel = f.relative_to(root)
@@ -140,6 +183,7 @@ def check_sensitivity_routing(files: list[Path], root: Path) -> list[str]:
 
 def count_stats(files: list[Path], root: Path) -> dict:
     """General vault statistics."""
+    root = root.resolve()
     stats = {
         "inbox": 0, "projects_active": 0, "projects_total": 0,
         "areas": 0, "resources": 0, "archives": 0,
@@ -177,7 +221,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--vault", default=None, help="Path to vault root (default: parent of script's parent dir)")
     args = ap.parse_args()
-    root = Path(args.vault) if args.vault else DEFAULT_VAULT_ROOT
+    root = (Path(args.vault).expanduser() if args.vault else DEFAULT_VAULT_ROOT).resolve()
     if not root.exists():
         print(f"ERROR: vault not found: {root}", file=sys.stderr)
         return 1
