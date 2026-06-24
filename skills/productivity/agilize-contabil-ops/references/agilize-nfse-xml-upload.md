@@ -8,12 +8,14 @@ The visible Agilize import UI (`nfseImportDirectiveCtrl`) does **not** stop at `
 
 ```http
 POST /api/v1/companies/{company_id}/nfses/preimportfromresource
-Authorization: Bearer <access_token>
+Authorization: Bearer <redacted-access-token>
 key: <company_cnpj_digits>
 Referer: https://app.agilize.com.br/
 Accept: application/json, text/plain, */*
 Content-Type: multipart/form-data
 ```
+
+Use the short-lived bearer returned by `scripts/agilize_login.py` in memory only. Do not paste live bearer values into examples, logs, issues, or committed request files.
 
 Multipart body uses indexed field names:
 
@@ -54,7 +56,7 @@ The React uploader response usually includes a batch/import object such as `lote
 ## Recommended workflow
 
 1. Authenticate via the standard Keycloak/PKCE flow. If the company UUID is not already configured, decode the JWT payload and read the `tenant[0]` claim.
-2. Collect only user-specified `.xml` and `.zip` files. Do not upload every XML under a broad home-directory search.
+2. Collect only user-specified `.xml` and `.zip` files. Do not upload every XML under a broad home-directory search, and do not follow symlinked invoice paths.
 3. Before uploading, create a small manifest: filename, byte size, and SHA-256. Report this manifest without printing XML contents.
 4. Validate XML inputs before upload: parse each `.xml`, confirm the root is NFS-e (`http://www.sped.fazenda.gov.br/nfse`), and confirm emitted status (`cStat=100`) when available. Remove failed download artifacts such as HTML error pages saved with `.xml` names.
 5. POST all files through the legacy 3-step resource flow: `preimportfromresource` → `nfseimportresources` → `importfromresource`; use indexed multipart fields `resources[0]`, `resources[1]`, ... exactly as the UI does.
@@ -76,13 +78,18 @@ Avoid relying on `onedrive.live.com/download?resid=...` for shared folders: it o
 ## Minimal Python shape
 
 ```python
+from pathlib import Path
+
 files = []
 opened = []
 try:
     for path in paths:
-        f = open(path, "rb")
+        p = Path(path).expanduser()
+        if p.is_symlink():
+            raise ValueError(f"refusing symlinked upload path: {p}")
+        f = p.open("rb")
         opened.append(f)
-        files.append(("resources[]", (os.path.basename(path), f, "application/xml")))
+        files.append(("resources[]", (p.name, f, "application/xml")))
     resp = requests.post(url, headers=headers, files=files, timeout=120)
 finally:
     for f in opened:
@@ -97,3 +104,4 @@ finally:
 - **Shared OneDrive direct-download links are brittle.** For public folders, open file previews and capture the `my.microsoftpersonalcontent.com/.../download.aspx?...tempauth=...` XML response, or automate that with Playwright. Direct `onedrive.live.com/download?resid=...` calls may save HTML/403 pages as `.xml`.
 - **File Provider / OneDrive visibility is environment-specific.** If OneDrive files are not visible to the agent filesystem due to macOS TCC/File Provider permissions or unsynced account state, ask for an accessible local path, copied ZIP, or share link. Do not conclude OneDrive is generally unavailable.
 - **Protect secrets and XML contents.** Upload XMLs as files, compute hashes, but do not dump sensitive invoice XML contents in chat/logs.
+- **Do not follow symlinked upload paths.** Resolve user-selected files deliberately and reject symlinks before opening them.
