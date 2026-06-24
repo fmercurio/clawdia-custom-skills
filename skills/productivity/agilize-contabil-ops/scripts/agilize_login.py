@@ -64,6 +64,7 @@ TOKEN_URL = "https://sso.agilize.com.br/auth/realms/AgilizeAPPs/protocol/openid-
 API_BASE = "https://app.agilize.com.br"
 DEFAULT_CLIENT_ID = "agilize-legacy-client"
 DEFAULT_REDIRECT_URI = "https://app.agilize.com.br/"
+API_PATH_PREFIX = "/api"
 
 
 class FormParser(HTMLParser):
@@ -373,13 +374,35 @@ def login(creds: dict, client_id: str, redirect_uri: str, timeout: int, user_age
 
 # ─── API request helper ──────────────────────────────────────────────
 
-def api_get(token: LoginResult, path: str, company_cnpj: str, timeout: int) -> requests.Response:
-    if path.startswith("http://") or path.startswith("https://"):
-        url = path
+def build_api_url(path: str) -> str:
+    """Build an authenticated Agilize API URL without allowing cross-origin targets."""
+    raw = (path or "").strip()
+    if not raw:
+        raise ValueError("--api-get path is empty")
+
+    base = urllib.parse.urlsplit(API_BASE)
+    parsed = urllib.parse.urlsplit(raw)
+
+    if parsed.scheme or parsed.netloc:
+        if parsed.scheme != base.scheme or parsed.netloc != base.netloc:
+            raise ValueError("--api-get must target https://app.agilize.com.br or use a relative /api path")
+        api_path = parsed.path or "/"
     else:
-        if not path.startswith("/"):
-            path = "/" + path
-        url = API_BASE + path
+        api_path = parsed.path
+        if not api_path.startswith("/"):
+            api_path = "/" + api_path
+
+    if api_path != API_PATH_PREFIX and not api_path.startswith(API_PATH_PREFIX + "/"):
+        raise ValueError("--api-get only allows Agilize API paths under /api/")
+
+    return urllib.parse.urlunsplit((base.scheme, base.netloc, api_path, parsed.query, ""))
+
+
+def api_get(token: LoginResult, path: str, company_cnpj: str, timeout: int) -> requests.Response:
+    try:
+        url = build_api_url(path)
+    except ValueError as exc:
+        die(str(exc))
     headers = {
         "Authorization": f"Bearer {token.access_token}",
         "Accept": "application/json",
@@ -387,7 +410,7 @@ def api_get(token: LoginResult, path: str, company_cnpj: str, timeout: int) -> r
     }
     if company_cnpj:
         headers["key"] = company_cnpj
-    return requests.get(url, headers=headers, timeout=timeout)
+    return requests.get(url, headers=headers, timeout=timeout, allow_redirects=False)
 
 
 def write_secure(path: str, content: str) -> None:
@@ -422,7 +445,7 @@ def main() -> int:
     ap.add_argument("--user-agent", default="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36")
     # Actions
     ap.add_argument("--verify", action="store_true", help="Run safe verification GET after login")
-    ap.add_argument("--api-get", help="Authenticated GET path or URL")
+    ap.add_argument("--api-get", help="Authenticated Agilize API path under /api/ or same-origin https://app.agilize.com.br/api/... URL")
     ap.add_argument("--output", help="Write --api-get response body to this file (mode 0600)")
     args = ap.parse_args()
 
