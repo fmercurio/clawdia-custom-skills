@@ -339,8 +339,8 @@ Participantes: [names]
 - `2026-06-06T20:47:21Z` **felippe:** Full transcript line 2
 ```
 
-Saved to: `<output_dir>/<guild_id>/<timestamp>-<title>.md`
-Posted to Discord as a `.md` file attachment with a preview.
+Saved to: `<output_dir>/<guild_id>/<timestamp>-<title>.md` with private local permissions.
+Returned to the authorized command invoker as an ephemeral `.md` file attachment with a preview.
 
 ## Configuration
 

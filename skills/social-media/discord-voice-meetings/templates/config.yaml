@@ -26,8 +26,8 @@ discord:
     members: false
     reactions: false
 
-  # Optional allow-list of Discord user IDs permitted to control recordings.
-  # Leave empty to allow any user who can invoke the bot command.
+  # Required allow-list of Discord user IDs permitted to control recordings.
+  # Leave empty to deny all meeting control commands until explicitly configured.
   # User IDs must be strings to avoid integer precision issues in some parsers.
   allowed_users:
     - "123456789012345678"  # Example: meeting host / team lead
@@ -145,7 +145,8 @@ voice_capture:
 # -----------------------------------------------------------------------------
 meeting:
   # Directory where transcripts, summaries, metadata, and temporary audio files
-  # are written. Relative paths are resolved from the process working directory.
+  # are written. The bot creates guild subdirectories as 0700 and transcript
+  # markdown files as 0600. Relative paths are resolved from the process working directory.
   output_dir: ./meetings
 
   # Language used for generated summaries and meeting notes (ISO 639-1).

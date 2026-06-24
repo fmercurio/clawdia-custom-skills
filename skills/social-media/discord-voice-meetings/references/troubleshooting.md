@@ -150,8 +150,8 @@ Options:
    - `Auto-mapped ssrc=X -> user=Y` — fallback mapping (no SPEAKING event)
    - `Voice input processing START for guild=X user=Y, pcm=N bytes` — check_silence emitted an utterance
    - `Voice input STT result for user X: success=True/False` — Whisper ran
-   - `Voice input from user Y: text` — confirms transcription succeeded
-   - `Voice callback received: guild=X user=Y transcript=...` — gateway callback fired
+   - `Voice input from user Y transcribed (chars=N)` — confirms transcription succeeded without logging content
+   - `Voice callback received: guild=X user=Y chars=N` — gateway callback fired without logging transcript text
    - `Meeting stop flush: buffers=..., ssrc_map=...` — buffer state at stop
    - `Flushed N pending utterance(s) on stop` — flush captured audio
 
