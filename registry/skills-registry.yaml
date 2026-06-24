@@ -495,3 +495,59 @@ skills:
           removed password CLI args, removed unnecessary urllib try/except,
           added Playwright login verification, generalized nginx template.
           5 files, ~25KB total. Status: candidate — pending Felippe approval.
+
+  - name: topic-channel-soul-routing
+    status: candidate
+    version: 1.0.0
+    category: productivity
+    description: >
+      Generic runbook for configuring Telegram topics, Discord channels/threads,
+      or equivalent messaging surfaces as specialist agent souls/profiles while
+      preserving conversation-first behavior and explicit-only Kanban/task intake.
+    source:
+      type: internal
+      origin: "Generalized from Topic Soul Routing + Explicit Kanban Wizard in Skills Lab"
+      author: "Felippe M. + Hermes Agent"
+      created: "2026-06-24"
+      approved: null
+      approved_by: null
+      repository_url: null
+      no_repository_reason: "Skill interna, generalizada de wizard/runbook operacional"
+    installation:
+      runtime_path: null
+      repo_path: "skills/productivity/topic-channel-soul-routing/"
+      installed_date: null
+      installed_by: null
+      note: "Template genérico — publicar/revisar via Skills Lab antes de instalar em runtime"
+    audit:
+      security_review: "2026-06-24"
+      security_status: "passed"
+      findings:
+        - "No scripts or executable automation included"
+        - "No hardcoded secrets, tenant identifiers, chat IDs, or local paths"
+        - "Conversation-first and explicit task intake behavior documented"
+        - "README gives non-technical step-by-step prompt for asking an agent to configure a specialist topic/profile"
+      frontmatter_valid: true
+      company_agnostic: true
+      pitfalls_documented: true
+    files:
+      - path: "SKILL.md"
+        status: "new"
+        note: "Generic operational skill with data model, wizard, behavior contract, pitfalls, and validation checklist"
+      - path: "README.md"
+        status: "new"
+        note: "User-facing step-by-step guide for asking an agent to create a specialist topic/profile"
+      - path: "templates/topic-souls.example.yaml"
+        status: "new"
+      - path: "templates/soul.example.md"
+        status: "new"
+      - path: "references/implementation-notes.md"
+        status: "new"
+    changelog:
+      - date: "2026-06-24"
+        action: "created generic template"
+        details: >
+          Promoted the Topic Soul Routing + Explicit Kanban Wizard into a reusable
+          skill package. Added a README focused on non-technical operators asking
+          their own agent to configure specialist topic/channel profiles. Status:
+          candidate — awaiting Skills Lab review/approval.
