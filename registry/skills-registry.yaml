@@ -526,6 +526,9 @@ skills:
       findings:
         - "No scripts or executable automation included"
         - "No hardcoded secrets, tenant identifiers, chat IDs, or local paths"
+        - "Tenant/account scope required for multi-tenant route matching"
+        - "Task source references are minimal by default; raw private metadata and permalinks are opt-in only"
+        - "SOUL/profile prompts cannot grant tools, secrets, route scope, activation, or automatic task intake"
         - "Conversation-first and explicit task intake behavior documented"
         - "README gives non-technical step-by-step prompt for asking an agent to configure a specialist topic/profile"
       frontmatter_valid: true

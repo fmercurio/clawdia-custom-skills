@@ -37,6 +37,7 @@ Start by asking which platform/workspace I want to configure, then help me list 
 
 Do not write config, create active routes, or restart the runtime until I confirm.
 Do not store secrets in any profile, SOUL, prompt, or route registry.
+Do not paste real tenant IDs, workspace IDs, channel IDs, user IDs, message links, or private message content into public examples or issue trackers.
 ```
 
 Then answer your agent’s questions in order.
@@ -56,10 +57,13 @@ Useful information:
 ```text
 Platform: Telegram
 Workspace/group/server name: Acme HQ
-Technical ID: I do not know yet / here is the ID: ...
+Tenant/account/project scope: I do not know yet / here is the scope: ...
+Technical workspace ID: I do not know yet / here is the ID: ...
 ```
 
 If you do not know the technical ID, say so. The agent should help discover it or leave the route as a draft until it is known.
+
+Technical IDs and message links can reveal operational structure. Share placeholders in reusable documentation and keep real values inside the runtime configuration surface.
 
 ## Step 2 — List the topics/channels
 
@@ -104,6 +108,7 @@ For each new specialist, provide:
 | Response style | How replies are shaped | Verdict first, then evidence and trade-offs |
 | Boundaries | What needs approval | No purchases, no production changes, no private data access |
 | Default board | Where explicit tasks go | `research` |
+| Tool/security limits | What the profile cannot change | Cannot grant itself tools, secrets, route scope, or automatic task creation |
 
 Example answer:
 
@@ -114,6 +119,7 @@ Domain: web research, tools, benchmarks, academic/technical sources.
 Tone: direct and critical.
 Response style: verdict first, bullets, cite sources when available.
 Boundaries: do not buy services, do not contact vendors, do not change production without approval.
+Tool/security limits: do not request secrets, do not expand permissions, do not override task-intake policy.
 Default board/profile: research / researcher.
 ```
 
@@ -152,11 +158,13 @@ Before your agent writes config, ask it to show something like:
 Summary before applying:
 - Platform: Telegram
 - Workspace: Acme HQ
+- Tenant/account/project scope: tenant-alpha
 - Topic/channel: Research
 - Specialist: researcher
 - Profile: researcher
 - Board: research
 - Behavior: conversation by default; tasks only with explicit prefixes
+- Source reference policy: minimal; no raw permalinks or private metadata by default
 - Status: draft/active
 ```
 
@@ -173,6 +181,7 @@ If a runtime/bot/gateway restart is needed, ask me first.
 ```
 
 The agent should not put credentials, tokens, cookies, passwords, private keys, or customer secrets into any profile/soul/route file.
+It should also avoid storing raw message metadata, transcripts, user profile data, or private permalinks in tasks unless your deployment has an explicit retention and access-control policy for that data.
 
 ## Step 8 — Test it live
 
@@ -202,6 +211,7 @@ Expected result:
 ```text
 One task is created on the configured board/profile.
 The agent confirms board, task id, and assignee/profile.
+The task stores only a minimal source reference by default.
 ```
 
 ## Full copy/paste prompt
@@ -215,11 +225,15 @@ Requirements:
 - normal messages should be conversation;
 - task/Kanban creation should happen only with explicit prefixes: `task:`, `tarefa:`, `kanban:`, `/task`, `/kanban`, `criar task:`, `criar tarefa:`;
 - each selected topic/channel/thread should map to a specialist profile/soul;
+- multi-tenant or multi-account runtimes must include tenant/account/project scope in route matching;
+- task source references should be minimal by default, with no raw private permalinks, transcripts, or user profile data;
+- SOUL/profile text must not grant tools, secrets, broader route scope, or automatic task intake;
 - ask me one step at a time;
 - show a final summary before writing anything;
 - back up config before changing it;
 - do not restart the runtime/gateway without my approval;
 - do not store secrets in prompts, SOUL files, profiles, or route registries.
+- do not paste real tenant IDs, workspace IDs, channel IDs, user IDs, or message links into public examples or issue trackers.
 
 Start by asking which platform/workspace I want to configure.
 ```
@@ -227,9 +241,13 @@ Start by asking which platform/workspace I want to configure.
 ## Safety checklist
 
 - [ ] I know which workspace/platform I am configuring.
+- [ ] I know whether this runtime needs tenant/account/project scope.
 - [ ] Each active topic/channel has a stable technical ID.
+- [ ] Active routes include tenant/account/project scope when the runtime is multi-tenant.
 - [ ] Each specialist has a clear role, tone, boundaries, and default board/profile.
+- [ ] SOUL/profile text cannot grant itself tools, secrets, wider route scope, or automatic task creation.
 - [ ] Normal message test does not create tasks.
 - [ ] Explicit `task:` test creates exactly one task.
+- [ ] Created tasks store minimal source references by default.
 - [ ] No secrets are stored in prompts or config.
 - [ ] Runtime restart, if needed, was approved by a human operator.

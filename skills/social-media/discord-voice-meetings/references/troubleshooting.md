@@ -244,12 +244,11 @@ Log shows HTTP 401 "token expired or incorrect" from Z.AI.
 
 **Diagnosis**:
 1. Check `.env` for `GLM_API_KEY` — note there may be duplicate/commented entries
-2. Test the key directly:
+2. Test the key through the audit helper. It sends the bearer header inside
+   Python rather than putting the token in `curl` command arguments:
    ```bash
-   source ~/.hermes/.env
-   curl -s https://api.z.ai/api/coding/paas/v4/chat/completions \
-     -H "Authorization: Bearer ***     -H "Content-Type: application/json" \
-     -d '{"model":"glm-4-flash","messages":[{"role":"user","content":"ok"}],"max_tokens":5}'
+   cd <installed-discord-voice-meetings-skill-dir>
+   python3 scripts/audit-meeting-pipeline.py
    ```
 3. If HTTP 401: the key in `.env` is stale. Update it to match the key
    the Hermes provider system uses.

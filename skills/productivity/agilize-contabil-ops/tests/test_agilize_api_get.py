@@ -1,4 +1,6 @@
 import importlib.util
+import os
+import stat
 import sys
 import types
 from pathlib import Path
@@ -87,3 +89,39 @@ def test_api_get_rejects_same_origin_non_api_path_before_request(monkeypatch):
         module.api_get(token, "https://app.agilize.com.br/#/dashboard", "", 5)
 
     assert captured == {}
+
+
+def test_config_file_with_credentials_must_not_be_group_or_world_readable(monkeypatch, tmp_path):
+    module, _ = load_script(monkeypatch)
+    config = tmp_path / "agilize.json"
+    config.write_text('{"username":"user","password":"secret"}', encoding="utf-8")
+    config.chmod(0o644)
+
+    with pytest.raises(SystemExit):
+        module.load_config_file(str(config))
+
+    config.chmod(0o600)
+    assert module.load_config_file(str(config))["username"] == "user"
+
+
+def test_write_secure_uses_private_mode_and_does_not_follow_symlink(monkeypatch, tmp_path):
+    module, _ = load_script(monkeypatch)
+    output = tmp_path / "out" / "response.json"
+
+    module.write_secure(str(output), '{"ok":true}')
+
+    assert output.read_text(encoding="utf-8") == '{"ok":true}'
+    assert stat.S_IMODE(output.stat().st_mode) == 0o600
+
+    if not hasattr(os, "O_NOFOLLOW"):
+        return
+
+    target = tmp_path / "target.json"
+    target.write_text("do not overwrite", encoding="utf-8")
+    symlink = tmp_path / "out" / "linked.json"
+    symlink.symlink_to(target)
+
+    with pytest.raises(OSError):
+        module.write_secure(str(symlink), '{"ok":false}')
+
+    assert target.read_text(encoding="utf-8") == "do not overwrite"

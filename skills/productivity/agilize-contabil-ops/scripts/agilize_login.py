@@ -42,6 +42,7 @@ import json
 import os
 import re
 import secrets
+import stat
 import struct
 import subprocess
 import sys
@@ -97,6 +98,9 @@ def load_config_file(path: str) -> dict:
     p = Path(path).expanduser()
     if not p.exists():
         die(f"config file not found: {p}")
+    mode = stat.S_IMODE(p.stat().st_mode)
+    if mode & (stat.S_IRWXG | stat.S_IRWXO):
+        die(f"config file permissions are too broad: {p}; run chmod 600")
     try:
         return json.loads(p.read_text())
     except Exception as exc:
@@ -414,10 +418,11 @@ def api_get(token: LoginResult, path: str, company_cnpj: str, timeout: int) -> r
 
 
 def write_secure(path: str, content: str) -> None:
-    import stat
     p = Path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
+    p.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
     fd = os.open(str(p), flags, 0o600)
     with os.fdopen(fd, "w") as f:
         f.write(content)
