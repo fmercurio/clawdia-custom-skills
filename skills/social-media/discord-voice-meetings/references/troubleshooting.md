@@ -430,8 +430,24 @@ The drop-in survives main unit regeneration. Verify with:
 ```bash
 systemctl --user show hermes-gateway -p ExecStart -p Environment
 # ExecStart: python -m hermes_cli.main gateway run --replace (no wrapper)
-cat /proc/$(pgrep -f 'hermes_cli.main gateway')/environ | tr '\0' '\n' | grep LD_LIBRARY
-# Should show: LD_LIBRARY_PATH=/home/nuclia/.local/lib
+python3 - <<'PY'
+from pathlib import Path
+
+for pid in Path('/proc').iterdir():
+    if not pid.name.isdigit():
+        continue
+    try:
+        cmdline = (pid / 'cmdline').read_bytes().replace(b'\0', b' ').decode(errors='ignore')
+        if 'hermes_cli.main gateway' not in cmdline:
+            continue
+        for entry in (pid / 'environ').read_bytes().split(b'\0'):
+            if entry.startswith(b'LD_LIBRARY_PATH='):
+                print(entry.decode(errors='replace'))
+                raise SystemExit(0)
+    except OSError:
+        continue
+PY
+# Should print only: LD_LIBRARY_PATH=/home/nuclia/.local/lib
 ```
 
 ### After any Hermes update or config change, run:

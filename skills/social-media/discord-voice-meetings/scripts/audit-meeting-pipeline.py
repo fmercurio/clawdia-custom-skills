@@ -11,6 +11,7 @@ Usage:
 import os
 import json
 import re
+import stat
 import subprocess
 import sys
 import urllib.error
@@ -59,6 +60,44 @@ def summarize_log_line(line):
     tags = [tag for tag in ("voice", "meeting", "opus", "flush", "ssrc") if tag in lower]
     timestamp = redacted.split(maxsplit=1)[0] if redacted else "log"
     return f"{timestamp} {'/'.join(tags) or 'voice/meeting'} log line (chars={len(line)})"
+
+
+def process_has_env_value(pid, key, expected_value):
+    """Check one process env var without shelling out or printing the environment."""
+    env_path = Path("/proc") / str(pid) / "environ"
+    try:
+        data = env_path.read_bytes()
+    except OSError:
+        return None
+
+    target = key.encode("utf-8")
+    expected = expected_value.encode("utf-8")
+    for entry in data.split(b"\0"):
+        name, sep, value = entry.partition(b"=")
+        if sep and name == target:
+            return value == expected
+    return False
+
+
+def load_private_env_value(env_path, key):
+    """Read one env-file value only when the file is private to the user."""
+    if not env_path.exists():
+        return None, "missing"
+    try:
+        mode = stat.S_IMODE(env_path.stat().st_mode)
+    except OSError:
+        return None, "unreadable"
+    if mode & (stat.S_IRWXG | stat.S_IRWXO):
+        return None, "broad_permissions"
+
+    try:
+        lines = env_path.read_text().splitlines()
+    except OSError:
+        return None, "unreadable"
+    for line in lines:
+        if line.startswith(f"{key}=") and not line.startswith("#"):
+            return line.split("=", 1)[1].strip().strip('"').strip("'"), "ok"
+    return None, "missing"
 
 
 def probe_zai_endpoint(endpoint_url, glm_key, timeout=10):
@@ -195,12 +234,11 @@ pid_result = subprocess.run(
 )
 if pid_result.stdout.strip():
     pid = pid_result.stdout.strip().split()[0]
-    environ_result = subprocess.run(
-        ["cat", f"/proc/{pid}/environ"],
-        capture_output=True, text=True
-    )
-    if "LD_LIBRARY_PATH=/home/nuclia/.local/lib" in environ_result.stdout.replace("\0", "\n"):
+    has_ld_library = process_has_env_value(pid, "LD_LIBRARY_PATH", "/home/nuclia/.local/lib")
+    if has_ld_library is True:
         ok("Running process has LD_LIBRARY_PATH set")
+    elif has_ld_library is None:
+        warn("Could not inspect running process env for LD_LIBRARY_PATH")
     else:
         warn("LD_LIBRARY_PATH not in running process env (libopus may fail to load)")
 
@@ -228,12 +266,7 @@ else:
 
 # --- 5. Z.AI API key validity ---
 header("5. Z.AI API KEY VALIDITY")
-glm_key = None
-if ENV_FILE.exists():
-    for line in ENV_FILE.read_text().splitlines():
-        if line.startswith("GLM_API_KEY=") and not line.startswith("#"):
-            glm_key = line.split("=", 1)[1].strip().strip('"').strip("'")
-            break
+glm_key, glm_key_status = load_private_env_value(ENV_FILE, "GLM_API_KEY")
 
 if glm_key:
     ok(f"GLM_API_KEY found in .env ({len(glm_key)} chars)")
@@ -243,11 +276,13 @@ if glm_key:
     ]:
         resp = probe_zai_endpoint(endpoint_url, glm_key).strip()
         if '"error"' in resp:
-            fail(f"Z.AI {endpoint_name} endpoint: {resp[:100]}")
+            fail(f"Z.AI {endpoint_name} endpoint returned error response (chars={len(resp)})")
         elif '"choices"' in resp:
             ok(f"Z.AI {endpoint_name} endpoint: working")
         else:
-            warn(f"Z.AI {endpoint_name} endpoint: unexpected response: {resp[:80]}")
+            warn(f"Z.AI {endpoint_name} endpoint returned unexpected response (chars={len(resp)})")
+elif glm_key_status == "broad_permissions":
+    fail("GLM_API_KEY file permissions are too broad; run chmod 600 on .env before probing")
 else:
     fail("GLM_API_KEY not found in .env (meeting summary LLM will fail)")
 
