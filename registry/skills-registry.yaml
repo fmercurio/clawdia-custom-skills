@@ -448,13 +448,14 @@ skills:
       installed_by: null
       note: "Action-focused deploy skill. Companion to caprover-operations (server ops)."
     audit:
-      security_review: "2026-06-16"
+      security_review: "2026-06-24"
       security_status: "passed"
       findings:
         - "Zero hardcoded secrets, paths, or tenant-specific data"
         - "Passwords never accepted as CLI args (env var, KeePass, or interactive only)"
         - "KeePass optional — requires KEEPASS_DB and KEEPASS_KEY env vars, no hardcoded paths"
         - "GitHub token via gh CLI or env var only"
+        - "CapRover URL requires HTTPS by default; --allow-insecure is explicit local/dev only"
         - "subprocess.run uses list args, never shell=True"
         - "Playwright login failure detected via URL check"
       frontmatter_valid: true
@@ -462,7 +463,7 @@ skills:
       pitfalls_documented: true
       fixes_applied:
         - "Fixed argparse bug: --enable-https/--enable-websocket store_true with default=True (always True). Replaced with --no-https/--no-websocket store_false."
-        - "Removed hardcoded KeePress paths (/Users/Shared/hermes-keepass/...). Now env-only."
+        - "Removed hardcoded KeePassXC default paths. Now env-only."
         - "Removed --caprover-password and --github-token CLI args (visible in ps aux)."
         - "Removed unnecessary try/except for stdlib urllib import."
         - "Added Playwright login verification (URL check after submit)."

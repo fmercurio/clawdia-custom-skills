@@ -37,7 +37,7 @@ trigger build → poll until done → enable HTTPS + WebSocket → verify
 ## Prerequisites
 
 - **CapRover URL** (e.g. `https://captain.example.com`)
-- **CapRover password** — via env var, KeePass, or argument
+- **CapRover password** — via env var, KeePass, or interactive prompt; never CLI args
 - **GitHub token** — via `gh auth token` or env var `GITHUB_TOKEN`
 - **Python 3.9+** with `requests` (or `urllib` fallback)
 - **Playwright** (optional, for method 3) — `pip install playwright && playwright install chromium`
@@ -69,16 +69,22 @@ python3 scripts/caprover_deploy.py \
 
 The script tries these in order:
 
-1. `--caprover-password` argument
-2. `CAPROVER_PASSWORD` env var
-3. `--keepass-entry "/Caprover - MyOrg"` (reads from KeePassXC)
-4. Interactive prompt
+1. `CAPROVER_PASSWORD` env var
+2. `--keepass-entry "/Caprover - MyOrg"` (requires `KEEPASS_DB` and `KEEPASS_KEY`)
+3. Interactive prompt
 
 GitHub token:
 
 1. `GITHUB_TOKEN` env var
 2. `gh auth token` (if GitHub CLI is installed)
-3. `--github-user` + `--github-token` arguments
+
+Do not pass passwords or tokens through CLI arguments; process arguments are visible to local process inspection on many systems.
+
+## URL Safety
+
+- Use `https://` CapRover dashboard URLs by default.
+- Pass `--expected-host captain.example.com` when an automation must assert the intended dashboard hostname before resolving credentials.
+- `--allow-insecure` is only for local/dev targets and makes Playwright tolerate certificate errors for that run.
 
 ## Method Selection
 

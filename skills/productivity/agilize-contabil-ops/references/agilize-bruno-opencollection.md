@@ -1,6 +1,6 @@
 # Agilize Bruno OpenCollection
 
-Use this reference when Agilize API curls from browser DevTools do not replay from the agent (bearer expired, cookies stale) and you need to create Bruno request files for the user to run locally.
+Use this reference when the user needs a Bruno request for an Agilize API call that should run locally with their own short-lived credentials.
 
 ## Pattern
 
@@ -54,8 +54,8 @@ docs: |-
 
 ## Workflow
 
-1. Ask the user for the DevTools curl or describe the needed request.
-2. If the agent gets 401 replaying the curl, create a Bruno request file.
+1. Ask the user for a sanitized request description: method, path, query parameters, and body only.
+2. If the user has copied a browser request, require them to strip `Authorization`, `Cookie`, `key`, and any other live credential headers before sharing details.
 3. Use placeholders (`{{access_token}}`, `{{company_cnpj}}`, etc.) for all secrets.
 4. Write the collection under a shared or user-accessible path.
 5. Deliver the `.yml` files and tell the user to open them in Bruno.
@@ -63,6 +63,7 @@ docs: |-
 ## Security rules
 
 - **Never** save live bearer tokens, cookies, or passwords in Bruno files committed to the skill.
+- **Never** ask the user to paste a full browser cURL into chat, memory, skills, or audit logs.
 - If a one-time request needs live credentials, write to a temporary file with `0600` permissions and tell the user to delete after use.
 - Prefer Bruno environment variables for secrets (`{{access_token}}`, `{{company_cnpj}}`).
 
