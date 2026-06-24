@@ -256,7 +256,7 @@ skills:
       security_review: "2026-06-15"
       security_status: "passed"
       findings:
-        - "Network calls only to localhost (LM Studio/Ollama embedding endpoint)"
+        - "Embedding calls are localhost-only by default; remote providers require explicit opt-in"
         - "No hardcoded secrets — model endpoint is parameterized"
         - "Index is local SQLite cache, gitignored, rebuildable"
       frontmatter_valid: true
@@ -456,6 +456,7 @@ skills:
         - "KeePass optional — requires KEEPASS_DB and KEEPASS_KEY env vars, no hardcoded paths"
         - "GitHub token via gh CLI or env var only"
         - "CapRover URL requires HTTPS by default; --allow-insecure is explicit local/dev only"
+        - "Non-local CapRover URLs require --expected-host before credentials are resolved"
         - "subprocess.run uses list args, never shell=True"
         - "Playwright login failure detected via URL check"
       frontmatter_valid: true

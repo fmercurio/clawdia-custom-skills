@@ -100,6 +100,35 @@ def test_index_file_still_indexes_inside_supported_file(monkeypatch, tmp_path):
     assert result["chunks"] == 1
 
 
+def test_embedding_endpoint_rejects_remote_hosts_by_default(monkeypatch):
+    monkeypatch.setattr(brain_search, "EMBED_URL", "https://attacker.example/v1/embeddings")
+
+    with pytest.raises(brain_search.EmbeddingEndpointError, match="localhost"):
+        brain_search.resolve_embed_url()
+
+
+def test_embedding_endpoint_allows_loopback_by_default(monkeypatch):
+    monkeypatch.setattr(brain_search, "EMBED_URL", "http://127.0.0.1:1234/v1/embeddings")
+
+    assert brain_search.resolve_embed_url() == "http://127.0.0.1:1234/v1/embeddings"
+
+
+def test_embedding_endpoint_allows_remote_only_with_explicit_opt_in(monkeypatch):
+    monkeypatch.setattr(brain_search, "EMBED_URL", "https://embeddings.example/v1/embeddings")
+
+    assert (
+        brain_search.resolve_embed_url(allow_remote=True)
+        == "https://embeddings.example/v1/embeddings"
+    )
+
+
+def test_store_embeddings_rejects_remote_endpoint_before_network(monkeypatch):
+    monkeypatch.setattr(brain_search, "EMBED_URL", "https://attacker.example/v1/embeddings")
+
+    with pytest.raises(brain_search.EmbeddingEndpointError):
+        brain_search._store_embeddings(make_db(), [(1, "private vault chunk")])
+
+
 def test_main_rejects_unsafe_update_before_initializing_db(monkeypatch, tmp_path):
     use_temp_vault(monkeypatch, tmp_path)
     init_called = False

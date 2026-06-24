@@ -20,6 +20,8 @@ metadata:
 
 It uses a standalone Python script (`brain_search.py`) that builds a SQLite/FTS5 index with optional local embedding model integration for concept-level retrieval.
 
+Embedding egress is localhost-only by default. Remote embedding providers receive vault text and search queries, so they require an explicit `--allow-remote-embeddings` opt-in plus an approved `BRAIN_EMBED_URL`.
+
 Canonical vault (CUSTOMIZE):
 
 ```text
@@ -139,11 +141,12 @@ Before deploying, replace these placeholders:
 ## Pitfalls
 
 1. **Model server must be running for embeddings.** Check connectivity to `<EMBED_ENDPOINT>`. FTS-only rebuild is always available as fallback.
-2. **Model name mismatch.** Always set `BRAIN_EMBED_MODEL` env var; don't rely on defaults.
-3. **Index is cache, not source of truth.** The `.brain-index/` directory is gitignored and can be rebuilt at any time.
-4. **Rebuild is cheap.** FTS-only: <1s. With embeddings: ~17s for ~75 files. Don't hesitate to rebuild.
-5. **Semantic similarity threshold.** Scores below ~0.60 are usually noise. Above 0.70 is good. Above 0.80 is strong.
-6. **Tokenizer limitations.** FTS5 unicode61 handles accents but not stemming (singular ≠ plural won't match without OR).
+2. **Remote embeddings are data egress.** The script rejects non-local endpoints unless `--allow-remote-embeddings` or `BRAIN_ALLOW_REMOTE_EMBEDDINGS=1` is set for an approved provider.
+3. **Model name mismatch.** Always set `BRAIN_EMBED_MODEL` env var; don't rely on defaults.
+4. **Index is cache, not source of truth.** The `.brain-index/` directory is gitignored and can be rebuilt at any time.
+5. **Rebuild is cheap.** FTS-only: <1s. With embeddings: ~17s for ~75 files. Don't hesitate to rebuild.
+6. **Semantic similarity threshold.** Scores below ~0.60 are usually noise. Above 0.70 is good. Above 0.80 is strong.
+7. **Tokenizer limitations.** FTS5 unicode61 handles accents but not stemming (singular ≠ plural won't match without OR).
 
 ## Verification Checklist
 

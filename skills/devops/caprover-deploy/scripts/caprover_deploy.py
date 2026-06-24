@@ -24,6 +24,8 @@ try:
 except ImportError:
     sys.exit("This script requires Python 3 standard library.")
 
+LOCAL_CAPROVER_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
 # ──────────────────────────────────────────────
 #  Utilities
 # ──────────────────────────────────────────────
@@ -210,8 +212,15 @@ def validate_caprover_url(raw_url, allow_insecure=False, expected_host=None):
         raise CapRoverDeployError("caprover_config_invalid", "CapRover URL must not contain credentials")
     if parsed.scheme != "https" and not allow_insecure:
         raise CapRoverDeployError("caprover_config_invalid", "CapRover URL must use HTTPS; pass --allow-insecure only for local/dev")
-    if expected_host and (parsed.hostname or "").lower() != expected_host.lower():
-        raise CapRoverDeployError("caprover_config_invalid", "CapRover URL host does not match --expected-host")
+    hostname = (parsed.hostname or "").lower()
+    if expected_host:
+        if hostname != expected_host.lower():
+            raise CapRoverDeployError("caprover_config_invalid", "CapRover URL host does not match --expected-host")
+    elif hostname not in LOCAL_CAPROVER_HOSTS:
+        raise CapRoverDeployError(
+            "caprover_config_invalid",
+            "CapRover URL requires --expected-host for non-local targets before credentials are resolved",
+        )
     if parsed.query or parsed.fragment:
         raise CapRoverDeployError("caprover_config_invalid", "CapRover URL must not include query or fragment")
 
@@ -502,7 +511,7 @@ def build_arg_parser():
     parser.add_argument("--method", choices=["cli", "api", "playwright", "auto"], default="auto")
     parser.add_argument("--keepass-entry", help="KeePass entry path for password")
     parser.add_argument("--github-user", help="GitHub username")
-    parser.add_argument("--expected-host", help="Optional hostname assertion for the CapRover dashboard")
+    parser.add_argument("--expected-host", help="Required hostname assertion for non-local CapRover targets")
     parser.add_argument("--allow-insecure", action="store_true", help="Allow non-HTTPS/self-signed local/dev CapRover targets")
     parser.add_argument("--ssh-host", help="SSH host for verification (optional)")
     parser.add_argument("--ssh-key", help="SSH key path for verification")

@@ -37,6 +37,7 @@ import re
 import sqlite3
 import sys
 import time
+import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -52,6 +53,8 @@ DB_PATH = DB_DIR / "brain_search.sqlite"
 # Embedding config
 EMBED_URL = os.environ.get("BRAIN_EMBED_URL", "http://127.0.0.1:1234/v1/embeddings")
 EMBED_MODEL = os.environ.get("BRAIN_EMBED_MODEL", "nomic-embed-text")
+LOOPBACK_EMBED_HOSTS = {"localhost", "127.0.0.1", "::1"}
+REMOTE_EMBED_OPT_IN_ENV = "BRAIN_ALLOW_REMOTE_EMBEDDINGS"
 
 # File scanning
 SUPPORTED_EXTS = {".md", ".txt", ".yaml", ".yml"}
@@ -60,6 +63,40 @@ SKIP_DIRS = {".git", ".obsidian", ".trash", ".brain-index", "node_modules", "__p
 # Chunking
 MAX_CHUNK_CHARS = 800
 MIN_CHUNK_CHARS = 50
+
+
+class EmbeddingEndpointError(ValueError):
+    """Raised when embedding egress would leave the trusted local boundary."""
+
+
+def _env_flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def validate_embed_url(raw_url: str, allow_remote: bool = False) -> str:
+    """Return a normalized embedding URL, fail-closed for remote endpoints by default."""
+    parsed = urllib.parse.urlsplit((raw_url or "").strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise EmbeddingEndpointError("embedding endpoint must include http(s) scheme and host")
+    if parsed.username or parsed.password:
+        raise EmbeddingEndpointError("embedding endpoint must not contain credentials")
+    if parsed.query or parsed.fragment:
+        raise EmbeddingEndpointError("embedding endpoint must not include query or fragment")
+    hostname = (parsed.hostname or "").lower()
+    if not allow_remote and hostname not in LOOPBACK_EMBED_HOSTS:
+        raise EmbeddingEndpointError(
+            "embedding endpoint must be localhost by default; pass --allow-remote-embeddings "
+            f"or set {REMOTE_EMBED_OPT_IN_ENV}=1 only for an approved remote provider"
+        )
+    path = parsed.path or ""
+    return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
+
+
+def resolve_embed_url(allow_remote: bool = False) -> str:
+    return validate_embed_url(
+        EMBED_URL,
+        allow_remote=allow_remote or _env_flag(REMOTE_EMBED_OPT_IN_ENV),
+    )
 
 
 def ensure_vault_file(path: Path) -> Path:
@@ -268,7 +305,12 @@ def file_hash(path: Path) -> str:
         return ""
 
 
-def index_file(path: Path, con: sqlite3.Connection, embeddings: bool = False) -> dict:
+def index_file(
+    path: Path,
+    con: sqlite3.Connection,
+    embeddings: bool = False,
+    allow_remote_embeddings: bool = False,
+) -> dict:
     """Index a single file into the database."""
     try:
         path = ensure_vault_file(path)
@@ -344,7 +386,11 @@ def index_file(path: Path, con: sqlite3.Connection, embeddings: bool = False) ->
     # Optional embeddings
     embed_count = 0
     if embeddings and chunk_texts_for_embed:
-        embed_count = _store_embeddings(con, chunk_texts_for_embed)
+        embed_count = _store_embeddings(
+            con,
+            chunk_texts_for_embed,
+            allow_remote_embeddings=allow_remote_embeddings,
+        )
 
     return {
         "ok": True,
@@ -355,13 +401,18 @@ def index_file(path: Path, con: sqlite3.Connection, embeddings: bool = False) ->
     }
 
 
-def _store_embeddings(con: sqlite3.Connection, items: list[tuple[int, str]]) -> int:
+def _store_embeddings(
+    con: sqlite3.Connection,
+    items: list[tuple[int, str]],
+    allow_remote_embeddings: bool = False,
+) -> int:
     """Generate and store embeddings via OpenAI-compatible API."""
     try:
         import urllib.request
     except ImportError:
         return 0
 
+    embed_url = resolve_embed_url(allow_remote=allow_remote_embeddings)
     count = 0
     batch_size = 20
     for i in range(0, len(items), batch_size):
@@ -375,7 +426,7 @@ def _store_embeddings(con: sqlite3.Connection, items: list[tuple[int, str]]) -> 
         }).encode("utf-8")
 
         req = urllib.request.Request(
-            EMBED_URL,
+            embed_url,
             data=payload,
             headers={"Content-Type": "application/json"}
         )
@@ -413,7 +464,11 @@ def _blob_to_floats(blob: bytes) -> list[float]:
     return list(struct.unpack(f'{n}f', blob))
 
 
-def rebuild_index(con: sqlite3.Connection, embeddings: bool = False) -> dict:
+def rebuild_index(
+    con: sqlite3.Connection,
+    embeddings: bool = False,
+    allow_remote_embeddings: bool = False,
+) -> dict:
     """Full rebuild of the index."""
     start = time.time()
     # Clear all tables
@@ -431,7 +486,12 @@ def rebuild_index(con: sqlite3.Connection, embeddings: bool = False) -> dict:
 
     for path in _walk_vault():
         files_scanned += 1
-        result = index_file(path, con, embeddings=embeddings)
+        result = index_file(
+            path,
+            con,
+            embeddings=embeddings,
+            allow_remote_embeddings=allow_remote_embeddings,
+        )
         if result.get("ok"):
             files_indexed += 1
             total_chunks += result.get("chunks", 0)
@@ -529,9 +589,15 @@ def search_fts(con: sqlite3.Connection, query: str, limit: int = 10) -> list[dic
     return results
 
 
-def search_vector(con: sqlite3.Connection, query: str, limit: int = 10) -> list[dict]:
+def search_vector(
+    con: sqlite3.Connection,
+    query: str,
+    limit: int = 10,
+    allow_remote_embeddings: bool = False,
+) -> list[dict]:
     """Semantic search via embeddings + cosine similarity."""
     import urllib.request
+    embed_url = resolve_embed_url(allow_remote=allow_remote_embeddings)
 
     payload = json.dumps({
         "model": EMBED_MODEL,
@@ -539,7 +605,7 @@ def search_vector(con: sqlite3.Connection, query: str, limit: int = 10) -> list[
     }).encode("utf-8")
 
     req = urllib.request.Request(
-        EMBED_URL,
+        embed_url,
         data=payload,
         headers={"Content-Type": "application/json"}
     )
@@ -599,7 +665,13 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
     return dot / (mag_a * mag_b)
 
 
-def search_combined(con: sqlite3.Connection, query: str, limit: int = 8, vector: bool = False) -> dict:
+def search_combined(
+    con: sqlite3.Connection,
+    query: str,
+    limit: int = 8,
+    vector: bool = False,
+    allow_remote_embeddings: bool = False,
+) -> dict:
     """Combined search: FTS + optional vector, deduplicated."""
     fts_results = search_fts(con, query, limit=limit)
 
@@ -610,7 +682,12 @@ def search_combined(con: sqlite3.Connection, query: str, limit: int = 8, vector:
     }
 
     if vector:
-        vec_results = search_vector(con, query, limit=limit)
+        vec_results = search_vector(
+            con,
+            query,
+            limit=limit,
+            allow_remote_embeddings=allow_remote_embeddings,
+        )
         if vec_results and "error" not in vec_results[0]:
             # Deduplicate: prefer FTS, add vector-only results
             fts_paths = {r["path"] + ":" + r.get("heading", "") for r in fts_results}
@@ -665,6 +742,11 @@ def main():
     parser.add_argument("--list", action="store_true", help="List indexed files")
     parser.add_argument("--vector", action="store_true", help="Enable semantic search (requires embedding endpoint)")
     parser.add_argument("--embeddings", action="store_true", help="Generate embeddings during rebuild")
+    parser.add_argument(
+        "--allow-remote-embeddings",
+        action="store_true",
+        help="Allow sending vault text/query text to a non-local embedding endpoint",
+    )
     parser.add_argument("--limit", type=int, default=8, help="Max results (default 8)")
     parser.add_argument("--json", action="store_true", help="JSON output")
     args = parser.parse_args()
@@ -680,7 +762,16 @@ def main():
     con = init_db()
 
     if args.rebuild:
-        result = rebuild_index(con, embeddings=args.embeddings)
+        try:
+            result = rebuild_index(
+                con,
+                embeddings=args.embeddings,
+                allow_remote_embeddings=args.allow_remote_embeddings,
+            )
+        except EmbeddingEndpointError as e:
+            con.close()
+            print(f"Unsafe embedding endpoint: {e}", file=sys.stderr)
+            sys.exit(2)
         if args.json:
             print(json.dumps(result, ensure_ascii=False, indent=2))
         else:
@@ -695,7 +786,17 @@ def main():
         if not path.exists():
             print(f"Arquivo não encontrado: {args.update}")
             sys.exit(1)
-        result = index_file(path, con, embeddings=args.embeddings)
+        try:
+            result = index_file(
+                path,
+                con,
+                embeddings=args.embeddings,
+                allow_remote_embeddings=args.allow_remote_embeddings,
+            )
+        except EmbeddingEndpointError as e:
+            con.close()
+            print(f"Unsafe embedding endpoint: {e}", file=sys.stderr)
+            sys.exit(2)
         if args.json:
             print(json.dumps(result, ensure_ascii=False, indent=2))
         else:
@@ -731,7 +832,18 @@ def main():
         return
 
     if args.query:
-        result = search_combined(con, args.query, limit=args.limit, vector=args.vector)
+        try:
+            result = search_combined(
+                con,
+                args.query,
+                limit=args.limit,
+                vector=args.vector,
+                allow_remote_embeddings=args.allow_remote_embeddings,
+            )
+        except EmbeddingEndpointError as e:
+            con.close()
+            print(f"Unsafe embedding endpoint: {e}", file=sys.stderr)
+            sys.exit(2)
         if args.json:
             print(json.dumps(result, ensure_ascii=False, indent=2))
         else:
