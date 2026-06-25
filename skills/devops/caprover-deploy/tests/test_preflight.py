@@ -252,6 +252,87 @@ class TestRepoSafety:
         assert "caprover_config_invalid" in out
         assert "repo validation" in out
 
+    def test_custom_repo_host_requires_host_specific_token_env(self, monkeypatch):
+        monkeypatch.setenv("GITHUB_TOKEN", "generic-github-token")
+        args = SimpleNamespace(
+            github_user=None,
+            repo="https://git.example.com/org/repo",
+            repo_token_env=None,
+        )
+
+        with pytest.raises(CapRoverDeployError) as exc:
+            cd.get_github_creds(args)
+
+        assert exc.value.code == "caprover_config_invalid"
+        assert "--repo-token-env" in exc.value.message
+
+    def test_custom_repo_host_rejects_generic_github_token_env(self, monkeypatch):
+        monkeypatch.setenv("GITHUB_TOKEN", "generic-github-token")
+        args = SimpleNamespace(
+            github_user=None,
+            repo="https://git.example.com/org/repo",
+            repo_token_env="GITHUB_TOKEN",
+        )
+
+        with pytest.raises(CapRoverDeployError) as exc:
+            cd.get_github_creds(args)
+
+        assert exc.value.code == "caprover_config_invalid"
+        assert "host-specific" in exc.value.message
+
+    def test_custom_repo_host_does_not_fallback_to_gh_auth_token(self, monkeypatch):
+        def fail_if_gh_auth_is_called(*args, **kwargs):
+            pytest.fail("gh auth token was called for a custom repo host")
+
+        monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+        monkeypatch.setattr(cd.subprocess, "run", fail_if_gh_auth_is_called)
+        args = SimpleNamespace(
+            github_user=None,
+            repo="https://git.example.com/org/repo",
+            repo_token_env=None,
+        )
+
+        with pytest.raises(CapRoverDeployError) as exc:
+            cd.get_github_creds(args)
+
+        assert exc.value.code == "caprover_config_invalid"
+        assert "--repo-token-env" in exc.value.message
+
+    def test_custom_repo_host_uses_only_declared_token_env(self, monkeypatch):
+        def fail_if_gh_auth_is_called(*args, **kwargs):
+            pytest.fail("gh auth token was called for a custom repo host")
+
+        monkeypatch.setattr(cd.subprocess, "run", fail_if_gh_auth_is_called)
+        monkeypatch.setenv("GITHUB_TOKEN", "generic-github-token")
+        monkeypatch.setenv("GIT_EXAMPLE_TOKEN", "host-specific-token")
+        args = SimpleNamespace(
+            github_user="alice",
+            repo="https://git.example.com/org/repo",
+            repo_token_env="GIT_EXAMPLE_TOKEN",
+        )
+
+        assert cd.get_github_creds(args) == ("alice", "host-specific-token")
+
+    def test_main_rejects_custom_repo_missing_token_env_before_password_resolution(self, monkeypatch, capsys):
+        monkeypatch.setenv("GITHUB_TOKEN", "generic-github-token")
+        monkeypatch.setattr(sys, "argv", [
+            "caprover_deploy.py",
+            "--caprover-url", "https://captain.example.com",
+            "--expected-host", "captain.example.com",
+            "--app-name", "my-app",
+            "--repo", "https://git.example.com/org/repo",
+            "--expected-repo-host", "git.example.com",
+        ])
+        monkeypatch.setattr(cd, "get_password", lambda args: pytest.fail("password was resolved"))
+
+        with pytest.raises(SystemExit) as exc:
+            cd.main()
+
+        assert exc.value.code == 2
+        out = capsys.readouterr().out
+        assert "caprover_config_invalid" in out
+        assert "repo token validation" in out
+
 
 class TestCliDeploySafety:
     def test_cli_deploy_binds_target_app_and_password_env(self, monkeypatch):
@@ -323,7 +404,9 @@ class TestSecretSources:
             "--caprover-url", "https://captain.example.com",
             "--app-name", "my-app",
             "--expected-host", "captain.example.com",
+            "--repo-token-env", "GIT_EXAMPLE_TOKEN",
         ])
+        assert args.repo_token_env == "GIT_EXAMPLE_TOKEN"
         assert not hasattr(args, "caprover_password")
         assert not hasattr(args, "github_token")
 

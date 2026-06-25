@@ -43,6 +43,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import urllib.parse
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -77,6 +78,69 @@ PLACEHOLDER_ALLOWED_USER_IDS = {
     "123456789012345678",
     "234567890123456789",
 }
+DEFAULT_LLM_API_KEY_ENV = "LLM_API_KEY"
+APPROVED_LLM_REMOTE_HOSTS = {"api.openai.com", "api.groq.com"}
+LOCAL_LLM_HOSTS = {"localhost", "127.0.0.1", "::1"}
+ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _truthy_config(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _normalize_env_name(raw_name: Any, label: str) -> str:
+    name = str(raw_name or "").strip()
+    if not name or not ENV_NAME_RE.fullmatch(name):
+        raise ValueError(f"{label} must be an environment variable name")
+    return name
+
+
+def _is_local_llm_host(hostname: str) -> bool:
+    return (hostname or "").lower() in LOCAL_LLM_HOSTS
+
+
+def validate_llm_base_url(
+    raw_url: Any,
+    *,
+    allow_custom_remote: bool = False,
+    api_key_env: str = DEFAULT_LLM_API_KEY_ENV,
+) -> str:
+    """Validate summary LLM egress before transcript text or API keys are used."""
+    candidate = str(raw_url or "").strip()
+    parsed = urllib.parse.urlsplit(candidate)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("llm.base_url must include http(s) scheme and host")
+    if parsed.username or parsed.password:
+        raise ValueError("llm.base_url must not include credentials")
+    if parsed.query or parsed.fragment:
+        raise ValueError("llm.base_url must not include query or fragment")
+    try:
+        parsed.port
+    except ValueError:
+        raise ValueError("llm.base_url has an invalid port")
+
+    hostname = (parsed.hostname or "").lower()
+    if not hostname:
+        raise ValueError("llm.base_url must include a host")
+
+    is_local = _is_local_llm_host(hostname)
+    if parsed.scheme != "https" and not is_local:
+        raise ValueError("llm.base_url remote endpoints must use https")
+
+    is_approved_remote = hostname in APPROVED_LLM_REMOTE_HOSTS
+    if not is_local and not is_approved_remote:
+        if not allow_custom_remote:
+            raise ValueError(
+                "llm.base_url custom remote endpoints require "
+                "llm.allow_custom_remote: true or LLM_ALLOW_CUSTOM_REMOTE=1"
+            )
+        if api_key_env == DEFAULT_LLM_API_KEY_ENV:
+            raise ValueError("custom llm.base_url requires a host-specific llm.api_key_env instead of LLM_API_KEY")
+
+    path = parsed.path.rstrip("/")
+    return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, path, "", "")).rstrip("/")
 
 
 # ============================================================================
@@ -170,11 +234,22 @@ class MeetingConfig:
 
         # LLM
         llm_cfg = yaml_data.get("llm", {})
-        cfg.llm_api_key = os.environ.get(
-            llm_cfg.get("api_key_env", "LLM_API_KEY"), ""
+        llm_api_key_env = _normalize_env_name(
+            llm_cfg.get("api_key_env") or DEFAULT_LLM_API_KEY_ENV,
+            "llm.api_key_env",
         )
-        cfg.llm_base_url = llm_cfg.get("base_url", cfg.llm_base_url)
-        cfg.llm_model = llm_cfg.get("model", cfg.llm_model)
+        allow_custom_remote = (
+            _truthy_config(llm_cfg.get("allow_custom_remote", False))
+            or _truthy_config(os.environ.get("LLM_ALLOW_CUSTOM_REMOTE", ""))
+        )
+        raw_llm_base_url = os.environ.get("LLM_BASE_URL") or llm_cfg.get("base_url", cfg.llm_base_url)
+        cfg.llm_base_url = validate_llm_base_url(
+            raw_llm_base_url,
+            allow_custom_remote=allow_custom_remote,
+            api_key_env=llm_api_key_env,
+        )
+        cfg.llm_api_key = os.environ.get(llm_api_key_env, "")
+        cfg.llm_model = os.environ.get("LLM_MODEL", llm_cfg.get("model", cfg.llm_model))
 
         # Voice capture tuning
         voice_cfg = yaml_data.get("voice_capture", {})

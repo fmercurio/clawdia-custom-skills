@@ -100,14 +100,23 @@ stt:
 # -----------------------------------------------------------------------------
 llm:
   # Environment variable that contains the API key for the summary LLM provider.
+  # For custom remote providers, use a provider-specific env var instead of the
+  # generic LLM_API_KEY.
   api_key_env: LLM_API_KEY
 
   # OpenAI-compatible API base URL for summary generation.
+  # Remote hosts are limited to approved providers by default. Loopback/local
+  # endpoints are allowed for self-hosted models.
   # Examples:
   # - https://api.openai.com/v1
   # - https://api.groq.com/openai/v1
   # - http://localhost:11434/v1
   base_url: https://api.openai.com/v1
+
+  # Set to true only when intentionally sending meeting transcripts to a custom
+  # remote endpoint. Custom remote endpoints also require api_key_env to name a
+  # provider-specific env var, not LLM_API_KEY.
+  allow_custom_remote: false
 
   # Chat/completions model used to generate meeting summaries, action items,
   # decisions, and follow-ups.
