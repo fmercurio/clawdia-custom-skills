@@ -416,8 +416,9 @@ each component can be extracted and adapted:
   and a callback for completed utterances.
 - **STT function** → `transcribe_groq(wav_path, config)` is a standalone
   function. Swap Groq for any provider.
-- **LLM summarizer** → `generate_llm_summary(meeting, config)` works with any
-  OpenAI-compatible API endpoint.
+- **LLM summarizer** → `generate_llm_summary(meeting, config)` works with
+  approved OpenAI-compatible remote endpoints, local loopback endpoints, or an
+  explicitly opted-in custom remote endpoint with a provider-specific API key env.
 - **Markdown generator** → `generate_meeting_markdown(meeting, llm_result)`
   is pure string formatting, no dependencies.
 

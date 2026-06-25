@@ -161,6 +161,96 @@ def test_local_stt_provider_does_not_call_groq(monkeypatch, tmp_path):
     }
 
 
+def test_config_rejects_custom_remote_llm_base_url_by_default(monkeypatch, tmp_path):
+    module = load_meeting_bot(monkeypatch, {
+        "llm": {
+            "base_url": "https://attacker.example/v1",
+        }
+    })
+    monkeypatch.setenv("LLM_API_KEY", "generic")
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text("llm: {}\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="llm.base_url"):
+        module.MeetingConfig.load(str(cfg_path))
+
+
+def test_env_llm_base_url_override_is_validated(monkeypatch, tmp_path):
+    module = load_meeting_bot(monkeypatch, {
+        "llm": {
+            "base_url": "https://api.openai.com/v1",
+        }
+    })
+    monkeypatch.setenv("LLM_BASE_URL", "https://attacker.example/v1")
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text("llm: {}\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="llm.base_url"):
+        module.MeetingConfig.load(str(cfg_path))
+
+
+def test_config_allows_openai_llm_base_url(monkeypatch, tmp_path):
+    module = load_meeting_bot(monkeypatch, {
+        "llm": {
+            "base_url": "https://api.openai.com/v1",
+        }
+    })
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text("llm: {}\n", encoding="utf-8")
+
+    cfg = module.MeetingConfig.load(str(cfg_path))
+
+    assert cfg.llm_base_url == "https://api.openai.com/v1"
+
+
+def test_config_allows_local_llm_base_url_without_custom_remote(monkeypatch, tmp_path):
+    module = load_meeting_bot(monkeypatch, {
+        "llm": {
+            "base_url": "http://localhost:11434/v1",
+        }
+    })
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text("llm: {}\n", encoding="utf-8")
+
+    cfg = module.MeetingConfig.load(str(cfg_path))
+
+    assert cfg.llm_base_url == "http://localhost:11434/v1"
+
+
+def test_custom_remote_llm_requires_host_specific_key_env(monkeypatch, tmp_path):
+    module = load_meeting_bot(monkeypatch, {
+        "llm": {
+            "base_url": "https://attacker.example/v1",
+            "allow_custom_remote": True,
+        }
+    })
+    monkeypatch.setenv("LLM_API_KEY", "generic")
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text("llm: {}\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="host-specific"):
+        module.MeetingConfig.load(str(cfg_path))
+
+
+def test_custom_remote_llm_uses_host_specific_key_env(monkeypatch, tmp_path):
+    module = load_meeting_bot(monkeypatch, {
+        "llm": {
+            "base_url": "https://attacker.example/v1",
+            "allow_custom_remote": True,
+            "api_key_env": "ATTACKER_EXAMPLE_LLM_KEY",
+        }
+    })
+    monkeypatch.setenv("LLM_API_KEY", "generic")
+    monkeypatch.setenv("ATTACKER_EXAMPLE_LLM_KEY", "host-specific")
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text("llm: {}\n", encoding="utf-8")
+
+    cfg = module.MeetingConfig.load(str(cfg_path))
+
+    assert cfg.llm_api_key == "host-specific"
+    assert cfg.llm_base_url == "https://attacker.example/v1"
+
+
 def test_meeting_markdown_is_saved_with_private_permissions(monkeypatch, tmp_path):
     module = load_meeting_bot(monkeypatch)
 

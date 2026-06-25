@@ -8,11 +8,13 @@ Usage:
     python3 caprover_deploy.py --caprover-url URL --app-name APP --tarball ./project.tar
 
 Auth: CAPROVER_PASSWORD env, --keepass-entry with KEEPASS_DB/KEEPASS_KEY, or interactive.
-GitHub: GITHUB_TOKEN env or gh auth token.
+GitHub: github.com uses GITHUB_TOKEN env or gh auth token.
+Custom Git hosts require --repo-token-env with a host-specific env var.
 """
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -26,6 +28,7 @@ except ImportError:
 
 LOCAL_CAPROVER_HOSTS = {"localhost", "127.0.0.1", "::1"}
 DEFAULT_GITHUB_REPO_HOST = "github.com"
+ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 # ──────────────────────────────────────────────
 #  Utilities
@@ -180,13 +183,44 @@ def fail(code, message=None, detail=None, exit_code=1):
     raise SystemExit(exit_code)
 
 
+def _normalize_env_name(raw_name, label):
+    name = (raw_name or "").strip()
+    if not name or not ENV_NAME_RE.fullmatch(name):
+        raise CapRoverDeployError("caprover_config_invalid", f"{label} must be an environment variable name")
+    return name
+
+
+def _repo_uses_default_github_host(raw_repo):
+    parsed = urllib.parse.urlsplit((raw_repo or "").strip())
+    hostname, port = _parsed_host_port(parsed, "Git repo URL")
+    return hostname == DEFAULT_GITHUB_REPO_HOST and port is None
+
+
 def get_github_creds(args):
     """Resolve GitHub credentials."""
     gh_user = args.github_user or os.environ.get("GITHUB_USER", "")
-    gh_token = (
-        os.environ.get("GITHUB_TOKEN")
-        or ""
-    )
+    repo = getattr(args, "repo", None)
+    repo_token_env = getattr(args, "repo_token_env", None)
+
+    if repo and not _repo_uses_default_github_host(repo):
+        if not repo_token_env:
+            raise CapRoverDeployError(
+                "caprover_config_invalid",
+                "Non-github.com repo URLs require --repo-token-env with a host-specific token environment variable",
+            )
+        token_env = _normalize_env_name(repo_token_env, "--repo-token-env")
+        if token_env == "GITHUB_TOKEN":
+            raise CapRoverDeployError(
+                "caprover_config_invalid",
+                "--repo-token-env for non-github.com repos must be host-specific, not GITHUB_TOKEN",
+            )
+        return gh_user, os.environ.get(token_env, "")
+
+    if repo_token_env:
+        token_env = _normalize_env_name(repo_token_env, "--repo-token-env")
+        return gh_user, os.environ.get(token_env, "")
+
+    gh_token = os.environ.get("GITHUB_TOKEN") or ""
     if not gh_token:
         try:
             r = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True, timeout=10)
@@ -603,6 +637,7 @@ def build_arg_parser():
     parser.add_argument("--method", choices=["cli", "api", "playwright", "auto"], default="auto")
     parser.add_argument("--keepass-entry", help="KeePass entry path for password")
     parser.add_argument("--github-user", help="GitHub username")
+    parser.add_argument("--repo-token-env", help="Environment variable containing Git credentials for non-github.com repo hosts")
     parser.add_argument("--expected-host", help="Required hostname assertion for non-local CapRover targets")
     parser.add_argument("--expected-repo-host", help="Required Git repo hostname assertion when --repo is not github.com")
     parser.add_argument("--allow-insecure", action="store_true", help="Allow non-HTTPS/self-signed local/dev CapRover targets")
@@ -635,8 +670,14 @@ def main():
         print("  ⚠️  Insecure CapRover target allowed for local/dev use only")
 
     # Resolve credentials
+    gh_user = ""
+    gh_token = ""
+    if args.repo:
+        try:
+            gh_user, gh_token = get_github_creds(args)
+        except CapRoverDeployError as e:
+            fail(e.code, e.message, detail="repo token validation", exit_code=2)
     password = get_password(args)
-    gh_user, gh_token = get_github_creds(args)
 
     # Build SSH command for verification
     ssh_cmd = None

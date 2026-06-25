@@ -38,7 +38,7 @@ trigger build → poll until done → enable HTTPS + WebSocket → verify
 
 - **CapRover URL** (e.g. `https://captain.example.com`)
 - **CapRover password** — via env var, KeePass, or interactive prompt; never CLI args
-- **GitHub token** — via `gh auth token` or env var `GITHUB_TOKEN`
+- **Git repo token** — `github.com` uses `GITHUB_TOKEN` or `gh auth token`; non-`github.com` hosts require a host-specific env var named by `--repo-token-env`
 - **Python 3.9+** with `requests` (or `urllib` fallback)
 - **Playwright** (optional, for method 3) — `pip install playwright && playwright install chromium`
 
@@ -51,6 +51,16 @@ python3 scripts/caprover_deploy.py \
   --expected-host captain.example.com \
   --app-name my-app \
   --repo https://github.com/org/repo \
+  --branch main
+
+# Full deploy from a trusted GitHub Enterprise/custom host
+python3 scripts/caprover_deploy.py \
+  --caprover-url https://captain.example.com \
+  --expected-host captain.example.com \
+  --app-name my-app \
+  --repo https://git.example.com/org/repo \
+  --expected-repo-host git.example.com \
+  --repo-token-env GIT_EXAMPLE_TOKEN \
   --branch main
 
 # Force rebuild existing app
@@ -76,10 +86,18 @@ The script tries these in order:
 2. `--keepass-entry "/Caprover - MyOrg"` (requires `KEEPASS_DB` and `KEEPASS_KEY`)
 3. Interactive prompt
 
-GitHub token:
+GitHub token for `github.com` repos:
 
 1. `GITHUB_TOKEN` env var
 2. `gh auth token` (if GitHub CLI is installed)
+
+Git token for non-`github.com` repos:
+
+1. Pass `--expected-repo-host git.example.com`
+2. Pass `--repo-token-env GIT_EXAMPLE_TOKEN`
+3. Export that host-specific env var before running the script
+
+The script does not use generic `GITHUB_TOKEN` or `gh auth token` for custom Git hosts.
 
 Do not pass passwords or tokens through CLI arguments; process arguments are visible to local process inspection on many systems.
 
@@ -88,7 +106,7 @@ Do not pass passwords or tokens through CLI arguments; process arguments are vis
 - Use `https://` CapRover dashboard URLs by default.
 - Pass `--expected-host captain.example.com` for every non-local target. Include the port in `--expected-host` when the CapRover URL uses a non-default port. The script refuses to resolve credentials for a non-local CapRover URL without this host assertion.
 - Git repo URLs default to `https://github.com/org/repo`. For GitHub Enterprise or another trusted Git host, pass `--expected-repo-host git.example.com` before using `--repo`. Include the port in `--expected-repo-host` when the repo URL uses one.
-- GitHub credentials are resolved only after the repo URL host is validated.
+- Git credentials are resolved only after the repo URL host is validated. Non-`github.com` repo hosts must use `--repo-token-env` with a host-specific env var; `GITHUB_TOKEN` and `gh auth token` are reserved for `github.com`.
 - `--allow-insecure` is only for local/dev targets and makes Playwright tolerate certificate errors for that run.
 
 ## CLI Safety
@@ -112,7 +130,7 @@ The script auto-detects and falls back. Override with `--method cli|api|playwrig
 
 1. **CLI crashes on Node.js 26** — `ERR_USE_AFTER_CLOSE` on all interactive commands. Use API/Playwright.
 2. **API `appData/{app}/` returns 500** for tarball/inline deploy on CapRover 1.14.x. Use Playwright Force Build.
-3. **GitHub config requires credentials** even for public repos — `repoInfo` needs `user` + `password` (PAT). Without them: `status=1110`.
+3. **Git repo config requires credentials** even for public repos — `repoInfo` needs `user` + `password` (PAT). For non-`github.com` hosts, use a host-specific token env var. Without credentials: `status=1110`.
 4. **`{gitHash: ""}` does NOT trigger a Git build** via API — only tarball/Dockerfile inline work. Use dashboard "Force build".
 5. **Ant Design buttons** in the dashboard may not respond to standard clicks. Playwright with `locator().click()` works; browser automation tools may need JS fallback.
 6. **HTTPS provisioning takes 10-30s** (Let's Encrypt cert generation). The script waits automatically.
