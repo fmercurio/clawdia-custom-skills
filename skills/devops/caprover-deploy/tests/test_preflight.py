@@ -9,6 +9,7 @@ Covers:
 - fail() exits with correct code and sanitized message
 """
 import importlib.util
+import sys
 from types import SimpleNamespace
 from pathlib import Path
 
@@ -147,6 +148,118 @@ class TestUrlSafety:
         source = SCRIPT.read_text()
         assert "ignore_https_errors=True" not in source
         assert "ignore_https_errors=args.allow_insecure" in source
+
+
+class TestRepoSafety:
+    def test_github_repo_url_default_host_is_normalized(self):
+        assert (
+            cd.validate_github_repo_url("https://github.com/org/repo.git/")
+            == "https://github.com/org/repo.git"
+        )
+
+    def test_repo_url_rejects_attacker_host_before_token_resolution(self):
+        with pytest.raises(CapRoverDeployError) as exc:
+            cd.validate_github_repo_url("https://attacker.example/org/repo.git")
+
+        assert exc.value.code == "caprover_config_invalid"
+        assert "expected-repo-host" in exc.value.message
+
+    def test_repo_url_allows_expected_enterprise_host(self):
+        assert (
+            cd.validate_github_repo_url(
+                "https://git.example.com:8443/org/repo",
+                expected_host="git.example.com:8443",
+            )
+            == "https://git.example.com:8443/org/repo"
+        )
+
+    @pytest.mark.parametrize("expected_host", ["git.example.com/path", "user@git.example.com", "git.example.com?x=1"])
+    def test_expected_repo_host_must_be_host_only(self, expected_host):
+        with pytest.raises(CapRoverDeployError):
+            cd.validate_github_repo_url("https://git.example.com/org/repo", expected_host=expected_host)
+
+    @pytest.mark.parametrize(
+        "repo",
+        [
+            "git@github.com:org/repo.git",
+            "https://user:secret@github.com/org/repo",
+            "https://github.com/org/repo?token=secret",
+            "https://github.com/org/repo#secret",
+            "https://github.com/org",
+            "https://github.com:8443/org/repo",
+        ],
+    )
+    def test_repo_url_rejects_unsafe_shapes(self, repo):
+        with pytest.raises(CapRoverDeployError):
+            cd.validate_github_repo_url(repo)
+
+    def test_main_validates_repo_before_credential_resolution(self, monkeypatch, capsys):
+        monkeypatch.setattr(sys, "argv", [
+            "caprover_deploy.py",
+            "--caprover-url", "https://captain.example.com",
+            "--expected-host", "captain.example.com",
+            "--app-name", "my-app",
+            "--repo", "https://attacker.example/org/repo",
+        ])
+        monkeypatch.setattr(cd, "get_password", lambda args: pytest.fail("password was resolved"))
+        monkeypatch.setattr(cd, "get_github_creds", lambda args: pytest.fail("GitHub credentials were resolved"))
+
+        with pytest.raises(SystemExit) as exc:
+            cd.main()
+
+        assert exc.value.code == 2
+        out = capsys.readouterr().out
+        assert "caprover_config_invalid" in out
+        assert "repo validation" in out
+
+
+class TestCliDeploySafety:
+    def test_cli_deploy_binds_target_app_and_password_env(self, monkeypatch):
+        calls = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append((cmd, kwargs))
+            if cmd == ["caprover", "--version"]:
+                return SimpleNamespace(returncode=0, stdout="2.3.1", stderr="")
+            if cmd == ["node", "--version"]:
+                return SimpleNamespace(returncode=0, stdout="v24.0.0", stderr="")
+            return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+
+        monkeypatch.setattr(cd.subprocess, "run", fake_run)
+        monkeypatch.setenv("CAPROVER_CONFIG_FILE", "/tmp/stale.yaml")
+        monkeypatch.setenv("CAPROVER_NAME", "stale-machine")
+        monkeypatch.setenv("CAPROVER_APP_TOKEN", "stale-token")
+
+        args = SimpleNamespace(
+            app_name="my-app",
+            branch="main",
+            caprover_url="https://captain.example.com",
+            tarball=None,
+        )
+
+        assert cd.try_cli_deploy(args, "captain-secret") is True
+
+        deploy_cmd, deploy_kwargs = calls[-1]
+        assert deploy_cmd == [
+            "caprover",
+            "deploy",
+            "--caproverUrl",
+            "https://captain.example.com",
+            "--caproverApp",
+            "my-app",
+            "--branch",
+            "main",
+        ]
+        assert "captain-secret" not in deploy_cmd
+
+        deploy_env = deploy_kwargs["env"]
+        assert deploy_env["CAPROVER_PASSWORD"] == "captain-secret"
+        assert deploy_env["CAPROVER_URL"] == "https://captain.example.com"
+        assert deploy_env["CAPROVER_APP"] == "my-app"
+        assert deploy_env["CAPROVER_BRANCH"] == "main"
+        assert "CAPROVER_CONFIG_FILE" not in deploy_env
+        assert "CAPROVER_NAME" not in deploy_env
+        assert "CAPROVER_APP_TOKEN" not in deploy_env
 
 
 class TestSecretSources:

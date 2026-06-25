@@ -25,6 +25,7 @@ except ImportError:
     sys.exit("This script requires Python 3 standard library.")
 
 LOCAL_CAPROVER_HOSTS = {"localhost", "127.0.0.1", "::1"}
+DEFAULT_GITHUB_REPO_HOST = "github.com"
 
 # ──────────────────────────────────────────────
 #  Utilities
@@ -203,6 +204,28 @@ def get_github_creds(args):
     return gh_user, gh_token
 
 
+def _parsed_host_port(parsed, label):
+    try:
+        port = parsed.port
+    except ValueError:
+        raise CapRoverDeployError("caprover_config_invalid", f"{label} has an invalid port")
+    return (parsed.hostname or "").lower(), port
+
+
+def _normalize_expected_host(raw_host, label):
+    expected = (raw_host or "").strip()
+    if not expected:
+        return None, None
+    expected_for_parse = expected if "://" in expected else f"//{expected}"
+    parsed = urllib.parse.urlsplit(expected_for_parse)
+    if parsed.username or parsed.password or parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
+        raise CapRoverDeployError("caprover_config_invalid", f"{label} must be a hostname or hostname:port")
+    hostname, port = _parsed_host_port(parsed, label)
+    if not hostname:
+        raise CapRoverDeployError("caprover_config_invalid", f"{label} must include a hostname")
+    return hostname, port
+
+
 def validate_caprover_url(raw_url, allow_insecure=False, expected_host=None):
     """Normalize and validate the dashboard URL before any secret is resolved."""
     parsed = urllib.parse.urlsplit((raw_url or "").strip())
@@ -212,9 +235,10 @@ def validate_caprover_url(raw_url, allow_insecure=False, expected_host=None):
         raise CapRoverDeployError("caprover_config_invalid", "CapRover URL must not contain credentials")
     if parsed.scheme != "https" and not allow_insecure:
         raise CapRoverDeployError("caprover_config_invalid", "CapRover URL must use HTTPS; pass --allow-insecure only for local/dev")
-    hostname = (parsed.hostname or "").lower()
+    hostname, port = _parsed_host_port(parsed, "CapRover URL")
     if expected_host:
-        if hostname != expected_host.lower():
+        expected_hostname, expected_port = _normalize_expected_host(expected_host, "--expected-host")
+        if hostname != expected_hostname or port != expected_port:
             raise CapRoverDeployError("caprover_config_invalid", "CapRover URL host does not match --expected-host")
     elif hostname not in LOCAL_CAPROVER_HOSTS:
         raise CapRoverDeployError(
@@ -228,11 +252,41 @@ def validate_caprover_url(raw_url, allow_insecure=False, expected_host=None):
     return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, path, "", "")).rstrip("/")
 
 
+def validate_github_repo_url(raw_repo, expected_host=None):
+    """Normalize and validate a Git repo URL before any GitHub secret is resolved."""
+    parsed = urllib.parse.urlsplit((raw_repo or "").strip())
+    if parsed.scheme != "https" or not parsed.netloc:
+        raise CapRoverDeployError("caprover_config_invalid", "GitHub repo URL must use https://host/org/repo")
+    if parsed.username or parsed.password:
+        raise CapRoverDeployError("caprover_config_invalid", "GitHub repo URL must not contain credentials")
+    if parsed.query or parsed.fragment:
+        raise CapRoverDeployError("caprover_config_invalid", "GitHub repo URL must not include query or fragment")
+
+    segments = [segment for segment in parsed.path.split("/") if segment]
+    if len(segments) < 2:
+        raise CapRoverDeployError("caprover_config_invalid", "GitHub repo URL must include owner and repo path")
+
+    hostname, port = _parsed_host_port(parsed, "GitHub repo URL")
+    if expected_host:
+        expected_hostname, expected_port = _normalize_expected_host(expected_host, "--expected-repo-host")
+        if hostname != expected_hostname or port != expected_port:
+            raise CapRoverDeployError("caprover_config_invalid", "GitHub repo host does not match --expected-repo-host")
+    elif hostname != DEFAULT_GITHUB_REPO_HOST or port is not None:
+        raise CapRoverDeployError(
+            "caprover_config_invalid",
+            "GitHub repo URL requires github.com or --expected-repo-host before GitHub credentials are resolved",
+        )
+
+    netloc = hostname if port is None else f"{hostname}:{port}"
+    path = "/" + "/".join(segments)
+    return urllib.parse.urlunsplit(("https", netloc, path, "", ""))
+
+
 # ──────────────────────────────────────────────
 #  Deploy methods
 # ──────────────────────────────────────────────
 
-def try_cli_deploy(args):
+def try_cli_deploy(args, password):
     """Method 1: CapRover CLI."""
     print("[CLI] Checking caprover CLI...")
     try:
@@ -255,12 +309,41 @@ def try_cli_deploy(args):
     except Exception:
         pass
 
-    print("  CLI available — deploying...")
+    print("  CLI available — deploying to validated target...")
+    deploy_env = os.environ.copy()
+    for name in (
+        "CAPROVER_APP",
+        "CAPROVER_APP_TOKEN",
+        "CAPROVER_BRANCH",
+        "CAPROVER_CONFIG_FILE",
+        "CAPROVER_IMAGE_NAME",
+        "CAPROVER_NAME",
+        "CAPROVER_TAR_FILE",
+        "CAPROVER_URL",
+    ):
+        deploy_env.pop(name, None)
+    deploy_env.update({
+        "CAPROVER_APP": args.app_name,
+        "CAPROVER_PASSWORD": password,
+        "CAPROVER_URL": args.caprover_url,
+    })
+
+    cmd = [
+        "caprover",
+        "deploy",
+        "--caproverUrl",
+        args.caprover_url,
+        "--caproverApp",
+        args.app_name,
+    ]
     if args.tarball:
-        cmd = ["caprover", "deploy", "-t", args.tarball]
+        cmd += ["--tarFile", args.tarball]
+        deploy_env["CAPROVER_TAR_FILE"] = args.tarball
     else:
-        cmd = ["caprover", "deploy"]
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        cmd += ["--branch", args.branch]
+        deploy_env["CAPROVER_BRANCH"] = args.branch
+
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=120, env=deploy_env)
     if r.returncode == 0:
         print("  ✅ CLI deploy succeeded")
         return True
@@ -512,6 +595,7 @@ def build_arg_parser():
     parser.add_argument("--keepass-entry", help="KeePass entry path for password")
     parser.add_argument("--github-user", help="GitHub username")
     parser.add_argument("--expected-host", help="Required hostname assertion for non-local CapRover targets")
+    parser.add_argument("--expected-repo-host", help="Required Git repo hostname assertion when --repo is not github.com")
     parser.add_argument("--allow-insecure", action="store_true", help="Allow non-HTTPS/self-signed local/dev CapRover targets")
     parser.add_argument("--ssh-host", help="SSH host for verification (optional)")
     parser.add_argument("--ssh-key", help="SSH key path for verification")
@@ -533,6 +617,11 @@ def main():
         )
     except CapRoverDeployError as e:
         fail(e.code, e.message, detail="url validation", exit_code=2)
+    if args.repo:
+        try:
+            args.repo = validate_github_repo_url(args.repo, expected_host=args.expected_repo_host)
+        except CapRoverDeployError as e:
+            fail(e.code, e.message, detail="repo validation", exit_code=2)
     if args.allow_insecure:
         print("  ⚠️  Insecure CapRover target allowed for local/dev use only")
 
@@ -573,7 +662,7 @@ def main():
 
     # ── Method selection ──
     if method in ("auto", "cli"):
-        if not args.rebuild_only and try_cli_deploy(args):
+        if not args.rebuild_only and try_cli_deploy(args, password):
             verify_deploy(api, args.app_name, ssh_cmd)
             return
         if method == "cli":
