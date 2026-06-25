@@ -107,6 +107,60 @@ def test_config_rejects_placeholder_allowed_user_ids(monkeypatch, tmp_path):
         module.MeetingConfig.load(str(cfg_path))
 
 
+def test_config_loads_stt_provider_and_api_key_env(monkeypatch, tmp_path):
+    module = load_meeting_bot(monkeypatch, {
+        "stt": {
+            "provider": "groq",
+            "groq": {"api_key_env": "CUSTOM_GROQ_KEY", "model": "whisper-large-v3-turbo"},
+        }
+    })
+    monkeypatch.setenv("GROQ_API_KEY", "wrong")
+    monkeypatch.setenv("CUSTOM_GROQ_KEY", "right")
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text("stt: {}\n", encoding="utf-8")
+
+    cfg = module.MeetingConfig.load(str(cfg_path))
+
+    assert cfg.stt_provider == "groq"
+    assert cfg.groq_api_key == "right"
+
+
+def test_config_rejects_unknown_stt_provider(monkeypatch, tmp_path):
+    module = load_meeting_bot(monkeypatch, {"stt": {"provider": "remote-mystery"}})
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text("stt: {}\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="stt.provider"):
+        module.MeetingConfig.load(str(cfg_path))
+
+
+def test_local_stt_provider_does_not_call_groq(monkeypatch, tmp_path):
+    module = load_meeting_bot(monkeypatch, {
+        "stt": {
+            "provider": "local",
+            "local_fallback": {"enabled": True, "engine": "faster-whisper"},
+            "groq": {"model": "whisper-large-v3-turbo"},
+        }
+    })
+    monkeypatch.setenv("GROQ_API_KEY", "present")
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text("stt: {}\n", encoding="utf-8")
+    cfg = module.MeetingConfig.load(str(cfg_path))
+
+    monkeypatch.setattr(module, "transcribe_groq", lambda *args, **kwargs: pytest.fail("Groq was called"))
+    monkeypatch.setattr(
+        module,
+        "transcribe_local",
+        lambda wav_path, config: {"success": True, "provider": "local", "transcript": "ok"},
+    )
+
+    assert module.transcribe_audio("audio.wav", cfg) == {
+        "success": True,
+        "provider": "local",
+        "transcript": "ok",
+    }
+
+
 def test_meeting_markdown_is_saved_with_private_permissions(monkeypatch, tmp_path):
     module = load_meeting_bot(monkeypatch)
 

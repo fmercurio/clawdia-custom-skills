@@ -12,9 +12,12 @@ import argparse
 import os
 import re
 import stat
+import urllib.parse
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from playwright.sync_api import sync_playwright
+
+EXPECTED_ONEDRIVE_DOWNLOAD_HOST = "my.microsoftpersonalcontent.com"
 
 
 def safe_name(name: str) -> str:
@@ -51,7 +54,7 @@ def write_secure_bytes(path: Path, data: bytes) -> None:
     ensure_private_dir(path.parent)
     if path.exists() and path.is_symlink():
         raise OSError(f"refusing to overwrite symlink: {path}")
-    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
     fd = os.open(path, flags, 0o600)
@@ -60,6 +63,40 @@ def write_secure_bytes(path: Path, data: bytes) -> None:
     finally:
         os.close(fd)
     os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+
+
+def is_expected_onedrive_download_url(url: str) -> bool:
+    parsed = urllib.parse.urlsplit(url)
+    host = (parsed.hostname or "").lower()
+    return (
+        parsed.scheme == "https"
+        and host == EXPECTED_ONEDRIVE_DOWNLOAD_HOST
+        and parsed.path.endswith("/download.aspx")
+        and "UniqueId=" in parsed.query
+    )
+
+
+def extract_valid_xml_body(responses) -> bytes | None:
+    for resp in reversed(responses):
+        try:
+            ctype = resp.headers.get("content-type", "")
+            data = resp.body()
+            if resp.status == 200 and "xml" in ctype.lower() and data.startswith(b"<?xml") and is_valid_nfse_xml(data):
+                return data
+        except Exception:
+            continue
+    return None
+
+
+def output_path_for_name(out: Path, name: str, seen_names: set[str]) -> Path:
+    filename = safe_name(name)
+    if filename in seen_names:
+        raise RuntimeError(f"Sanitized XML filename collision: {filename}")
+    seen_names.add(filename)
+    path = out / filename
+    if path.exists():
+        raise FileExistsError(f"refusing to overwrite existing XML output: {path}")
+    return path
 
 
 def main() -> int:
@@ -75,6 +112,7 @@ def main() -> int:
     out = ensure_private_dir(out)
     name_re = re.compile(args.name_regex)
     saved: list[tuple[str, int]] = []
+    seen_output_names: set[str] = set()
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -82,7 +120,7 @@ def main() -> int:
         responses = []
 
         def on_response(resp):
-            if "/download.aspx?UniqueId=" in resp.url:
+            if is_expected_onedrive_download_url(resp.url):
                 responses.append(resp)
 
         page.on("response", on_response)
@@ -115,21 +153,12 @@ def main() -> int:
             page.get_by_role("link", name=name).click(timeout=args.timeout_ms)
             page.wait_for_timeout(2000)
 
-            body = None
-            for resp in reversed(responses[before:] or responses):
-                try:
-                    ctype = resp.headers.get("content-type", "")
-                    data = resp.body()
-                    if resp.status == 200 and "xml" in ctype.lower() and data.startswith(b"<?xml") and is_valid_nfse_xml(data):
-                        body = data
-                        break
-                except Exception:
-                    continue
+            body = extract_valid_xml_body(responses[before:])
 
             if body is None:
                 raise RuntimeError(f"Could not capture XML body for {name}")
 
-            path = out / safe_name(name)
+            path = output_path_for_name(out, name, seen_output_names)
             write_secure_bytes(path, body)
             saved.append((str(path), len(body)))
 

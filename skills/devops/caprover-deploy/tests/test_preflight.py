@@ -127,11 +127,33 @@ class TestUrlSafety:
             cd.validate_caprover_url("http://captain.example.com", expected_host="captain.example.com")
         assert exc.value.code == "caprover_config_invalid"
 
-    def test_http_url_requires_explicit_insecure_opt_in(self):
+    def test_local_http_url_requires_explicit_insecure_opt_in(self):
         assert (
             cd.validate_caprover_url("http://127.0.0.1:3000", allow_insecure=True)
             == "http://127.0.0.1:3000"
         )
+
+    def test_allow_insecure_rejects_remote_http_even_with_expected_host(self):
+        with pytest.raises(CapRoverDeployError) as exc:
+            cd.validate_caprover_url(
+                "http://captain.example.com",
+                allow_insecure=True,
+                expected_host="captain.example.com",
+            )
+
+        assert exc.value.code == "caprover_config_invalid"
+        assert "allow-insecure" in exc.value.message
+
+    def test_allow_insecure_rejects_remote_https_tls_bypass(self):
+        with pytest.raises(CapRoverDeployError) as exc:
+            cd.validate_caprover_url(
+                "https://captain.example.com",
+                allow_insecure=True,
+                expected_host="captain.example.com",
+            )
+
+        assert exc.value.code == "caprover_config_invalid"
+        assert "allow-insecure" in exc.value.message
 
     def test_url_rejects_embedded_credentials(self):
         with pytest.raises(CapRoverDeployError):
@@ -148,6 +170,24 @@ class TestUrlSafety:
         source = SCRIPT.read_text()
         assert "ignore_https_errors=True" not in source
         assert "ignore_https_errors=args.allow_insecure" in source
+
+    def test_main_rejects_remote_allow_insecure_before_password_resolution(self, monkeypatch, capsys):
+        monkeypatch.setattr(sys, "argv", [
+            "caprover_deploy.py",
+            "--caprover-url", "https://captain.example.com",
+            "--expected-host", "captain.example.com",
+            "--allow-insecure",
+            "--app-name", "my-app",
+        ])
+        monkeypatch.setattr(cd, "get_password", lambda args: pytest.fail("password was resolved"))
+
+        with pytest.raises(SystemExit) as exc:
+            cd.main()
+
+        assert exc.value.code == 2
+        out = capsys.readouterr().out
+        assert "caprover_config_invalid" in out
+        assert "allow-insecure" in out
 
 
 class TestRepoSafety:

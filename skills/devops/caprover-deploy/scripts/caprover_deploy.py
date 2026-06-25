@@ -226,6 +226,10 @@ def _normalize_expected_host(raw_host, label):
     return hostname, port
 
 
+def is_local_caprover_host(hostname):
+    return (hostname or "").lower() in LOCAL_CAPROVER_HOSTS
+
+
 def validate_caprover_url(raw_url, allow_insecure=False, expected_host=None):
     """Normalize and validate the dashboard URL before any secret is resolved."""
     parsed = urllib.parse.urlsplit((raw_url or "").strip())
@@ -233,14 +237,19 @@ def validate_caprover_url(raw_url, allow_insecure=False, expected_host=None):
         raise CapRoverDeployError("caprover_config_invalid", "CapRover URL must include http(s) scheme and host")
     if parsed.username or parsed.password:
         raise CapRoverDeployError("caprover_config_invalid", "CapRover URL must not contain credentials")
+    hostname, port = _parsed_host_port(parsed, "CapRover URL")
+    is_local = is_local_caprover_host(hostname)
+    if allow_insecure and not is_local:
+        raise CapRoverDeployError("caprover_config_invalid", "--allow-insecure is limited to local/dev CapRover hosts")
     if parsed.scheme != "https" and not allow_insecure:
         raise CapRoverDeployError("caprover_config_invalid", "CapRover URL must use HTTPS; pass --allow-insecure only for local/dev")
-    hostname, port = _parsed_host_port(parsed, "CapRover URL")
+    if parsed.scheme != "https" and not is_local:
+        raise CapRoverDeployError("caprover_config_invalid", "Non-HTTPS CapRover URLs are limited to local/dev hosts")
     if expected_host:
         expected_hostname, expected_port = _normalize_expected_host(expected_host, "--expected-host")
         if hostname != expected_hostname or port != expected_port:
             raise CapRoverDeployError("caprover_config_invalid", "CapRover URL host does not match --expected-host")
-    elif hostname not in LOCAL_CAPROVER_HOSTS:
+    elif not is_local:
         raise CapRoverDeployError(
             "caprover_config_invalid",
             "CapRover URL requires --expected-host for non-local targets before credentials are resolved",

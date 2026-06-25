@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import calendar
+import importlib.util
 import json
 import os
 import re
@@ -42,12 +43,26 @@ from pathlib import Path
 from typing import Any, Optional
 
 # Allow imports when run from the skill's scripts/ dir and support optional
-# user-local dependency installs before importing third-party packages.
+# user-local dependency installs for third-party packages.
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE))
-sys.path.insert(0, os.path.expanduser("~/.local/py-lib"))
 
-import agilize_login as A  # noqa: E402
+
+def load_bundled_agilize_login():
+    helper_path = HERE / "agilize_login.py"
+    spec = importlib.util.spec_from_file_location("_bundled_agilize_login", helper_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"could not load bundled helper: {helper_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+A = load_bundled_agilize_login()
+
+USER_LOCAL_LIB = os.path.expanduser("~/.local/py-lib")
+if USER_LOCAL_LIB not in sys.path:
+    sys.path.append(USER_LOCAL_LIB)
 
 try:
     import openpyxl

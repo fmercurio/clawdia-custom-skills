@@ -106,6 +106,23 @@ def test_match_spreadsheet_rejects_symlink_output_dir(monkeypatch, tmp_path):
         module.ensure_private_dir(linked_dir)
 
 
+def test_match_spreadsheet_loads_bundled_login_before_user_local_lib(monkeypatch, tmp_path):
+    user_lib = tmp_path / ".local" / "py-lib"
+    user_lib.mkdir(parents=True)
+    marker = tmp_path / "shadowed.txt"
+    (user_lib / "agilize_login.py").write_text(
+        "from pathlib import Path\n"
+        f"Path({str(marker)!r}).write_text('shadowed')\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    module = load_match_script(monkeypatch)
+
+    assert Path(module.A.__file__).resolve() == ROOT / "scripts" / "agilize_login.py"
+    assert not marker.exists()
+
+
 def test_onedrive_downloader_safe_names_do_not_escape_output_dir(monkeypatch):
     module = load_download_script(monkeypatch)
 
@@ -134,6 +151,9 @@ def test_onedrive_downloader_writes_private_files_and_rejects_symlinks(monkeypat
 
     assert target.read_text(encoding="utf-8") == "do not overwrite"
 
+    with pytest.raises(FileExistsError):
+        module.write_secure_bytes(output, b"<?xml version='1.0'?><root/>")
+
 
 def test_onedrive_downloader_rejects_symlink_output_dir(monkeypatch, tmp_path):
     module = load_download_script(monkeypatch)
@@ -144,3 +164,44 @@ def test_onedrive_downloader_rejects_symlink_output_dir(monkeypatch, tmp_path):
 
     with pytest.raises(OSError):
         module.ensure_private_dir(linked_dir)
+
+
+def test_onedrive_downloader_accepts_only_expected_download_origin(monkeypatch):
+    module = load_download_script(monkeypatch)
+
+    assert module.is_expected_onedrive_download_url(
+        "https://my.microsoftpersonalcontent.com/personal/demo/_layouts/15/download.aspx?UniqueId=abc&tempauth=redacted"
+    )
+    assert not module.is_expected_onedrive_download_url(
+        "https://attacker.example/_layouts/15/download.aspx?UniqueId=abc&tempauth=redacted"
+    )
+    assert not module.is_expected_onedrive_download_url(
+        "http://my.microsoftpersonalcontent.com/_layouts/15/download.aspx?UniqueId=abc"
+    )
+
+
+def test_onedrive_downloader_does_not_reuse_stale_responses(monkeypatch):
+    module = load_download_script(monkeypatch)
+    stale = types.SimpleNamespace(
+        status=200,
+        headers={"content-type": "text/xml"},
+        body=lambda: b"<?xml version='1.0'?><ConsultarNfseResposta xmlns='http://www.sped.fazenda.gov.br/nfse'><CompNfse /></ConsultarNfseResposta>",
+    )
+
+    assert module.extract_valid_xml_body([stale]) is not None
+    assert module.extract_valid_xml_body([]) is None
+
+
+def test_onedrive_downloader_rejects_sanitized_name_collisions(monkeypatch, tmp_path):
+    module = load_download_script(monkeypatch)
+    seen = set()
+
+    first = module.output_path_for_name(tmp_path, "a/b.xml", seen)
+    assert first.name == "a_b.xml"
+    with pytest.raises(RuntimeError, match="collision"):
+        module.output_path_for_name(tmp_path, "a:b.xml", seen)
+
+    existing = tmp_path / "existing.xml"
+    existing.write_text("<xml />", encoding="utf-8")
+    with pytest.raises(FileExistsError):
+        module.output_path_for_name(tmp_path, "existing.xml", set())

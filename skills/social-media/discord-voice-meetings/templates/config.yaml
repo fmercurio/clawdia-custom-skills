@@ -77,9 +77,10 @@ stt:
 
   local_fallback:
     # Enable local fallback if the hosted provider is unavailable or disabled.
+    # The standalone reference bot fails closed until a local engine is wired.
     enabled: true
 
-    # Local STT engine identifier used by the reference implementation.
+    # Local STT engine identifier for deployments that wire a local provider.
     # Examples: faster-whisper, whisper.cpp, openai-whisper.
     engine: faster-whisper
 

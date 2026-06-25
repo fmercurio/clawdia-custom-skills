@@ -22,7 +22,7 @@ Architecture:
     Discord Voice Gateway (WSS/UDP)
       → VoiceReceiver (RTP packets, NaCl decrypt, Opus decode, silence detection)
         → check_silence() emits completed utterances (PCM per speaker)
-          → Groq Whisper STT (whisper-large-v3-turbo, language + glossary hint)
+          → configured STT provider (Groq or fail-closed local placeholder)
             → transcript entries recorded with speaker + timestamp
               → /meeting stop → LLM summary → Markdown ata → saved + posted
 
@@ -91,11 +91,17 @@ class MeetingConfig:
     bot_token: str = ""
     allowed_user_ids: Set[str] = field(default_factory=set)
 
-    # STT (Groq)
+    # STT
+    stt_provider: str = "auto"
     groq_api_key: str = ""
     stt_model: str = "whisper-large-v3-turbo"
     stt_language: str = "pt"
     stt_prompt: str = ""  # Glossary hint for domain terms
+    local_fallback_enabled: bool = False
+    local_stt_engine: str = "faster-whisper"
+    local_stt_model: str = "small"
+    local_stt_device: str = "auto"
+    local_stt_compute_type: str = "int8"
 
     # LLM for summary
     llm_api_key: str = ""
@@ -146,11 +152,21 @@ class MeetingConfig:
 
         # STT
         stt_cfg = yaml_data.get("stt", {})
+        provider = str(stt_cfg.get("provider", cfg.stt_provider)).strip().lower()
+        if provider not in {"auto", "groq", "local"}:
+            raise ValueError("stt.provider must be one of: auto, groq, local")
+        cfg.stt_provider = provider
         groq_cfg = stt_cfg.get("groq", {})
-        cfg.groq_api_key = os.environ.get("GROQ_API_KEY", "")
+        cfg.groq_api_key = os.environ.get(groq_cfg.get("api_key_env", "GROQ_API_KEY"), "")
         cfg.stt_model = groq_cfg.get("model", cfg.stt_model)
         cfg.stt_language = groq_cfg.get("language", stt_cfg.get("language", cfg.stt_language))
         cfg.stt_prompt = groq_cfg.get("prompt", "")
+        local_cfg = stt_cfg.get("local_fallback", {})
+        cfg.local_fallback_enabled = bool(local_cfg.get("enabled", cfg.local_fallback_enabled))
+        cfg.local_stt_engine = local_cfg.get("engine", cfg.local_stt_engine)
+        cfg.local_stt_model = local_cfg.get("model", cfg.local_stt_model)
+        cfg.local_stt_device = local_cfg.get("device", cfg.local_stt_device)
+        cfg.local_stt_compute_type = local_cfg.get("compute_type", cfg.local_stt_compute_type)
 
         # LLM
         llm_cfg = yaml_data.get("llm", {})
@@ -612,6 +628,39 @@ def transcribe_groq(
             close()
 
 
+def transcribe_local(
+    wav_path: str,
+    config: MeetingConfig,
+) -> Dict[str, Any]:
+    """Fail closed until a local STT engine is wired into the reference implementation."""
+    return {
+        "success": False,
+        "transcript": "",
+        "provider": "local",
+        "error": (
+            "local STT provider is selected but no local transcription engine "
+            f"is implemented in this reference bot (engine={config.local_stt_engine}, "
+            f"model={config.local_stt_model})"
+        ),
+    }
+
+
+def transcribe_audio(
+    wav_path: str,
+    config: MeetingConfig,
+) -> Dict[str, Any]:
+    """Dispatch transcription according to the configured provider boundary."""
+    if config.stt_provider == "local":
+        return transcribe_local(wav_path, config)
+    if config.stt_provider == "groq":
+        return transcribe_groq(wav_path, config)
+
+    result = transcribe_groq(wav_path, config)
+    if result.get("success") or not config.local_fallback_enabled:
+        return result
+    return transcribe_local(wav_path, config)
+
+
 # ============================================================================
 # LLM Meeting Summary
 # ============================================================================
@@ -1040,7 +1089,7 @@ class MeetingBot(discord.Client):
                     wav_path = tmp_f.name
                     tmp_f.close()
                     await asyncio.to_thread(VoiceReceiver.pcm_to_wav, pcm_data, wav_path)
-                    result = await asyncio.to_thread(transcribe_groq, wav_path, self._config)
+                    result = await asyncio.to_thread(transcribe_audio, wav_path, self._config)
                     if result.get("success"):
                         transcript = result.get("transcript", "").strip()
                         if transcript and not is_whisper_hallucination(transcript):
@@ -1152,7 +1201,7 @@ class MeetingBot(discord.Client):
         tmp_f.close()
         try:
             await asyncio.to_thread(VoiceReceiver.pcm_to_wav, pcm_data, wav_path)
-            result = await asyncio.to_thread(transcribe_groq, wav_path, self._config)
+            result = await asyncio.to_thread(transcribe_audio, wav_path, self._config)
 
             if not result.get("success"):
                 logger.warning("Voice input STT failed for user %d: %s", user_id, result.get("error"))
@@ -1218,8 +1267,10 @@ def main() -> None:
     if not config.bot_token:
         print("ERROR: Discord bot token not found. Set DISCORD_BOT_TOKEN env var.")
         return
-    if not config.groq_api_key:
+    if config.stt_provider in {"auto", "groq"} and not config.groq_api_key:
         print("WARNING: GROQ_API_KEY not set — transcription will fail.")
+    if config.stt_provider == "local":
+        print("WARNING: local STT provider selected; local transcription is not implemented in this reference bot.")
 
     bot = MeetingBot(config)
     bot.run(config.bot_token)
