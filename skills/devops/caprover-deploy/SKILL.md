@@ -86,8 +86,16 @@ Do not pass passwords or tokens through CLI arguments; process arguments are vis
 ## URL Safety
 
 - Use `https://` CapRover dashboard URLs by default.
-- Pass `--expected-host captain.example.com` for every non-local target. The script refuses to resolve credentials for a non-local CapRover URL without this host assertion.
+- Pass `--expected-host captain.example.com` for every non-local target. Include the port in `--expected-host` when the CapRover URL uses a non-default port. The script refuses to resolve credentials for a non-local CapRover URL without this host assertion.
+- Git repo URLs default to `https://github.com/org/repo`. For GitHub Enterprise or another trusted Git host, pass `--expected-repo-host git.example.com` before using `--repo`. Include the port in `--expected-repo-host` when the repo URL uses one.
+- GitHub credentials are resolved only after the repo URL host is validated.
 - `--allow-insecure` is only for local/dev targets and makes Playwright tolerate certificate errors for that run.
+
+## CLI Safety
+
+- CLI deployments pass the validated `--caproverUrl`, `--caproverApp`, and `--branch`/`--tarFile` explicitly.
+- CapRover passwords are provided through `CAPROVER_PASSWORD` in the subprocess environment, never through CLI arguments.
+- Ambient CapRover CLI config such as `CAPROVER_CONFIG_FILE`, saved machine names, app tokens, stale app names, or stale branches is ignored for the deploy subprocess.
 
 ## Method Selection
 
