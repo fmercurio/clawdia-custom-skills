@@ -556,3 +556,92 @@ skills:
           skill package. Added a README focused on non-technical operators asking
           their own agent to configure specialist topic/channel profiles. Status:
           candidate — awaiting Skills Lab review/approval.
+
+  - name: docs-mcp-server-operations
+    status: candidate
+    version: 1.0.0
+    category: mcp
+    description: >
+      Generic public skill for deploying and maintaining a shared Docs MCP Server
+      for Hermes, Codex, or other MCP clients. Covers persistent Docker/CapRover
+      deployment, safe public/read-only exposure, embedding provider decisions,
+      dependency scanning, staleness reports, and quality gates against shallow
+      documentation indexes.
+    source:
+      type: internal
+      origin: "Generalized from an internal Docs MCP + CapRover implementation handoff in Skills Lab"
+      author: "Skills Lab + Hermes Agent"
+      created: "2026-07-09"
+      approved: null
+      approved_by: null
+      repository_url: null
+      no_repository_reason: "Skill interna/public-template, generalized from operational handoff before publishing"
+    installation:
+      runtime_path: null
+      repo_path: "skills/mcp/docs-mcp-server-operations/"
+      installed_date: null
+      installed_by: null
+      note: "Candidate public template — review before runtime install or public release"
+    audit:
+      security_review: "2026-07-09"
+      security_status: "passed"
+      findings:
+        - "Generalized internal handoff into company-agnostic placeholders and example domains"
+        - "Removed internal project/customer/person names from public skill package"
+        - "No real secrets, tokens, private repository names, local host paths, or tenant IDs in templates"
+        - "Scripts read credentials only from environment variables and do not print token values"
+        - "scan_repo_packages.py uses GitHub REST API directly; no interactive gh login required"
+        - "check_docs_staleness.py supports --list-json and --skip-registry for offline tests"
+        - "Quality gate explicitly warns that fresh temporal status is not enough"
+        - "Public exposure requires read-only mode or validated auth"
+      frontmatter_valid: true
+      company_agnostic: true
+      pitfalls_documented: true
+    files:
+      - path: "README.md"
+        size_bytes: 1009
+        status: "new"
+      - path: "SKILL.md"
+        size_bytes: 12853
+        status: "new"
+      - path: "references/caprover-secure-deployment.md"
+        size_bytes: 2953
+        status: "new"
+      - path: "references/client-configuration.md"
+        size_bytes: 1130
+        status: "new"
+      - path: "references/embedding-provider-decisions.md"
+        size_bytes: 1637
+        status: "new"
+      - path: "references/quality-gate-and-canary-searches.md"
+        size_bytes: 1979
+        status: "new"
+      - path: "scripts/check_docs_staleness.py"
+        size_bytes: 9051
+        status: "new"
+      - path: "scripts/scan_repo_packages.py"
+        size_bytes: 9906
+        status: "new"
+      - path: "templates/Dockerfile"
+        size_bytes: 783
+        status: "new"
+      - path: "templates/captain-definition.json"
+        size_bytes: 61
+        status: "new"
+      - path: "templates/docs-projects.example.yaml"
+        size_bytes: 1145
+        status: "new"
+      - path: "tests/test_docs_mcp_skill_security.py"
+        size_bytes: 1964
+        status: "new"
+      - path: "MANIFEST.sha256"
+        size_bytes: 1188
+        status: "new"
+    changelog:
+      - date: "2026-07-09"
+        action: "created candidate public skill"
+        details: >
+          Promoted an internal Docs MCP + CapRover handoff into a reusable public
+          skill package. Split the handoff into SKILL.md, references, templates,
+          scripts, tests, and manifest. Status: candidate — ready for Skills Lab
+          review before install or public publishing.
