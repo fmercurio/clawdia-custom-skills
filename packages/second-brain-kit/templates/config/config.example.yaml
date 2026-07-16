@@ -4,6 +4,7 @@
   "owner": "Example Owner",
   "organization": null,
   "vault_path": "/absolute/path/to/vault",
+  "vault_mode": "new",
   "profile": "second-brain",
   "locale": "pt-BR",
   "mode": "hybrid",

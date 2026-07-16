@@ -3,6 +3,8 @@
 from __future__ import annotations
 import argparse
 import json
+import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -10,6 +12,7 @@ from kitlib import config_path, hermes_home, install_bin_root, install_skill_roo
 
 PACKAGE = Path(__file__).resolve().parent.parent
 SKILLS = ("second-brain-operations", "pull-brain", "push-brain", "brain-search")
+RUNTIME_SCRIPTS = ("bootstrap.py", "brain_ops.py", "doctor.py", "kitlib.py", "okf_render.py", "uninstall.py")
 
 
 def cron_wrapper(config: Path, health_script: Path) -> str:
@@ -63,7 +66,7 @@ def main() -> int:
         for src in sorted(source_root.rglob("*")):
             if src.is_file() and "__pycache__" not in src.parts:
                 plan.append((src, install_skill_root(home, a.profile) / skill / src.relative_to(source_root)))
-    script_sources = list((PACKAGE / "scripts").glob("*.py")) + [
+    script_sources = [PACKAGE / "scripts" / name for name in RUNTIME_SCRIPTS] + [
         PACKAGE / "skills" / "brain-search" / "scripts" / "brain_search.py",
         PACKAGE / "skills" / "second-brain-operations" / "scripts" / "brain_health_check.py",
     ]
@@ -88,9 +91,13 @@ def main() -> int:
 
     ip = inventory_path(home, a.profile)
     managed_by_path = {}
+    previous_cron_registered = False
+    previous_cron_job_id = None
     if ip.exists():
         previous = json.loads(ip.read_text(encoding="utf-8"))
         managed_by_path = {item["path"]: item for item in previous.get("managed_files", []) if Path(item["path"]).exists()}
+        previous_cron_registered = bool(previous.get("cron_registered"))
+        previous_cron_job_id = previous.get("cron_job_id")
     managed_by_path[str(cfg_path)] = {"path": str(cfg_path), "sha256": sha256(cfg_path)}
     for src, dst in plan:
         dst.parent.mkdir(parents=True, exist_ok=True)
@@ -107,7 +114,8 @@ def main() -> int:
         "profile": a.profile,
         "vault_path": cfg["vault_path"],
         "managed_files": sorted(managed_by_path.values(), key=lambda item: item["path"]),
-        "cron_registered": bool(a.register_cron),
+        "cron_registered": previous_cron_registered or bool(a.register_cron),
+        "cron_job_id": previous_cron_job_id,
     }
     ip.parent.mkdir(parents=True, exist_ok=True)
     ip.write_text(json.dumps(inv, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -115,10 +123,17 @@ def main() -> int:
     if a.register_cron:
         cmd = [a.hermes_cli, "cron", "create", cfg["cron"]["schedule"], "--name", f"second-brain-health-{a.profile}", "--deliver", cfg["cron"]["deliver"], "--script", wrapper.name, "--no-agent"]
         try:
-            subprocess.run(cmd, check=True)
-        except subprocess.CalledProcessError as exc:
-            print(json.dumps({"ok": False, "error": f"runtime installed but cron registration failed: {exc}", "inventory": str(ip)}, ensure_ascii=False))
+            run = subprocess.run(cmd, check=True, capture_output=True, text=True, env={**os.environ, "HERMES_HOME": str(home)})
+        except (OSError, subprocess.CalledProcessError) as exc:
+            detail = getattr(exc, "stderr", None) or getattr(exc, "stdout", None) or str(exc)
+            print(json.dumps({"ok": False, "error": f"runtime installed but cron registration failed: {detail}", "inventory": str(ip)}, ensure_ascii=False))
             return 2
+        match = re.search(r"^Created job:\s*(\S+)\s*$", run.stdout, flags=re.MULTILINE)
+        if not match:
+            print(json.dumps({"ok": False, "error": "cron registration succeeded but Hermes did not return a job id; inspect the isolated HERMES_HOME before retrying", "inventory": str(ip)}, ensure_ascii=False))
+            return 2
+        inv["cron_job_id"] = match.group(1)
+        ip.write_text(json.dumps(inv, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(json.dumps({"ok": True, "dry_run": False, "operations": operations, "inventory": str(ip)}, ensure_ascii=False, indent=2))
     return 0
 

@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 PACKAGE = Path(__file__).resolve().parent.parent
@@ -79,6 +80,17 @@ class TestKitE2E(unittest.TestCase):
         self.assertIn("requires --existing", result.stdout)
         self.assertEqual(before, tree_fingerprint(self.vault))
 
+    def test_existing_vault_stays_on_existing_path_after_config_is_created(self):
+        self.vault.mkdir()
+        legacy = self.vault / "legacy.md"
+        legacy.write_text("# Existing\n", encoding="utf-8")
+        run("bootstrap.py", "--hermes-home", str(self.home), "--profile", self.profile, "--vault", str(self.vault), "--owner", "Example Owner", "--existing", "--apply", "--json")
+        before = tree_fingerprint(self.vault)
+        result = run("bootstrap.py", "--hermes-home", str(self.home), "--profile", self.profile, "--vault", str(self.vault), "--owner", "Example Owner", "--apply", "--json", check=False)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("requires --existing", result.stdout)
+        self.assertEqual(before, tree_fingerprint(self.vault))
+
     def test_query_requires_explicit_rebuild_and_does_not_mutate_vault(self):
         self.bootstrap()
         search = PACKAGE / "skills" / "brain-search" / "scripts" / "brain_search.py"
@@ -103,7 +115,21 @@ class TestKitE2E(unittest.TestCase):
         self.assertEqual(json.loads(stats.stdout)["restricted_indexed"], 0)
         subprocess.run([PYTHON, str(search), "--vault", str(self.vault), "--rebuild", "--include-restricted", "--json"], check=True, capture_output=True, text=True)
         result = subprocess.run([PYTHON, str(search), "--vault", str(self.vault), "--query", "ultrasecret", "--json"], check=True, capture_output=True, text=True)
+        self.assertEqual(json.loads(result.stdout)["results"], [])
+        result = subprocess.run([PYTHON, str(search), "--vault", str(self.vault), "--query", "ultrasecret", "--include-restricted", "--json"], check=True, capture_output=True, text=True)
         self.assertEqual(len(json.loads(result.stdout)["results"]), 1)
+
+    def test_restricted_yaml_comment_fails_closed_for_search_and_render(self):
+        self.bootstrap()
+        restricted = self.vault / "30_Resources" / "restricted-comment.md"
+        restricted.write_text("---\npara: resource\nstatus: active\nsensitivity: restricted # private note\n---\n# Restricted\ncommentsecret phrase\n", encoding="utf-8")
+        search = PACKAGE / "skills" / "brain-search" / "scripts" / "brain_search.py"
+        subprocess.run([PYTHON, str(search), "--vault", str(self.vault), "--rebuild", "--json"], check=True, capture_output=True, text=True)
+        result = subprocess.run([PYTHON, str(search), "--vault", str(self.vault), "--query", "commentsecret", "--json"], check=True, capture_output=True, text=True)
+        self.assertEqual(json.loads(result.stdout)["results"], [])
+        render = run("okf_render.py", "--hermes-home", str(self.home), "--profile", self.profile, "--apply", check=False)
+        self.assertEqual(render.returncode, 2)
+        self.assertIn("restricted notes present", render.stdout)
 
     def test_health_check_is_silent_when_healthy(self):
         self.bootstrap()
@@ -135,17 +161,32 @@ class TestKitE2E(unittest.TestCase):
         self.bootstrap()
         log = self.root / "cron-cli.log"
         fake = self.root / "fake-hermes"
-        fake.write_text(f"#!/bin/sh\nprintf '%s\\n' \"$*\" > {str(log)!r}\n", encoding="utf-8")
+        fake.write_text(f"#!/bin/sh\nprintf '%s\\n' \"$*\" > {str(log)!r}\nprintf 'Created job: fake-job-id\\n'\n", encoding="utf-8")
         fake.chmod(0o755)
         self.install("--enable-cron", "--register-cron", "--hermes-cli", str(fake))
         command = log.read_text(encoding="utf-8")
         self.assertIn("cron create", command)
         self.assertIn("--no-agent", command)
+        inventory = self.home / "second-brain-kit" / "profiles" / self.profile / "install-inventory.json"
+        self.assertEqual(json.loads(inventory.read_text(encoding="utf-8"))["cron_job_id"], "fake-job-id")
         refused = run("uninstall.py", "--hermes-home", str(self.home), "--profile", self.profile, "--apply", check=False)
         self.assertEqual(refused.returncode, 2)
         self.assertIn("pass --cron-removed", refused.stdout)
         removed = run("uninstall.py", "--hermes-home", str(self.home), "--profile", self.profile, "--apply", "--cron-removed")
         self.assertTrue(json.loads(removed.stdout)["ok"])
+
+    def test_plain_reinstall_preserves_registered_cron_state(self):
+        self.bootstrap()
+        fake = self.root / "fake-hermes"
+        fake.write_text("#!/bin/sh\nprintf 'Created job: fake-job-id\\n'\n", encoding="utf-8")
+        fake.chmod(0o755)
+        self.install("--enable-cron", "--register-cron", "--hermes-cli", str(fake))
+        self.install()
+        inventory = self.home / "second-brain-kit" / "profiles" / self.profile / "install-inventory.json"
+        self.assertTrue(json.loads(inventory.read_text(encoding="utf-8"))["cron_registered"])
+        refused = run("uninstall.py", "--hermes-home", str(self.home), "--profile", self.profile, "--apply", check=False)
+        self.assertEqual(refused.returncode, 2)
+        self.assertIn("pass --cron-removed", refused.stdout)
 
     def test_install_conflict_preflight_leaves_no_partial_install(self):
         self.bootstrap()
@@ -167,6 +208,17 @@ class TestKitE2E(unittest.TestCase):
         report = json.loads(run("uninstall.py", "--hermes-home", str(self.home), "--profile", self.profile, "--apply").stdout)
         self.assertEqual(Path(report["vault_preserved"]).resolve(), self.vault.resolve())
         self.assertEqual(sentinel.read_bytes(), before)
+
+    def test_only_runtime_safe_scripts_are_installed(self):
+        self.bootstrap()
+        self.install()
+        bin_root = self.home / "second-brain-kit" / "bin"
+        self.assertFalse((bin_root / "install.py").exists())
+        self.assertFalse((bin_root / "export.py").exists())
+        for name in ("bootstrap.py", "brain_ops.py", "doctor.py", "kitlib.py", "okf_render.py", "uninstall.py", "brain_search.py", "brain_health_check.py"):
+            self.assertTrue((bin_root / name).is_file(), name)
+        report = subprocess.run([PYTHON, str(bin_root / "doctor.py"), "--hermes-home", str(self.home), "--profile", self.profile, "--json"], capture_output=True, text=True)
+        self.assertEqual(report.returncode, 0, report.stdout + report.stderr)
 
     def test_uninstall_modified_file_preserves_inventory_and_runtime(self):
         self.bootstrap()
@@ -203,6 +255,24 @@ class TestKitE2E(unittest.TestCase):
         for line in (PACKAGE / "MANIFEST.sha256").read_text(encoding="utf-8").splitlines():
             digest, rel = line.split("  ", 1)
             self.assertEqual(hashlib.sha256((PACKAGE / rel).read_bytes()).hexdigest(), digest)
+
+    def test_exported_zip_installs_without_source_checkout(self):
+        archive = self.root / "second-brain-kit.zip"
+        run("export.py", "--output", str(archive))
+        extracted = self.root / "extracted"
+        with zipfile.ZipFile(archive) as bundle:
+            bundle.extractall(extracted)
+        package = extracted / "second-brain-kit"
+        isolated_home = self.root / "portable-hermes"
+        isolated_vault = self.root / "portable-vault"
+        common = ["--hermes-home", str(isolated_home), "--profile", self.profile]
+        bootstrap = subprocess.run([PYTHON, str(package / "scripts" / "bootstrap.py"), *common, "--vault", str(isolated_vault), "--owner", "Portable Test", "--apply", "--json"], capture_output=True, text=True)
+        self.assertEqual(bootstrap.returncode, 0, bootstrap.stdout + bootstrap.stderr)
+        install = subprocess.run([PYTHON, str(package / "scripts" / "install.py"), *common, "--apply", "--json"], capture_output=True, text=True)
+        self.assertEqual(install.returncode, 0, install.stdout + install.stderr)
+        doctor = subprocess.run([PYTHON, str(package / "scripts" / "doctor.py"), *common, "--smoke", "--json"], capture_output=True, text=True)
+        self.assertEqual(doctor.returncode, 0, doctor.stdout + doctor.stderr)
+        self.assertTrue(json.loads(doctor.stdout)["ok"])
 
     def test_remote_embedding_endpoint_fails_closed(self):
         spec = importlib.util.spec_from_file_location("kitlib_under_test", SCRIPTS / "kitlib.py")

@@ -591,7 +591,7 @@ skills:
         - "Restricted content is excluded from search and static render by default"
         - "Existing-vault discovery is read-only and dry-run-first"
         - "skill-architect methodology is attributed and remains build-time only"
-        - "16 package tests and 134 repository tests passed in clean-room verification"
+        - "24 package tests and 142 repository tests passed, including real Hermes and OKF integration"
       frontmatter_valid: true
       company_agnostic: true
       pitfalls_documented: true

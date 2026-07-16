@@ -23,7 +23,7 @@ def main() -> int:
     inv = json.loads(ip.read_text(encoding="utf-8"))
     vault = Path(inv["vault_path"]).resolve()
     if inv.get("cron_registered") and not a.cron_removed:
-        print(json.dumps({"ok": False, "error": "remove the registered Hermes cron job first, then pass --cron-removed", "inventory_preserved": str(ip), "vault_preserved": str(vault)}, indent=2))
+        print(json.dumps({"ok": False, "error": "remove the registered Hermes cron job first, then pass --cron-removed", "cron_job_id": inv.get("cron_job_id"), "inventory_preserved": str(ip), "vault_preserved": str(vault)}, indent=2))
         return 2
     removable, skipped = [], []
     for item in reversed(inv.get("managed_files", [])):

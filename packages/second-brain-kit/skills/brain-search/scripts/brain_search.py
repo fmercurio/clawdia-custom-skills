@@ -8,6 +8,30 @@ import sqlite3
 from pathlib import Path
 
 SKIP_DIRS = {".git", ".obsidian", ".brain-index", "node_modules", "__pycache__"}
+KNOWN_SENSITIVITY = {"public", "internal", "restricted"}
+
+
+def parse_yaml_scalar(value: str) -> str:
+    value = value.strip()
+    quote = None
+    escaped = False
+    for index, char in enumerate(value):
+        if quote:
+            if quote == '"' and char == "\\" and not escaped:
+                escaped = True
+                continue
+            if char == quote and not escaped:
+                quote = None
+            escaped = False
+            continue
+        if char in {"'", '"'} and index == 0:
+            quote = char
+        elif char == "#" and index > 0 and value[index - 1].isspace():
+            value = value[:index].rstrip()
+            break
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return value[1:-1]
+    return value
 
 
 def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
@@ -20,7 +44,7 @@ def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
     for line in text[4:end].splitlines():
         if ":" in line and not line.lstrip().startswith("-"):
             key, value = line.split(":", 1)
-            meta[key.strip()] = value.strip().strip("'\"")
+            meta[key.strip()] = parse_yaml_scalar(value)
     return meta, text[end + 5:]
 
 
@@ -58,6 +82,9 @@ def rebuild(vault: Path, include_restricted: bool = False) -> dict:
         text = path.read_text(encoding="utf-8", errors="replace")
         meta, body = parse_frontmatter(text)
         sensitivity = meta.get("sensitivity", "internal").lower()
+        if sensitivity not in KNOWN_SENSITIVITY:
+            skipped_restricted += 1
+            continue
         if sensitivity == "restricted" and not include_restricted:
             skipped_restricted += 1
             continue
@@ -71,7 +98,7 @@ def rebuild(vault: Path, include_restricted: bool = False) -> dict:
     return {"ok": True, "files_indexed": indexed, "restricted_skipped": skipped_restricted, "db": str(db_path(vault))}
 
 
-def search(vault: Path, query: str, limit: int = 8) -> list[dict]:
+def search(vault: Path, query: str, limit: int = 8, include_restricted: bool = False) -> list[dict]:
     if not db_path(vault).exists():
         raise FileNotFoundError("search index missing; run --rebuild explicitly")
     con = connect(vault)
@@ -83,8 +110,9 @@ def search(vault: Path, query: str, limit: int = 8) -> list[dict]:
       SELECT n.path,n.title,n.para,n.sensitivity,
              snippet(notes_fts,2,'>>>','<<<','…',24) AS snippet, bm25(notes_fts) AS rank
       FROM notes_fts JOIN notes n ON n.path=notes_fts.path
-      WHERE notes_fts MATCH ? ORDER BY rank LIMIT ?
-    """, (expression, limit)).fetchall()
+      WHERE notes_fts MATCH ? AND (? OR n.sensitivity != 'restricted')
+      ORDER BY rank LIMIT ?
+    """, (expression, include_restricted, limit)).fetchall()
     con.close()
     return [dict(row) for row in rows]
 
@@ -118,7 +146,7 @@ def main() -> int:
         result = rebuild(vault, args.include_restricted)
     elif args.query is not None:
         try:
-            results = search(vault, args.query, args.limit)
+            results = search(vault, args.query, args.limit, args.include_restricted)
         except FileNotFoundError as exc:
             print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False, indent=2))
             return 2

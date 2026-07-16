@@ -22,6 +22,22 @@ python3 scripts/doctor.py --hermes-home "$HERMES_HOME" --profile second-brain --
 
 No gateway restart is performed or required by these scripts.
 
+## Portable install from an exported ZIP
+
+Build the deterministic artifact on the source machine, copy it to the target environment, then run the same explicit-home flow from the extracted directory:
+
+```bash
+python3 scripts/export.py --output /tmp/second-brain-kit.zip
+unzip second-brain-kit.zip
+cd second-brain-kit
+export HERMES_HOME="/absolute/path/to/hermes-home"
+python3 scripts/bootstrap.py --hermes-home "$HERMES_HOME" --profile second-brain --vault "/absolute/path/to/vault" --owner "Owner" --apply --json
+python3 scripts/install.py --hermes-home "$HERMES_HOME" --profile second-brain --apply --json
+python3 scripts/doctor.py --hermes-home "$HERMES_HOME" --profile second-brain --smoke --json
+```
+
+For OKF rendering, install the pinned optional dependency with `gem install okf -v 1.6.0`. Cron registration requires a compatible `hermes` CLI and is always explicit.
+
 ## Existing vault
 
 Omit `--apply` and pass `--existing` for the mandatory read-only first audit. The audit does not move or rewrite notes.
@@ -34,7 +50,7 @@ When `okf` is detected and OKF is enabled in config:
 python3 scripts/okf_render.py --hermes-home "$HERMES_HOME" --profile second-brain --title "Knowledge Graph" --layout force --link "https://example.invalid/repository" --apply
 ```
 
-The adapter uses `okf render DIR -o FILE` and supports title, layout, and repository link. It refuses bundles containing restricted notes by default. Output is a frozen snapshot; rerun after changes. Large bundles create large self-contained HTML files.
+The adapter requires the configured OKF version, validates the bundle before rendering, and supports title, layout, and repository link. It refuses bundles containing restricted notes or Markdown symlinks. Output is a frozen snapshot; rerun after changes. Large bundles create large self-contained HTML files.
 
 ## Lifecycle
 

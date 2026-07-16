@@ -22,7 +22,7 @@ python3 ${KIT_BIN}/brain_search.py --vault ${VAULT_ROOT} --query "decision conte
 python3 ${KIT_BIN}/brain_search.py --vault ${VAULT_ROOT} --stats --json
 ```
 
-Use `--include-restricted` only inside an explicitly authorized restricted workflow. A remote embedding endpoint is invalid unless config explicitly enables data egress.
+Use `--include-restricted` on both rebuild and query only inside an explicitly authorized restricted workflow. A restricted-capable index still excludes restricted results from ordinary queries. A remote embedding endpoint is invalid unless config explicitly enables data egress.
 
 ## Exit criteria
 

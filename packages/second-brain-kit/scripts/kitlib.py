@@ -50,15 +50,18 @@ def inventory_path(home: Path, profile: str) -> Path:
     return home / "second-brain-kit" / "profiles" / profile_name(profile) / "install-inventory.json"
 
 
-def default_config(owner: str, vault: Path, profile: str, organization: str | None = None, mode: str = "hybrid") -> dict[str, Any]:
+def default_config(owner: str, vault: Path, profile: str, organization: str | None = None, mode: str = "hybrid", vault_mode: str = "new") -> dict[str, Any]:
     if mode not in {"para", "hybrid", "okf"}:
         raise ValueError("mode must be para, hybrid, or okf")
+    if vault_mode not in {"new", "existing"}:
+        raise ValueError("vault_mode must be new or existing")
     return {
         "schema_version": SCHEMA_VERSION,
         "kit_version": VERSION,
         "owner": owner,
         "organization": organization,
         "vault_path": str(vault.expanduser().resolve()),
+        "vault_mode": vault_mode,
         "profile": profile_name(profile),
         "locale": "pt-BR",
         "mode": mode,
@@ -92,6 +95,8 @@ def validate_config(data: dict[str, Any]) -> list[str]:
         errors.append("vault_path must be absolute")
     if data.get("mode") not in {"para", "hybrid", "okf"}:
         errors.append("mode must be para, hybrid, or okf")
+    if data.get("vault_mode") not in {"new", "existing"}:
+        errors.append("vault_mode must be new or existing")
     emb = data.get("embeddings", {})
     endpoint = emb.get("endpoint") if isinstance(emb, dict) else None
     if endpoint and not emb.get("allow_remote", False):
@@ -135,6 +140,29 @@ def write_if_missing(path: Path, content: str) -> bool:
     return True
 
 
+def parse_yaml_scalar(value: str) -> str:
+    value = value.strip()
+    quote: str | None = None
+    escaped = False
+    for index, char in enumerate(value):
+        if quote:
+            if quote == '"' and char == "\\" and not escaped:
+                escaped = True
+                continue
+            if char == quote and not escaped:
+                quote = None
+            escaped = False
+            continue
+        if char in {"'", '"'} and index == 0:
+            quote = char
+        elif char == "#" and index > 0 and value[index - 1].isspace():
+            value = value[:index].rstrip()
+            break
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return value[1:-1]
+    return value
+
+
 def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
     if not text.startswith("---\n"):
         return {}, text
@@ -145,7 +173,7 @@ def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
     for line in text[4:end].splitlines():
         if ":" in line and not line.lstrip().startswith("-"):
             key, value = line.split(":", 1)
-            meta[key.strip()] = value.strip().strip("'\"")
+            meta[key.strip()] = parse_yaml_scalar(value)
     return meta, text[end + 5:]
 
 
@@ -154,7 +182,8 @@ def note_is_restricted(path: Path) -> bool:
         meta, _ = parse_frontmatter(path.read_text(encoding="utf-8", errors="replace"))
     except OSError:
         return False
-    return meta.get("sensitivity", "internal").lower() == "restricted"
+    sensitivity = meta.get("sensitivity", "internal").lower()
+    return sensitivity not in {"public", "internal"}
 
 
 def safe_slug(value: str) -> str:

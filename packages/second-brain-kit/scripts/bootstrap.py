@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from kitlib import REQUIRED_DIRS, ROOT_DOCS, config_path, default_config, hermes_home, save_config, write_if_missing
+from kitlib import REQUIRED_DIRS, ROOT_DOCS, config_path, default_config, hermes_home, load_config, save_config, write_if_missing
 
 
 def audit(vault: Path) -> dict:
@@ -66,14 +66,22 @@ def main() -> int:
         report["error"] = "existing vault does not exist"
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return 2
-    if not args.existing and vault.exists() and any(vault.iterdir()) and not cfg_path.exists():
-        report["error"] = "non-empty vault requires --existing for read-only-first onboarding"
-        print(json.dumps(report, ensure_ascii=False, indent=2))
-        return 2
+    if not args.existing and vault.exists() and any(vault.iterdir()):
+        repeat_new_bootstrap = False
+        if cfg_path.exists():
+            try:
+                current = load_config(cfg_path)
+                repeat_new_bootstrap = current.get("vault_mode") == "new" and Path(current["vault_path"]).resolve() == vault
+            except (OSError, ValueError, json.JSONDecodeError):
+                repeat_new_bootstrap = False
+        if not repeat_new_bootstrap:
+            report["error"] = "non-empty vault requires --existing for read-only-first onboarding"
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+            return 2
     if args.apply:
         if not args.existing:
             report["created"] = create_vault(vault, args.owner, args.organization)
-        cfg = default_config(args.owner, vault, args.profile, args.organization, args.mode)
+        cfg = default_config(args.owner, vault, args.profile, args.organization, args.mode, "existing" if args.existing else "new")
         save_config(cfg_path, cfg)
         report["config"] = str(cfg_path)
     report["after"] = audit(vault)
