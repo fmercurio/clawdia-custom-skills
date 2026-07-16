@@ -3,9 +3,17 @@
 from __future__ import annotations
 import argparse
 import json
+import os
 import re
 import sqlite3
+import sys
 from pathlib import Path
+
+try:
+    from kitlib import private_directory
+except ModuleNotFoundError:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts"))
+    from kitlib import private_directory
 
 SKIP_DIRS = {".git", ".obsidian", ".brain-index", "node_modules", "__pycache__"}
 KNOWN_SENSITIVITY = {"public", "internal", "restricted"}
@@ -53,15 +61,31 @@ def db_path(vault: Path) -> Path:
 
 
 def connect(vault: Path) -> sqlite3.Connection:
-    target = db_path(vault)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(target)
+    index_dir = private_directory(vault, Path(".brain-index"))
+    target = index_dir / "brain_search.sqlite"
+    if target.is_symlink():
+        raise ValueError("symlinked search database is not allowed")
+    old_umask = os.umask(0o077)
+    try:
+        con = sqlite3.connect(target)
+    finally:
+        os.umask(old_umask)
+    target.chmod(0o600)
     con.row_factory = sqlite3.Row
     con.executescript("""
       CREATE TABLE IF NOT EXISTS notes(path TEXT PRIMARY KEY, title TEXT, para TEXT, sensitivity TEXT, body TEXT);
       CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(path UNINDEXED, title, body, tokenize='unicode61');
     """)
     return con
+
+
+def harden_index_permissions(vault: Path) -> None:
+    directory = db_path(vault).parent
+    directory.chmod(0o700)
+    for path in directory.glob("brain_search.sqlite*"):
+        if path.is_symlink() or not path.is_file():
+            raise ValueError("unsafe search database sidecar")
+        path.chmod(0o600)
 
 
 def iter_notes(vault: Path):
@@ -94,7 +118,7 @@ def rebuild(vault: Path, include_restricted: bool = False) -> dict:
         con.execute("INSERT INTO notes VALUES(?,?,?,?,?)", (rel, title, para, sensitivity, body))
         con.execute("INSERT INTO notes_fts(path,title,body) VALUES(?,?,?)", (rel, title, body))
         indexed += 1
-    con.commit(); con.close()
+    con.commit(); harden_index_permissions(vault); con.close()
     return {"ok": True, "files_indexed": indexed, "restricted_skipped": skipped_restricted, "db": str(db_path(vault))}
 
 
@@ -142,17 +166,17 @@ def main() -> int:
     vault = Path(args.vault).expanduser().resolve()
     if not vault.is_dir():
         print(json.dumps({"ok": False, "error": "vault not found"})); return 2
-    if args.rebuild:
-        result = rebuild(vault, args.include_restricted)
-    elif args.query is not None:
-        try:
+    try:
+        if args.rebuild:
+            result = rebuild(vault, args.include_restricted)
+        elif args.query is not None:
             results = search(vault, args.query, args.limit, args.include_restricted)
-        except FileNotFoundError as exc:
-            print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False, indent=2))
-            return 2
-        result = {"ok": True, "query": args.query, "results": results, "semantic": "fts-fallback" if args.vector else "disabled"}
-    else:
-        result = {"ok": True, **stats(vault)}
+            result = {"ok": True, "query": args.query, "results": results, "semantic": "fts-fallback" if args.vector else "disabled"}
+        else:
+            result = {"ok": True, **stats(vault)}
+    except (FileNotFoundError, OSError, ValueError, sqlite3.Error) as exc:
+        print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False, indent=2))
+        return 2
     print(json.dumps(result, ensure_ascii=False, indent=2) if args.json else result)
     return 0
 

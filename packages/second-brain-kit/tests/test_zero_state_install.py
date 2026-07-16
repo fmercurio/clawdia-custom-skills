@@ -3,6 +3,8 @@ import hashlib
 import importlib.util
 import json
 import os
+import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -146,6 +148,53 @@ class TestKitE2E(unittest.TestCase):
         pulled = json.loads(run("brain_ops.py", "--hermes-home", str(self.home), "--profile", self.profile, "pull", "--query", "deterministic retrieval").stdout)
         self.assertTrue(pulled["results"])
 
+    def test_push_refuses_symlinked_vault_layer(self):
+        self.bootstrap()
+        layer = self.vault / "10_Projects"
+        layer.rmdir()
+        outside = self.root / "outside-push"
+        outside.mkdir()
+        layer.symlink_to(outside, target_is_directory=True)
+        result = run(
+            "brain_ops.py", "--hermes-home", str(self.home), "--profile", self.profile,
+            "push", "--title", "Escaped Note", "--body", "sentinel", "--layer", "project",
+            check=False,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((outside / "escaped-note.md").exists())
+
+    def test_search_rebuild_refuses_symlinked_index_directory(self):
+        self.bootstrap()
+        outside = self.root / "outside-index"
+        outside.mkdir()
+        (self.vault / ".brain-index").symlink_to(outside, target_is_directory=True)
+        search = PACKAGE / "skills" / "brain-search" / "scripts" / "brain_search.py"
+        result = subprocess.run(
+            [PYTHON, str(search), "--vault", str(self.vault), "--rebuild", "--json"],
+            capture_output=True, text=True,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((outside / "brain_search.sqlite").exists())
+
+    def test_search_index_enforces_owner_only_permissions(self):
+        self.bootstrap()
+        restricted = self.vault / "30_Resources" / "restricted-mode.md"
+        restricted.write_text("---\nsensitivity: restricted\n---\n# Private\nsecret\n", encoding="utf-8")
+        search = PACKAGE / "skills" / "brain-search" / "scripts" / "brain_search.py"
+        old_umask = os.umask(0o022)
+        try:
+            result = subprocess.run(
+                [PYTHON, str(search), "--vault", str(self.vault), "--rebuild", "--include-restricted", "--json"],
+                capture_output=True, text=True,
+            )
+        finally:
+            os.umask(old_umask)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        index_dir = self.vault / ".brain-index"
+        database = index_dir / "brain_search.sqlite"
+        self.assertEqual(stat.S_IMODE(index_dir.stat().st_mode), 0o700)
+        self.assertEqual(stat.S_IMODE(database.stat().st_mode), 0o600)
+
     def test_cron_requires_opt_in_and_wrapper_has_no_false_notification(self):
         self.bootstrap()
         self.install()
@@ -255,6 +304,20 @@ class TestKitE2E(unittest.TestCase):
         for line in (PACKAGE / "MANIFEST.sha256").read_text(encoding="utf-8").splitlines():
             digest, rel = line.split("  ", 1)
             self.assertEqual(hashlib.sha256((PACKAGE / rel).read_bytes()).hexdigest(), digest)
+
+    def test_export_refuses_symlinked_package_member(self):
+        package = self.root / "second-brain-kit"
+        shutil.copytree(PACKAGE, package, symlinks=True)
+        outside = self.root / "outside-export.txt"
+        outside.write_text("disposable sentinel", encoding="utf-8")
+        (package / "leak.txt").symlink_to(outside)
+        archive = self.root / "unsafe.zip"
+        result = subprocess.run(
+            [PYTHON, str(package / "scripts" / "export.py"), "--output", str(archive)],
+            capture_output=True, text=True,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(archive.exists())
 
     def test_exported_zip_installs_without_source_checkout(self):
         archive = self.root / "second-brain-kit.zip"

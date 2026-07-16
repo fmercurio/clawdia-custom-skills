@@ -22,6 +22,56 @@ REQUIRED_DIRS = [*LAYERS.values(), "50_Templates", "_Hermes", "_Meta"]
 ROOT_DOCS = ["README.md", "MAPA.md", "PARA.md", "HERMES.md"]
 
 
+def _safe_relative_parts(relative: Path) -> tuple[str, ...]:
+    if relative.is_absolute() or not relative.parts or any(part in {"", ".", ".."} for part in relative.parts):
+        raise ValueError("path must be a non-empty relative path without traversal")
+    return relative.parts
+
+
+def private_directory(root: Path, relative: Path) -> Path:
+    """Create or validate an owner-only real directory beneath a trusted root."""
+    root = root.expanduser().resolve(strict=True)
+    parts = _safe_relative_parts(relative)
+    current = root
+    for part in parts:
+        current = current / part
+        if current.is_symlink():
+            raise ValueError(f"symlinked directory is not allowed beneath {root}")
+        if current.exists() and not current.is_dir():
+            raise ValueError(f"directory path is not a directory: {current}")
+        current.mkdir(mode=0o700, exist_ok=True)
+        if current.is_symlink() or not current.resolve(strict=True).is_relative_to(root):
+            raise ValueError(f"directory escapes configured root: {current}")
+    current.chmod(0o700)
+    return current
+
+
+def write_text_beneath(root: Path, relative: Path, content: str, *, encoding: str = "utf-8") -> Path:
+    """Exclusively create a file beneath root without following directory or leaf links."""
+    root = root.expanduser().resolve(strict=True)
+    parts = _safe_relative_parts(relative)
+    if os.open not in os.supports_dir_fd or os.mkdir not in os.supports_dir_fd:
+        raise OSError("secure contained writes require directory-relative filesystem operations")
+    directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    current_fd = os.open(root, directory_flags)
+    try:
+        for part in parts[:-1]:
+            try:
+                next_fd = os.open(part, directory_flags, dir_fd=current_fd)
+            except FileNotFoundError:
+                os.mkdir(part, mode=0o777, dir_fd=current_fd)
+                next_fd = os.open(part, directory_flags, dir_fd=current_fd)
+            os.close(current_fd)
+            current_fd = next_fd
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        file_fd = os.open(parts[-1], flags, 0o666, dir_fd=current_fd)
+        with os.fdopen(file_fd, "w", encoding=encoding) as stream:
+            stream.write(content)
+    finally:
+        os.close(current_fd)
+    return root.joinpath(*parts)
+
+
 def hermes_home(value: str | None = None) -> Path:
     return Path(value or os.environ.get("HERMES_HOME", "~/.hermes")).expanduser().resolve()
 
