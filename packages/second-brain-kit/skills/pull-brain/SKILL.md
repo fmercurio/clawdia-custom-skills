@@ -1,7 +1,7 @@
 ---
 name: pull-brain
 description: Load relevant consolidated context from a configured Second Brain before acting. Use for “carrega o cérebro”, “o que sabemos sobre X?”, project continuation, or a decision recall. Do not use when the answer is a trivial one-off with no durable context.
-version: 0.1.0-rc1
+version: 0.1.0-rc2
 author: Skills Lab
 license: MIT
 metadata:

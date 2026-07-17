@@ -9,7 +9,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-VERSION = "0.1.0-rc1"
+VERSION = "0.1.0-rc2"
 SCHEMA_VERSION = 1
 LAYERS = {
     "inbox": "00_Inbox",

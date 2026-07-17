@@ -1,7 +1,7 @@
 ---
 name: brain-search
 description: Search a configured Second Brain with SQLite FTS5 and optional semantic fallback. Use for keyword or concept retrieval, index rebuilds, and search diagnostics. Do not use to mutate canonical notes or expose restricted content.
-version: 0.1.0-rc1
+version: 0.1.0-rc2
 author: Skills Lab
 license: MIT
 metadata:

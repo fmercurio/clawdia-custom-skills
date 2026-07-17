@@ -1,7 +1,7 @@
 ---
 name: second-brain-operations
 description: Bootstrap, connect, diagnose, and maintain a Hermes-native Second Brain. Use for a new vault, an existing vault connection, health checks, optional cron, rollback, or package lifecycle work. Do not use for a one-off lookup or a single note save.
-version: 0.1.0-rc1
+version: 0.1.0-rc2
 author: Skills Lab
 license: MIT
 metadata:
@@ -26,14 +26,16 @@ Use for “quero criar meu Segundo Cérebro”, “conecte este vault”, “rod
 
 ## Sequential workflow
 
-1. Collect owner, optional organization, vault path, profile, mode, scopes, and sensitivity policy.
-2. Select **new** or **existing** context.
-3. For existing vaults, run read-only audit first and produce an adaptation manifest. No physical moves.
-4. Run `bootstrap.py` with explicit arguments; use `--apply` only after reviewing the plan.
-5. Run `install.py`; install into the configured profile and explicit `HERMES_HOME`.
-6. Run `doctor.py --smoke` and fix deterministic failures.
-7. Test a representative push, rebuild, pull, and health check.
-8. Offer cron only when explicitly authorized. Never restart the gateway.
+1. If the task is setup/installation and package source is available, open `docs/agent-guided-setup.md` and follow it verbatim.
+2. Collect owner, optional organization, vault path, profile, mode, scopes, and sensitivity policy.
+3. Select **new** or **existing** context.
+4. For existing vaults, run read-only audit first and produce an adaptation manifest. No physical moves.
+5. Run `bootstrap.py` with explicit arguments; use `--apply` only after reviewing the plan.
+6. Run `install.py`; install into the configured profile and explicit `HERMES_HOME`.
+7. Run `doctor.py --smoke --check-optional` and fix deterministic failures.
+8. Test rebuild, representative search/pull, and health check. Run a disposable push probe only for a new empty vault after authorization; never write to an existing vault during onboarding without separate approval.
+9. Offer cron only when explicitly authorized. Never restart the gateway.
+10. Ask one blocking question at a time and always include a recommended default plus reason, including during post-install changes.
 
 ## Safety and optional capabilities
 
@@ -52,3 +54,10 @@ OKF 1.6 static rendering is available only through the explicit adapter. A rende
 - Rollback inventory exists; uninstall preserves vault data.
 
 Read `references/workflow.md`, `references/knowledge-contracts.md`, and package-root documentation for details.
+
+## Setup interview mode
+
+Use when this package is being onboarded by another agent.
+- Start from `docs/agent-guided-setup.md`.
+- Preserve the one-question-at-a-time pattern with defaults and reasons through setup and any follow-up deployment-safe adjustments.
+- Never ask for environment details that are already available from files or process state.
