@@ -1,0 +1,20 @@
+schema_version: 1
+name: second-brain-kit
+version: 0.1.0-rc1
+status: candidate
+license: MIT
+python: ">=3.11"
+minimum_capabilities:
+  - sqlite-fts5
+skills:
+  - second-brain-operations
+  - pull-brain
+  - push-brain
+  - brain-search
+optional_capabilities:
+  - okf-1.6-render
+  - embeddings
+  - obsidian
+  - git-remote
+  - cron
+checksums: MANIFEST.sha256
