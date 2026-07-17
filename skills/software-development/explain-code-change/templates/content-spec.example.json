@@ -1,0 +1,183 @@
+{
+  "metadata": {
+    "title": "Fictional example: token cache consistency for profile picture generation",
+    "artifact_slug": "token-cache-consistency",
+    "change_id": "cp-2026-0717-auth-cache",
+    "base_ref": "main",
+    "target_ref": "feature/token-cache-refresh",
+    "seed": 20260717
+  },
+  "sections": [
+    {
+      "id": "background",
+      "title": "Background",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "In this fictional example, stale avatar URLs were served after profile updates. A refactor centralizes token refresh and cache invalidation in the auth gateway."
+        },
+        {
+          "type": "heading",
+          "level": 3,
+          "text": "Observed impact"
+        },
+        {
+          "type": "list",
+          "ordered": true,
+          "items": [
+            "Cache lookups could return expired profile URLs when token refresh fails silently.",
+            "Retry behavior duplicated across three call paths with inconsistent edge-case handling.",
+            "Tests only asserted success cases and missed token rotation rollback scenarios."
+          ]
+        },
+        {
+          "type": "callout",
+          "tone": "note",
+          "text": "Example evidence map: src/auth/gateway.py, tests/test_gateway.py, and docs/cache.md in a hypothetical inspected branch. Replace these with verified paths from the real change."
+        },
+        {
+          "type": "table",
+          "header": ["Component", "Problem before", "Problem after"],
+          "rows": [
+            ["Auth gateway", "Retry branch dropped updated token", "Single resolver with guarded writeback"],
+            ["Profile loader", "Duplicate cache clear calls", "One idempotent cache invalidate helper"],
+            ["Tests", "Only success assertions", "Failure + rollback matrix"]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "intuition",
+      "title": "Intuition",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "Think of the cache as a signed notebook. Before this change, every reader touched it in a different way. Now all updates flow through one checkpoint before data is returned."
+        },
+        {
+          "type": "flow",
+          "steps": [
+            "Validate token age and metadata before cache read.",
+            "Resolve token only through the shared `TokenResolver` helper.",
+            "Invalidate stale cache entries deterministically.",
+            "Persist refreshed token only once and return normalized payload."
+          ]
+        },
+        {
+          "type": "code",
+          "language": "python",
+          "label": "Before (conceptual pattern)",
+          "code": "def get_avatar_url(user_id):\n    # Multiple handlers, partial cleanup\n    cached = CACHE.get(user_id)\n    if cached and cached.valid:\n        return cached.value\n    token = refresh_token(user_id)\n    CACHE[user_id] = token\n    return token"
+        }
+      ]
+    },
+    {
+      "id": "code",
+      "title": "What changed in code",
+      "blocks": [
+        {
+          "type": "before_after",
+          "title": "Refactor comparison",
+          "before": [
+            {
+              "type": "paragraph",
+              "text": "Three routes checked token state independently and each one logged a different edge case."
+            },
+            {
+              "type": "list",
+              "items": ["Inconsistent invalidation", "Different errors on failure", "No shared rollback"]
+            }
+          ],
+          "after": [
+            {
+              "type": "paragraph",
+              "text": "A single resolver now owns state transitions and returns deterministic results for all callers."
+            },
+            {
+              "type": "list",
+              "items": ["Centralized invalidation", "Single rollback policy", "Explicit caller contract"]
+            }
+          ]
+        },
+        {
+          "type": "code",
+          "language": "python",
+          "label": "After (conceptual pattern)",
+          "code": "def resolve_profile_avatar(user_id, *, now=utcnow):\n    state = token_store.get(user_id)\n    if state and not state.is_stale(now):\n        return state.url\n\n    refreshed = token_resolver.refresh(user_id)\n    token_store.invalidate(user_id)\n    token_store.upsert(user_id, refreshed)\n    return refreshed.url\n"
+        },
+        {
+          "type": "callout",
+          "tone": "tip",
+          "text": "Keep this section in sync with diff line references in the verification notes section."
+        }
+      ]
+    },
+    {
+      "id": "quiz",
+      "title": "Check your understanding",
+      "questions": [
+        {
+          "id": "q1",
+          "prompt": "Why was a shared resolver introduced in the refactor?",
+          "options": [
+            "To deduplicate token refresh logic and guarantee identical rollback behavior across callers.",
+            "To speed up startup time in every route.",
+            "To remove cache usage entirely.",
+            "To make token generation asynchronous by default."
+          ],
+          "correct_index": 0,
+          "explanation": "The resolver aligns shared edge cases and prevents stale writes."
+        },
+        {
+          "id": "q2",
+          "prompt": "What was the highest-priority bug symptom described in the scenario?",
+          "options": [
+            "Excessive CPU usage on unrelated endpoints.",
+            "Stale avatar URLs after profile updates.",
+            "A login loop for all users.",
+            "A schema migration failure in production."
+          ],
+          "correct_index": 1,
+          "explanation": "The stated incident focused on stale values being returned." 
+        },
+        {
+          "id": "q3",
+          "prompt": "Which section is the best place to place the caller impact note?",
+          "options": [
+            "Only in the final section summary.",
+            "Within the code section, next to the new helper contract.",
+            "Inside the quiz question explanations.",
+            "In an external system design diagram only."
+          ],
+          "correct_index": 1,
+          "explanation": "Caller impact is part of implementation behavior, not quiz text."
+        },
+        {
+          "id": "q4",
+          "prompt": "What does deterministic output help with for this skill?",
+          "options": [
+            "It avoids randomness in diff inspection.",
+            "It removes the need for metadata.",
+            "It guarantees reproducible quiz shuffling for review and testing.",
+            "It encrypts local HTML artifacts automatically."
+          ],
+          "correct_index": 2,
+          "explanation": "Reproducibility makes review and artifact drift tests stable."
+        },
+        {
+          "id": "q5",
+          "prompt": "Which output constraint is required by the renderer?",
+          "options": [
+            "Must be a single offline, self-contained HTML file.",
+            "Must only include remote scripts and styles for richer rendering.",
+            "Must push directly to cloud storage without user review.",
+            "Must include inline click handlers for immediate interaction.",
+            "Must execute remote API calls when opened." 
+          ],
+          "correct_index": 0,
+          "explanation": "Artifacts are local, standalone, and offline by contract."
+        }
+      ]
+    }
+  ]
+}

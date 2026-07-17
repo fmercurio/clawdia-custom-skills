@@ -556,3 +556,71 @@ skills:
           skill package. Added a README focused on non-technical operators asking
           their own agent to configure specialist topic/channel profiles. Status:
           candidate — awaiting Skills Lab review/approval.
+
+  - name: explain-code-change
+    status: approved
+    version: 0.1.0
+    category: software-development
+    description: >
+      Generate a source-grounded explanation artifact for code changes with a
+      fact/interpretation split, structured content sections, quiz quality
+      validations, deterministic option shuffling, and a single offline HTML
+      artifact output.
+    source:
+      type: external
+      origin: "External gist reference + Hermes-native clean-room implementation"
+      author: "Hermes Agent"
+      created: "2026-07-17"
+      approved: "2026-07-17"
+      approved_by: "Felippe M."
+      zip_received: null
+      repository_url: "https://gist.github.com/geoffreylitt/a29df1b5f9865506e8952488eac3d524"
+      upstream_license: "not stated"
+      conceptual_provenance_note: "No prose copied verbatim; high-level workflow and structure only."
+    installation:
+      runtime_path: "~/.hermes/skills/software-development/explain-code-change/"
+      repo_path: "skills/software-development/explain-code-change/"
+      installed_date: "2026-07-17"
+      installed_by: "Hermes Agent"
+      note: "Runtime synced from validated v0.1.0 after explicit user approval and browser-tested dogfood render."
+    audit:
+      security_review: "2026-07-17"
+      security_status: "passed"
+      findings:
+        - "Clean-room adaptation only; source-of-truth workflow requires diff/base/callers/tests/config/docs review."
+        - "No network calls, subprocess usage, or external assets in renderer."
+        - "Render output uses inline HTML/CSS/JS and writes artifact with mode 0600."
+        - "Quiz quality checks enforce exact five questions and 3-5 options per question."
+      frontmatter_valid: true
+      company_agnostic: true
+      pitfalls_documented: true
+      test_coverage:
+        - "Content spec and renderer unit tests"
+        - "Strict/non-strict quiz leakage behavior"
+        - "Deterministic output and balanced option positions"
+    files:
+      - path: "SKILL.md"
+        size_bytes: 6179
+        status: "new"
+      - path: "scripts/render_explanation.py"
+        size_bytes: 26853
+        status: "new"
+      - path: "templates/content-spec.example.json"
+        size_bytes: 7407
+        status: "new"
+      - path: "references/content-spec.md"
+        size_bytes: 2517
+        status: "new"
+      - path: "tests/test_render_explanation.py"
+        size_bytes: 6700
+        status: "new"
+      - path: "MANIFEST.sha256"
+        size_bytes: 465
+        status: "new"
+    changelog:
+      - date: "2026-07-17"
+        action: "initial candidate entry"
+        details: >
+          Added dedicated Hermes-native explain-code-change skill with deterministic
+          renderer, offline artifact generation, quiz validation, and tests.
+          Approved by Felippe after technical review; runtime installation validated.
