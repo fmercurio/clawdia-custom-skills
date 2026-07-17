@@ -1,7 +1,7 @@
 ---
 name: skill-architecture-workflow
 description: "Use when deciding whether a recurring workflow should become a Hermes skill, designing a new skill before authoring it, or adapting an external skill into the governed ClawdIA/Hermes library. Produces scope, triggers, architecture, validation, and promotion criteria. Do not use for a one-off answer, direct runtime installation, or writing an implementation before the workflow is understood."
-version: 0.1.0
+version: 0.1.1
 author: Skills Lab (adapted from Felipe Rodrigues' skill-architect)
 license: CC-BY-4.0
 metadata:
@@ -194,7 +194,7 @@ Quando a arquitetura estiver aprovada:
 1. Criar ou atualizar a skill no repositório canônico em `~/.hermes/custom-skills/`.
 2. Usar frontmatter compatível com Hermes: `name`, `description`, `version`, `author`, `license` e `metadata.hermes`.
 3. Usar `SKILL.md` para gatilhos, passos, pitfalls e checklist; mover profundidade para arquivos vinculados.
-4. Incluir atribuição e licença quando o material vier de fonte externa.
+4. Quando houver fonte externa, criar `references/provenance.md` com URL, autor, licença, revisão completa, data, limites da adaptação, decisões adotadas/rejeitadas e política de revalidação.
 5. Não instalar no runtime nem copiar para profiles sem aprovação explícita para esse estágio.
 6. Atualizar `registry/skills-registry.yaml` com fonte, status, auditoria, paths e critério de promoção.
 
@@ -261,4 +261,4 @@ Esta skill adapta os princípios de descoberta, arquitetura, disclosure progress
 - https://agent-skills.techleads.club/skills/skill-architect/
 - https://github.com/tech-leads-club/agent-skills
 
-A adaptação remove o instalador externo e substitui ferramentas/suposições não-Hermes por governança, registry e validação Hermes-native.
+A adaptação remove o instalador externo e substitui ferramentas/suposições não-Hermes por governança, registry e validação Hermes-native. O ledger completo — revisão analisada, licença, fronteira da adaptação e política de revalidação — está em `references/provenance.md`.

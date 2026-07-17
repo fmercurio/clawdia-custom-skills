@@ -557,9 +557,143 @@ skills:
           their own agent to configure specialist topic/channel profiles. Status:
           candidate — awaiting Skills Lab review/approval.
 
+  - name: second-brain-kit
+    status: candidate
+    version: 0.1.0-rc1
+    category: note-taking
+    description: >
+      Hermes-native installable suite for bootstrapping a new Second Brain or
+      connecting an existing Markdown vault, with profile-aware skills, FTS5,
+      health checks, deterministic lifecycle scripts, rollback and optional OKF.
+    source:
+      type: internal-with-external-method-adaptation
+      origin: "Skills Lab — generic productization of the Second Brain suite"
+      author: "Skills Lab"
+      created: "2026-07-16"
+      approved: null
+      approved_by: null
+      repository_url: "https://github.com/tech-leads-club/agent-skills"
+      source_url: "https://agent-skills.techleads.club/skills/skill-architect/"
+      source_commit: "e7ab0caa0c0a055e6b230c72769e75a6cb4cbdb5"
+      source_license: "CC-BY-4.0"
+    installation:
+      runtime_path: null
+      repo_path: "packages/second-brain-kit/"
+      installed_date: null
+      installed_by: null
+      note: "Release candidate only; clean-room install is tested in temporary HERMES_HOME and is not installed in the active runtime."
+    audit:
+      security_review: "2026-07-16"
+      security_status: "passed"
+      findings:
+        - "Core is parameterized and contains no tenant paths, identities or credentials"
+        - "FTS5 is mandatory; OKF, embeddings, Obsidian, Git remote and cron are optional"
+        - "Restricted content is excluded from search and static render by default"
+        - "Existing-vault discovery is read-only and dry-run-first"
+        - "skill-architect methodology is attributed and remains build-time only"
+        - "24 package tests and 142 repository tests passed, including real Hermes and OKF integration"
+      frontmatter_valid: true
+      company_agnostic: true
+      pitfalls_documented: true
+    files:
+      - path: "packages/second-brain-kit/"
+        status: "new"
+        note: "Installable multi-skill package with scripts, templates, docs, tests and reproducible export"
+    changelog:
+      - date: "2026-07-16"
+        action: "created release candidate"
+        details: >
+          Consolidated four operational skills and deterministic lifecycle tooling
+          into a clean-room-installable Hermes package. Status remains candidate;
+          no active runtime installation or main-branch merge is authorized.
+
+  - name: explain-code-change
+    status: approved
+    version: 0.1.1
+    category: software-development
+    description: >
+      Generate a source-grounded explanation artifact for code changes with a
+      fact/interpretation split, structured content sections, quiz quality
+      validations, deterministic option shuffling, and a single offline HTML
+      artifact output.
+    source:
+      type: external
+      origin: "External gist reference + Hermes-native clean-room implementation"
+      author: "Hermes Agent"
+      created: "2026-07-17"
+      approved: "2026-07-17"
+      approved_by: "Felippe M."
+      zip_received: null
+      repository_url: "https://gist.github.com/geoffreylitt/a29df1b5f9865506e8952488eac3d524"
+      upstream_ref: "126e7fe9eecaafadfe1ac8bb183d135812b608f2"
+      upstream_html_ref: "e4982a26bc8975dd45eeb96ad8c68f2f25fc42c7"
+      last_checked_at: "2026-07-17T09:30:09-03:00"
+      catalog_id: "geoffreylitt-explain-diff"
+      upstream_license: "not stated"
+      conceptual_provenance_note: "No prose copied verbatim; high-level workflow and structure only."
+      revalidation_policy: "Read-only on upstream revision change or when materially editing after 90 days; no automatic imports."
+    installation:
+      runtime_path: "~/.hermes/skills/software-development/explain-code-change/"
+      repo_path: "skills/software-development/explain-code-change/"
+      installed_date: "2026-07-17"
+      installed_by: "Hermes Agent"
+      note: "Runtime synced from validated v0.1.1 after explicit user approval; includes provenance ledger and upstream revalidation policy."
+    audit:
+      security_review: "2026-07-17"
+      security_status: "passed"
+      findings:
+        - "Clean-room adaptation only; source-of-truth workflow requires diff/base/callers/tests/config/docs review."
+        - "No network calls, subprocess usage, or external assets in renderer."
+        - "Render output uses inline HTML/CSS/JS and writes artifact with mode 0600."
+        - "Quiz quality checks enforce exact five questions and 3-5 options per question."
+      frontmatter_valid: true
+      company_agnostic: true
+      pitfalls_documented: true
+      test_coverage:
+        - "Content spec and renderer unit tests"
+        - "Strict/non-strict quiz leakage behavior"
+        - "Deterministic output and balanced option positions"
+    files:
+      - path: "SKILL.md"
+        size_bytes: 6798
+        status: "new"
+      - path: "scripts/render_explanation.py"
+        size_bytes: 26841
+        status: "new"
+      - path: "templates/content-spec.example.json"
+        size_bytes: 7405
+        status: "new"
+      - path: "references/content-spec.md"
+        size_bytes: 2517
+        status: "new"
+      - path: "references/provenance.md"
+        size_bytes: 5420
+        status: "new"
+        note: "External source ledger, license observations, adopted/rejected decisions, and revision-triggered revalidation procedure."
+      - path: "tests/test_render_explanation.py"
+        size_bytes: 6700
+        status: "new"
+      - path: "MANIFEST.sha256"
+        size_bytes: 556
+        status: "new"
+    changelog:
+      - date: "2026-07-17"
+        action: "initial candidate entry"
+        details: >
+          Added dedicated Hermes-native explain-code-change skill with deterministic
+          renderer, offline artifact generation, quiz validation, and tests.
+          Approved by Felippe after technical review; runtime installation validated.
+      - date: "2026-07-17"
+        action: "v0.1.1 provenance hardening"
+        details: >
+          Added references/provenance.md with exact upstream revisions, license observations,
+          community influences, adopted/rejected decisions, internal composition dependencies,
+          and revision-triggered read-only revalidation. Linked the Skills Lab catalog entry
+          and explicitly prohibited blind automatic imports.
+
   - name: skill-architecture-workflow
     status: candidate
-    version: 0.1.0
+    version: 0.1.1
     category: productivity
     description: >
       Hermes-native workflow for deciding whether a recurring need deserves a skill,
@@ -570,11 +704,11 @@ skills:
       origin: "Adapted for Hermes/ClawdIA from Tech Leads Club skill-architect"
       author: "Skills Lab; source attribution: Felipe Rodrigues"
       created: "2026-07-15"
-      approved: "2026-07-15"
-      approved_by: "Felippe M."
+      approved: null
+      approved_by: null
       repository_url: "https://github.com/tech-leads-club/agent-skills"
       source_url: "https://agent-skills.techleads.club/skills/skill-architect/"
-      source_commit: "6663279"
+      source_commit: "6663279cd659b60cecb3e8d2dcc13162c88a8b7a"
       source_license: "CC-BY-4.0"
     installation:
       runtime_path: null
@@ -584,7 +718,7 @@ skills:
       note: "Candidate only — source artifact is governed in the repo; runtime installation awaits promotion decision."
     audit:
       security_review: "2026-07-15"
-      security_status: "passed-with-adaptation"
+      security_status: "passed"
       findings:
         - "Source skill and references contain no network or shell execution instructions; included source validator is local-only."
         - "External npx installer was not executed; it is not Hermes-aware and targets other agent directories."
@@ -596,13 +730,21 @@ skills:
       pitfalls_documented: true
     files:
       - path: "SKILL.md"
-        size_bytes: 12522
+        size_bytes: 12793
         status: "new"
         note: "Discovery, architecture, trigger contract, governance and promotion workflow adapted for Hermes."
       - path: "references/quality-gates.md"
         size_bytes: 2541
         status: "new"
         note: "Description scorecard, activation tests, security matrix and promotion criteria."
+      - path: "references/provenance.md"
+        size_bytes: 2897
+        status: "new"
+        note: "Exact upstream revision, CC-BY-4.0 attribution, adaptation boundary, and revalidation policy."
+      - path: "MANIFEST.sha256"
+        size_bytes: 260
+        status: "new"
+        note: "Checksums for all governed package contents."
     changelog:
       - date: "2026-07-15"
         action: "created external adaptation"
@@ -611,3 +753,9 @@ skills:
           trigger/anti-trigger and validation patterns from skill-architect. Removed direct
           installer assumptions and added Hermes-native governance, security gates, registry
           status and runtime-promotion requirements. Status: candidate pending validation.
+      - date: "2026-07-17"
+        action: "v0.1.1 provenance and registry hardening"
+        details: >
+          Added a full provenance ledger and revision-triggered revalidation policy; normalized
+          candidate approval fields and security status; expanded the upstream short commit to
+          its full immutable SHA. Candidate remains repo-only pending representative use.
