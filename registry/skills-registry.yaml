@@ -691,6 +691,75 @@ skills:
           and revision-triggered read-only revalidation. Linked the Skills Lab catalog entry
           and explicitly prohibited blind automatic imports.
 
+  - name: skill-architecture-workflow
+    status: candidate
+    version: 0.1.1
+    category: productivity
+    description: >
+      Hermes-native workflow for deciding whether a recurring need deserves a skill,
+      then designing its scope, trigger contract, progressive disclosure, safety gates,
+      validation, provenance, and promotion path through the governed custom-skills library.
+    source:
+      type: external-adaptation
+      origin: "Adapted for Hermes/ClawdIA from Tech Leads Club skill-architect"
+      author: "Skills Lab; source attribution: Felipe Rodrigues"
+      created: "2026-07-15"
+      approved: null
+      approved_by: null
+      repository_url: "https://github.com/tech-leads-club/agent-skills"
+      source_url: "https://agent-skills.techleads.club/skills/skill-architect/"
+      source_commit: "6663279cd659b60cecb3e8d2dcc13162c88a8b7a"
+      source_license: "CC-BY-4.0"
+    installation:
+      runtime_path: null
+      repo_path: "skills/productivity/skill-architecture-workflow/"
+      installed_date: null
+      installed_by: null
+      note: "Candidate only — source artifact is governed in the repo; runtime installation awaits promotion decision."
+    audit:
+      security_review: "2026-07-15"
+      security_status: "passed"
+      findings:
+        - "Source skill and references contain no network or shell execution instructions; included source validator is local-only."
+        - "External npx installer was not executed; it is not Hermes-aware and targets other agent directories."
+        - "Adaptation replaces present_files and external-agent assumptions with Hermes skill_manage, registry and runtime-promotion workflow."
+        - "No scripts, credentials, hardcoded tenant data or operational secrets included."
+        - "CC-BY-4.0 provenance and attribution retained in the SKILL.md."
+      frontmatter_valid: true
+      company_agnostic: true
+      pitfalls_documented: true
+    files:
+      - path: "SKILL.md"
+        size_bytes: 12793
+        status: "new"
+        note: "Discovery, architecture, trigger contract, governance and promotion workflow adapted for Hermes."
+      - path: "references/quality-gates.md"
+        size_bytes: 2541
+        status: "new"
+        note: "Description scorecard, activation tests, security matrix and promotion criteria."
+      - path: "references/provenance.md"
+        size_bytes: 2897
+        status: "new"
+        note: "Exact upstream revision, CC-BY-4.0 attribution, adaptation boundary, and revalidation policy."
+      - path: "MANIFEST.sha256"
+        size_bytes: 260
+        status: "new"
+        note: "Checksums for all governed package contents."
+    changelog:
+      - date: "2026-07-15"
+        action: "created external adaptation"
+        details: >
+          Selectively adapted the high-value discovery, architecture, progressive disclosure,
+          trigger/anti-trigger and validation patterns from skill-architect. Removed direct
+          installer assumptions and added Hermes-native governance, security gates, registry
+          status and runtime-promotion requirements. Status: candidate pending validation.
+      - date: "2026-07-17"
+        action: "v0.1.1 provenance and registry hardening"
+        details: >
+          Added a full provenance ledger and revision-triggered revalidation policy; normalized
+          candidate approval fields and security status; expanded the upstream short commit to
+          its full immutable SHA. Candidate remains repo-only pending representative use.
+
   - name: docs-mcp-server-operations
     status: candidate
     version: 1.0.1
