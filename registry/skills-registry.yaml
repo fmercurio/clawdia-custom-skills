@@ -559,7 +559,7 @@ skills:
 
   - name: explain-code-change
     status: approved
-    version: 0.1.0
+    version: 0.1.1
     category: software-development
     description: >
       Generate a source-grounded explanation artifact for code changes with a
@@ -575,14 +575,19 @@ skills:
       approved_by: "Felippe M."
       zip_received: null
       repository_url: "https://gist.github.com/geoffreylitt/a29df1b5f9865506e8952488eac3d524"
+      upstream_ref: "126e7fe9eecaafadfe1ac8bb183d135812b608f2"
+      upstream_html_ref: "e4982a26bc8975dd45eeb96ad8c68f2f25fc42c7"
+      last_checked_at: "2026-07-17T09:30:09-03:00"
+      catalog_id: "geoffreylitt-explain-diff"
       upstream_license: "not stated"
       conceptual_provenance_note: "No prose copied verbatim; high-level workflow and structure only."
+      revalidation_policy: "Read-only on upstream revision change or when materially editing after 90 days; no automatic imports."
     installation:
       runtime_path: "~/.hermes/skills/software-development/explain-code-change/"
       repo_path: "skills/software-development/explain-code-change/"
       installed_date: "2026-07-17"
       installed_by: "Hermes Agent"
-      note: "Runtime synced from validated v0.1.0 after explicit user approval and browser-tested dogfood render."
+      note: "Runtime synced from validated v0.1.1 after explicit user approval; includes provenance ledger and upstream revalidation policy."
     audit:
       security_review: "2026-07-17"
       security_status: "passed"
@@ -600,7 +605,7 @@ skills:
         - "Deterministic output and balanced option positions"
     files:
       - path: "SKILL.md"
-        size_bytes: 6179
+        size_bytes: 6798
         status: "new"
       - path: "scripts/render_explanation.py"
         size_bytes: 26853
@@ -611,11 +616,15 @@ skills:
       - path: "references/content-spec.md"
         size_bytes: 2517
         status: "new"
+      - path: "references/provenance.md"
+        size_bytes: 5420
+        status: "new"
+        note: "External source ledger, license observations, adopted/rejected decisions, and revision-triggered revalidation procedure."
       - path: "tests/test_render_explanation.py"
         size_bytes: 6700
         status: "new"
       - path: "MANIFEST.sha256"
-        size_bytes: 465
+        size_bytes: 556
         status: "new"
     changelog:
       - date: "2026-07-17"
@@ -624,3 +633,10 @@ skills:
           Added dedicated Hermes-native explain-code-change skill with deterministic
           renderer, offline artifact generation, quiz validation, and tests.
           Approved by Felippe after technical review; runtime installation validated.
+      - date: "2026-07-17"
+        action: "v0.1.1 provenance hardening"
+        details: >
+          Added references/provenance.md with exact upstream revisions, license observations,
+          community influences, adopted/rejected decisions, internal composition dependencies,
+          and revision-triggered read-only revalidation. Linked the Skills Lab catalog entry
+          and explicitly prohibited blind automatic imports.

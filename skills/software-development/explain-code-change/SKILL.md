@@ -1,7 +1,7 @@
 ---
 name: explain-code-change
 description: "Use when a diff, branch, commit, or PR needs a secure, source-grounded teaching artifact with deterministic quiz reinforcement and offline self-contained HTML output."
-version: 0.1.0
+version: 0.1.1
 author: Hermes Agent
 license: MIT
 metadata:
@@ -23,6 +23,19 @@ metadata:
 This skill implements an **Explain Change** mode for code-review workflows. It is a clean-room Hermes-native adaptation inspired by the external outline at `https://gist.github.com/geoffreylitt/a29df1b5f9865506e8952488eac3d524`. No prose from that source was copied verbatim; only high-level structure was reused as a conceptual reference.
 
 Use this skill when the request is to summarize a code diff and teach what changed, why it changed, and how to reason about it safely.
+
+## Provenance and Upstream Maintenance
+
+The complete source ledger, adopted/rejected decisions, reviewed revisions, license observations, and revalidation procedure live in `references/provenance.md`.
+
+Use that reference when:
+
+- changing this skill materially;
+- checking whether the original sources evolved;
+- deciding whether an upstream improvement should be incorporated;
+- answering who influenced a specific mechanism.
+
+Do not auto-import upstream changes. Revalidate read-only, compare capability deltas, and incorporate only reviewed improvements through the governed repo, tests, manifest, and PR workflow.
 
 ## Triggers
 
