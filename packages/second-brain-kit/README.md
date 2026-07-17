@@ -1,4 +1,4 @@
-# second-brain-kit 0.1.0-rc1
+# second-brain-kit 0.1.0-rc2
 
 Hermes-native candidate package for creating a new Second Brain or connecting an existing Markdown vault without hardcoded identities, paths, optional services, or credentials.
 
@@ -37,6 +37,16 @@ python3 scripts/doctor.py --hermes-home "$HERMES_HOME" --profile second-brain --
 ```
 
 For OKF rendering, install the pinned optional dependency with `gem install okf -v 1.6.0`. Cron registration requires a compatible `hermes` CLI and is always explicit.
+
+## Agent-guided setup handoff
+
+For another Hermes-capable agent, give the package path and instruct it to follow the handoff flow in [docs/agent-guided-setup.md](docs/agent-guided-setup.md).
+
+Copy/paste starter:
+
+```text
+Use the second-brain-kit at <ABSOLUTE_PACKAGE_PATH> and follow docs/agent-guided-setup.md. Inspect the package and target environment first, then conduct the setup interview in my language, one blocking question at a time, with a recommended default and reason. After the decision ledger is complete, run dry-runs, request the documented apply gate, deploy, run doctor/smoke checks, and report rollback details.
+```
 
 ## Existing vault
 

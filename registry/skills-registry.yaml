@@ -559,7 +559,7 @@ skills:
 
   - name: second-brain-kit
     status: candidate
-    version: 0.1.0-rc1
+    version: 0.1.0-rc2
     category: note-taking
     description: >
       Hermes-native installable suite for bootstrapping a new Second Brain or
@@ -606,6 +606,11 @@ skills:
           Consolidated four operational skills and deterministic lifecycle tooling
           into a clean-room-installable Hermes package. Status remains candidate;
           no active runtime installation or main-branch merge is authorized.
+      - date: "2026-07-17"
+        action: "added agent-guided setup handoff"
+        details: >
+          Added a package-scoped handoff document and tests for one-question-at-a-time
+          safe deployment interviews. Updated versioning to 0.1.0-rc2.
 
   - name: explain-code-change
     status: approved

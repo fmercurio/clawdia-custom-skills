@@ -1,6 +1,6 @@
 schema_version: 1
 name: second-brain-kit
-version: 0.1.0-rc1
+version: 0.1.0-rc2
 status: candidate
 license: MIT
 python: ">=3.11"

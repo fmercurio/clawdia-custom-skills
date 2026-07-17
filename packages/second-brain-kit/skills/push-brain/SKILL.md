@@ -1,7 +1,7 @@
 ---
 name: push-brain
 description: Consolidate durable session knowledge into a configured Second Brain. Use for “salva isso no cérebro”, “fecha sessão”, “sync”, a lasting decision, or a meaningful project update. Do not use to dump raw chat, secrets, or temporary task progress.
-version: 0.1.0-rc1
+version: 0.1.0-rc2
 author: Skills Lab
 license: MIT
 metadata:
