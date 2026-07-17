@@ -22,6 +22,11 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 try:
+    import tomllib  # type: ignore
+except Exception:  # pragma: no cover - Python versions without stdlib tomllib
+    tomllib = None
+
+try:
     import yaml  # type: ignore
 except Exception:  # pragma: no cover - optional dependency
     yaml = None
@@ -122,13 +127,102 @@ def parse_package_json(text: str) -> dict:
     return {"ecosystem": "npm", "dependencies": sorted(set(deps))}
 
 
+def _normalize_requirement_name(value: str) -> str | None:
+    if not value:
+        return None
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    if not value or value.startswith(("#", ";", "/")):
+        return None
+
+    # Remove markers and direct-reference parts.
+    value = value.split(";", 1)[0].strip()
+    if "@" in value:
+        value = value.split("@", 1)[0].strip()
+
+    # Optional extras come first: package[extra] -> package.
+    value = value.split("[", 1)[0].strip()
+    if not value:
+        return None
+
+    # Keep only the package name portion before version operators.
+    match = re.match(r"^[A-Za-z0-9_.-]+", value)
+    if not match:
+        return None
+    normalized = match.group(0).strip("-_")
+    if not normalized:
+        return None
+
+    # `python` and similar environment specifiers are not package names.
+    if normalized.lower() in {"python"}:
+        return None
+
+    return normalized.lower()
+
+
+def _collect_pyproject_dependency_values(target: object, names: set[str]) -> None:
+    if isinstance(target, list):
+        for raw in target:
+            name = _normalize_requirement_name(raw)
+            if name:
+                names.add(name)
+
+
 def parse_pyproject(text: str) -> dict:
-    deps: list[str] = []
-    for match in re.finditer(r'["\']([A-Za-z0-9_.-]+)(?:[<>=!~\[][^"\']*)?["\']', text):
-        value = match.group(1)
-        if value.lower() not in {"project", "dependencies", "optional-dependencies"}:
-            deps.append(value)
-    return {"ecosystem": "pypi", "dependencies": sorted(set(deps))}
+    if tomllib is None:
+        return {"ecosystem": "pypi", "dependencies": []}
+
+    try:
+        project = tomllib.loads(text)
+    except Exception:
+        return {"ecosystem": "pypi", "dependencies": []}
+
+    if not isinstance(project, dict):
+        return {"ecosystem": "pypi", "dependencies": []}
+
+    deps: set[str] = set()
+
+    project_section = project.get("project")
+    if isinstance(project_section, dict):
+        _collect_pyproject_dependency_values(project_section.get("dependencies"), deps)
+        optional_dependencies = project_section.get("optional-dependencies")
+        if isinstance(optional_dependencies, dict):
+            for opt_values in optional_dependencies.values():
+                _collect_pyproject_dependency_values(opt_values, deps)
+
+    tool_section = project.get("tool")
+    if isinstance(tool_section, dict):
+        poetry_section = tool_section.get("poetry")
+        if isinstance(poetry_section, dict):
+            poetry_deps = poetry_section.get("dependencies")
+            if isinstance(poetry_deps, dict):
+                for name in poetry_deps.keys():
+                    if isinstance(name, str) and name.lower() != "python":
+                        normalized = _normalize_requirement_name(name)
+                        if normalized:
+                            deps.add(normalized)
+
+            poetry_groups = poetry_section.get("group")
+            if isinstance(poetry_groups, dict):
+                for group in poetry_groups.values():
+                    if not isinstance(group, dict):
+                        continue
+                    group_deps = group.get("dependencies")
+                    if not isinstance(group_deps, dict):
+                        continue
+                    for name in group_deps.keys():
+                        if isinstance(name, str) and name.lower() != "python":
+                            normalized = _normalize_requirement_name(name)
+                            if normalized:
+                                deps.add(normalized)
+
+    dependency_groups = project.get("dependency-groups")
+    if isinstance(dependency_groups, dict):
+        for values in dependency_groups.values():
+            _collect_pyproject_dependency_values(values, deps)
+
+    return {"ecosystem": "pypi", "dependencies": sorted(deps)}
 
 
 def parse_go_mod(text: str) -> dict:

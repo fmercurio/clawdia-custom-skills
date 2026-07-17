@@ -1,7 +1,7 @@
 ---
 name: docs-mcp-server-operations
 description: "Use when deploying, operating, or maintaining a shared Docs MCP Server for Hermes, Codex, or other MCP clients — including persistent storage, safe read-only/public exposure, embedding provider decisions, documentation indexing, staleness checks, and quality gates against shallow or broken documentation indexes."
-version: 1.0.0
+version: 1.0.1
 author: Skills Lab
 license: MIT
 platforms: [linux, macos]

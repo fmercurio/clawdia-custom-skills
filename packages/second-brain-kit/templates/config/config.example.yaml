@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "kit_version": "0.1.0-rc1",
+  "owner": "Example Owner",
+  "organization": null,
+  "vault_path": "/absolute/path/to/vault",
+  "vault_mode": "new",
+  "profile": "second-brain",
+  "locale": "pt-BR",
+  "mode": "hybrid",
+  "sensitivity": {"default": "internal", "restricted_search": false},
+  "git": {"enabled": false, "remote": null, "push_policy": "confirm"},
+  "obsidian": {"enabled": false},
+  "okf": {"enabled": "auto", "version": "1.6.0", "render": {"enabled": false, "title": null, "layout": null, "link": null, "output": null}},
+  "embeddings": {"enabled": "auto", "provider": null, "endpoint": null, "model": null, "allow_remote": false},
+  "cron": {"enabled": false, "schedule": "0 9 * * 1", "deliver": "local"}
+}

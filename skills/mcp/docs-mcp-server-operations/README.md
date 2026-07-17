@@ -19,7 +19,7 @@ This package is intentionally generic:
 ## Minimal validation
 
 ```bash
-python3 ../../tools/validate_skill.py SKILL.md
+python3 ../../../tools/validate_skill.py SKILL.md
 python3 -m py_compile scripts/*.py
 python3 scripts/check_docs_staleness.py --help
 python3 scripts/scan_repo_packages.py --help

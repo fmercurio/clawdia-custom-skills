@@ -18,6 +18,13 @@ custom-skills/
 │           ├── references/          # Documentação de referência
 │           ├── templates/           # Templates reutilizáveis
 │           └── scripts/             # Scripts operacionais
+├── packages/                        # Suítes instaláveis com múltiplas skills e lifecycle próprio
+│   └── <package-name>/
+│       ├── README.md                 # Documentação humana do pacote
+│       ├── manifest.yaml             # Versões, capacidades e componentes
+│       ├── skills/                   # Skills Hermes-native instaladas pelo pacote
+│       ├── scripts/                  # Bootstrap, doctor, install, rollback e export
+│       └── tests/                    # Unitários e clean-room E2E
 ├── registry/
 │   └── skills-registry.yaml         # Registro de todas as skills (status, proveniência, decisão)
 ├── docs/
@@ -53,3 +60,4 @@ custom-skills/
 - **Proveniência obrigatória**: origem, autor, data, motivo
 - **Segurança primeiro**: scripts read-only por padrão, sem hardcoded secrets
 - **Company-agnostic**: valores específicos via config, nunca hardcoded
+- **Pacotes permanecem candidates** até que clean-room E2E, checksums e revisão humana passem

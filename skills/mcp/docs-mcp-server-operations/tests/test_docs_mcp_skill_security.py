@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import subprocess
 import sys
@@ -63,3 +64,62 @@ def test_staleness_script_accepts_list_json(tmp_path):
     assert "low-document-count" in rows[0]["quality_flags"]
     assert "single-source-url" in rows[0]["quality_flags"]
     assert "package-registry-source" in rows[0]["quality_flags"]
+
+
+SCAN_SCRIPT = ROOT / "scripts" / "scan_repo_packages.py"
+SCAN_SPEC = importlib.util.spec_from_file_location("scan_repo_packages_test", SCAN_SCRIPT)
+if SCAN_SPEC is None or SCAN_SPEC.loader is None:
+    raise RuntimeError("Could not load scan_repo_packages module")
+SCAN_MODULE = importlib.util.module_from_spec(SCAN_SPEC)
+SCAN_SPEC.loader.exec_module(SCAN_MODULE)
+
+
+def parse_pyproject(text: str) -> list[str]:
+    return SCAN_MODULE.parse_pyproject(text)["dependencies"]
+
+
+def test_parse_pyproject_ignores_metadata_and_quoted_text():
+    pyproject = """
+[project]
+name = "docs-server"
+description = "This string contains requests and numpy"
+readme = "README.md"
+dependencies = ["requests >=2.0", "urllib3 == 2.0"]
+[project.optional-dependencies]
+test = ["pytest>=8"]
+"""
+    assert parse_pyproject(pyproject) == ["pytest", "requests", "urllib3"]
+
+
+def test_parse_pyproject_collects_pep621_and_dependency_groups():
+    pyproject = """
+[project]
+name = "docs-server"
+description = "ignore me"
+readme = "README.md"
+dependencies = [
+  "Django[auth] >=5.0; python_version >= '3.11'",
+  "fastapi @ git+https://github.com/tiangolo/fastapi",
+]
+[dependency-groups]
+lint = ["ruff == 0.1", "black"]
+"""
+    assert parse_pyproject(pyproject) == ["black", "django", "fastapi", "ruff"]
+
+
+def test_parse_pyproject_collects_poetry_dependencies_and_groups():
+    pyproject = """
+[tool.poetry.dependencies]
+python = "^3.12"
+requests = "^2.30"
+PyYAML = "^6.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0"
+ruff = "^0.5"
+"""
+    assert parse_pyproject(pyproject) == ["pytest", "pyyaml", "requests", "ruff"]
+
+
+def test_parse_pyproject_invalid_toml_is_safe():
+    assert parse_pyproject("[project\nname = 'broken'") == []

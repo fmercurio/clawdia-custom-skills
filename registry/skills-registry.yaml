@@ -557,9 +557,143 @@ skills:
           their own agent to configure specialist topic/channel profiles. Status:
           candidate — awaiting Skills Lab review/approval.
 
+  - name: second-brain-kit
+    status: candidate
+    version: 0.1.0-rc1
+    category: note-taking
+    description: >
+      Hermes-native installable suite for bootstrapping a new Second Brain or
+      connecting an existing Markdown vault, with profile-aware skills, FTS5,
+      health checks, deterministic lifecycle scripts, rollback and optional OKF.
+    source:
+      type: internal-with-external-method-adaptation
+      origin: "Skills Lab — generic productization of the Second Brain suite"
+      author: "Skills Lab"
+      created: "2026-07-16"
+      approved: null
+      approved_by: null
+      repository_url: "https://github.com/tech-leads-club/agent-skills"
+      source_url: "https://agent-skills.techleads.club/skills/skill-architect/"
+      source_commit: "e7ab0caa0c0a055e6b230c72769e75a6cb4cbdb5"
+      source_license: "CC-BY-4.0"
+    installation:
+      runtime_path: null
+      repo_path: "packages/second-brain-kit/"
+      installed_date: null
+      installed_by: null
+      note: "Release candidate only; clean-room install is tested in temporary HERMES_HOME and is not installed in the active runtime."
+    audit:
+      security_review: "2026-07-16"
+      security_status: "passed"
+      findings:
+        - "Core is parameterized and contains no tenant paths, identities or credentials"
+        - "FTS5 is mandatory; OKF, embeddings, Obsidian, Git remote and cron are optional"
+        - "Restricted content is excluded from search and static render by default"
+        - "Existing-vault discovery is read-only and dry-run-first"
+        - "skill-architect methodology is attributed and remains build-time only"
+        - "24 package tests and 142 repository tests passed, including real Hermes and OKF integration"
+      frontmatter_valid: true
+      company_agnostic: true
+      pitfalls_documented: true
+    files:
+      - path: "packages/second-brain-kit/"
+        status: "new"
+        note: "Installable multi-skill package with scripts, templates, docs, tests and reproducible export"
+    changelog:
+      - date: "2026-07-16"
+        action: "created release candidate"
+        details: >
+          Consolidated four operational skills and deterministic lifecycle tooling
+          into a clean-room-installable Hermes package. Status remains candidate;
+          no active runtime installation or main-branch merge is authorized.
+
+  - name: explain-code-change
+    status: approved
+    version: 0.1.1
+    category: software-development
+    description: >
+      Generate a source-grounded explanation artifact for code changes with a
+      fact/interpretation split, structured content sections, quiz quality
+      validations, deterministic option shuffling, and a single offline HTML
+      artifact output.
+    source:
+      type: external
+      origin: "External gist reference + Hermes-native clean-room implementation"
+      author: "Hermes Agent"
+      created: "2026-07-17"
+      approved: "2026-07-17"
+      approved_by: "Felippe M."
+      zip_received: null
+      repository_url: "https://gist.github.com/geoffreylitt/a29df1b5f9865506e8952488eac3d524"
+      upstream_ref: "126e7fe9eecaafadfe1ac8bb183d135812b608f2"
+      upstream_html_ref: "e4982a26bc8975dd45eeb96ad8c68f2f25fc42c7"
+      last_checked_at: "2026-07-17T09:30:09-03:00"
+      catalog_id: "geoffreylitt-explain-diff"
+      upstream_license: "not stated"
+      conceptual_provenance_note: "No prose copied verbatim; high-level workflow and structure only."
+      revalidation_policy: "Read-only on upstream revision change or when materially editing after 90 days; no automatic imports."
+    installation:
+      runtime_path: "~/.hermes/skills/software-development/explain-code-change/"
+      repo_path: "skills/software-development/explain-code-change/"
+      installed_date: "2026-07-17"
+      installed_by: "Hermes Agent"
+      note: "Runtime synced from validated v0.1.1 after explicit user approval; includes provenance ledger and upstream revalidation policy."
+    audit:
+      security_review: "2026-07-17"
+      security_status: "passed"
+      findings:
+        - "Clean-room adaptation only; source-of-truth workflow requires diff/base/callers/tests/config/docs review."
+        - "No network calls, subprocess usage, or external assets in renderer."
+        - "Render output uses inline HTML/CSS/JS and writes artifact with mode 0600."
+        - "Quiz quality checks enforce exact five questions and 3-5 options per question."
+      frontmatter_valid: true
+      company_agnostic: true
+      pitfalls_documented: true
+      test_coverage:
+        - "Content spec and renderer unit tests"
+        - "Strict/non-strict quiz leakage behavior"
+        - "Deterministic output and balanced option positions"
+    files:
+      - path: "SKILL.md"
+        size_bytes: 6798
+        status: "new"
+      - path: "scripts/render_explanation.py"
+        size_bytes: 26841
+        status: "new"
+      - path: "templates/content-spec.example.json"
+        size_bytes: 7405
+        status: "new"
+      - path: "references/content-spec.md"
+        size_bytes: 2517
+        status: "new"
+      - path: "references/provenance.md"
+        size_bytes: 5420
+        status: "new"
+        note: "External source ledger, license observations, adopted/rejected decisions, and revision-triggered revalidation procedure."
+      - path: "tests/test_render_explanation.py"
+        size_bytes: 6700
+        status: "new"
+      - path: "MANIFEST.sha256"
+        size_bytes: 556
+        status: "new"
+    changelog:
+      - date: "2026-07-17"
+        action: "initial candidate entry"
+        details: >
+          Added dedicated Hermes-native explain-code-change skill with deterministic
+          renderer, offline artifact generation, quiz validation, and tests.
+          Approved by Felippe after technical review; runtime installation validated.
+      - date: "2026-07-17"
+        action: "v0.1.1 provenance hardening"
+        details: >
+          Added references/provenance.md with exact upstream revisions, license observations,
+          community influences, adopted/rejected decisions, internal composition dependencies,
+          and revision-triggered read-only revalidation. Linked the Skills Lab catalog entry
+          and explicitly prohibited blind automatic imports.
+
   - name: docs-mcp-server-operations
     status: candidate
-    version: 1.0.0
+    version: 1.0.1
     category: mcp
     description: >
       Generic public skill for deploying and maintaining a shared Docs MCP Server
@@ -599,7 +733,7 @@ skills:
       pitfalls_documented: true
     files:
       - path: "README.md"
-        size_bytes: 1009
+        size_bytes: 1012
         status: "new"
       - path: "SKILL.md"
         size_bytes: 12853
@@ -620,7 +754,7 @@ skills:
         size_bytes: 9051
         status: "new"
       - path: "scripts/scan_repo_packages.py"
-        size_bytes: 9906
+        size_bytes: 13239
         status: "new"
       - path: "templates/Dockerfile"
         size_bytes: 783
@@ -632,10 +766,10 @@ skills:
         size_bytes: 1145
         status: "new"
       - path: "tests/test_docs_mcp_skill_security.py"
-        size_bytes: 1964
+        size_bytes: 3697
         status: "new"
       - path: "MANIFEST.sha256"
-        size_bytes: 1188
+        size_bytes: 1169
         status: "new"
     changelog:
       - date: "2026-07-09"
@@ -645,3 +779,9 @@ skills:
           skill package. Split the handoff into SKILL.md, references, templates,
           scripts, tests, and manifest. Status: candidate — ready for Skills Lab
           review before install or public publishing.
+      - date: "2026-07-17"
+        action: "v1.0.1 parser and validation hardening"
+        details: >
+          Replaced regex-based pyproject scanning with TOML-aware dependency extraction for
+          PEP 621, Poetry, and dependency groups; added regression tests for metadata false
+          positives and corrected the package-local validator path. Candidate remains repo-only.
