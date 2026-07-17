@@ -556,3 +556,53 @@ skills:
           skill package. Added a README focused on non-technical operators asking
           their own agent to configure specialist topic/channel profiles. Status:
           candidate — awaiting Skills Lab review/approval.
+
+  - name: second-brain-kit
+    status: candidate
+    version: 0.1.0-rc1
+    category: note-taking
+    description: >
+      Hermes-native installable suite for bootstrapping a new Second Brain or
+      connecting an existing Markdown vault, with profile-aware skills, FTS5,
+      health checks, deterministic lifecycle scripts, rollback and optional OKF.
+    source:
+      type: internal-with-external-method-adaptation
+      origin: "Skills Lab — generic productization of the Second Brain suite"
+      author: "Skills Lab"
+      created: "2026-07-16"
+      approved: null
+      approved_by: null
+      repository_url: "https://github.com/tech-leads-club/agent-skills"
+      source_url: "https://agent-skills.techleads.club/skills/skill-architect/"
+      source_commit: "e7ab0caa0c0a055e6b230c72769e75a6cb4cbdb5"
+      source_license: "CC-BY-4.0"
+    installation:
+      runtime_path: null
+      repo_path: "packages/second-brain-kit/"
+      installed_date: null
+      installed_by: null
+      note: "Release candidate only; clean-room install is tested in temporary HERMES_HOME and is not installed in the active runtime."
+    audit:
+      security_review: "2026-07-16"
+      security_status: "passed"
+      findings:
+        - "Core is parameterized and contains no tenant paths, identities or credentials"
+        - "FTS5 is mandatory; OKF, embeddings, Obsidian, Git remote and cron are optional"
+        - "Restricted content is excluded from search and static render by default"
+        - "Existing-vault discovery is read-only and dry-run-first"
+        - "skill-architect methodology is attributed and remains build-time only"
+        - "24 package tests and 142 repository tests passed, including real Hermes and OKF integration"
+      frontmatter_valid: true
+      company_agnostic: true
+      pitfalls_documented: true
+    files:
+      - path: "packages/second-brain-kit/"
+        status: "new"
+        note: "Installable multi-skill package with scripts, templates, docs, tests and reproducible export"
+    changelog:
+      - date: "2026-07-16"
+        action: "created release candidate"
+        details: >
+          Consolidated four operational skills and deterministic lifecycle tooling
+          into a clean-room-installable Hermes package. Status remains candidate;
+          no active runtime installation or main-branch merge is authorized.
