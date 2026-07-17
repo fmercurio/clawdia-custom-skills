@@ -1,0 +1,35 @@
+# Example project and library registry for docs-mcp-server operations.
+# Copy this file into your deployment repo and replace placeholders.
+# Do not commit private repository names, customer names, tokens, or credentials.
+
+projects:
+  web-app:
+    org: example-org
+    filter: "web|frontend"
+    description: Example web application repositories
+    repos_extra:
+      - example-org/example-web-app
+    repos_exclude: []
+    enabled: true
+
+  backend-services:
+    org: example-org
+    filter: "api|service"
+    description: Example backend service repositories
+    enabled: true
+
+base_libraries:
+  - name: react
+    url: https://react.dev/reference/react
+  - name: next
+    url: https://nextjs.org/docs
+  - name: vite
+    url: https://vite.dev/guide/
+    notes: Prefer official docs; package registry README is too shallow for env/config queries.
+  - name: tailwindcss
+    url: https://tailwindcss.com/docs/installation/using-vite
+    notes: Prefer official v4 docs.
+  - name: express
+    url: https://expressjs.com/en/guide/routing.html
+  - name: '@tanstack/react-query'
+    url: https://tanstack.com/query/latest/docs/framework/react/overview
