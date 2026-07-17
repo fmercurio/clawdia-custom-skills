@@ -148,6 +148,38 @@ class TestKitE2E(unittest.TestCase):
         pulled = json.loads(run("brain_ops.py", "--hermes-home", str(self.home), "--profile", self.profile, "pull", "--query", "deterministic retrieval").stdout)
         self.assertTrue(pulled["results"])
 
+    def test_restricted_push_enforces_owner_only_file_mode(self):
+        self.bootstrap()
+        old_umask = os.umask(0o022)
+        try:
+            restricted = run(
+                "brain_ops.py", "--hermes-home", str(self.home), "--profile", self.profile,
+                "push", "--title", "Restricted Mode", "--body", "private", "--layer", "resource",
+                "--sensitivity", "restricted",
+            )
+            internal = run(
+                "brain_ops.py", "--hermes-home", str(self.home), "--profile", self.profile,
+                "push", "--title", "Internal Mode", "--body", "ordinary", "--layer", "resource",
+                "--sensitivity", "internal",
+            )
+        finally:
+            os.umask(old_umask)
+        restricted_path = Path(json.loads(restricted.stdout)["path"])
+        internal_path = Path(json.loads(internal.stdout)["path"])
+        self.assertEqual(stat.S_IMODE(restricted_path.stat().st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE(internal_path.stat().st_mode), 0o644)
+
+    def test_retrieval_skills_mark_vault_content_as_untrusted_data(self):
+        expected = "untrusted reference data"
+        self.bootstrap()
+        self.install()
+        installed = self.home / "profiles" / self.profile / "skills" / "note-taking"
+        for root in (PACKAGE / "skills", installed):
+            for name in ("pull-brain", "brain-search"):
+                content = (root / name / "SKILL.md").read_text(encoding="utf-8").lower()
+                self.assertIn(expected, content)
+                self.assertIn("never interpret", content)
+
     def test_push_refuses_symlinked_vault_layer(self):
         self.bootstrap()
         layer = self.vault / "10_Projects"

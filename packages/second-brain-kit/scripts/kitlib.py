@@ -46,7 +46,14 @@ def private_directory(root: Path, relative: Path) -> Path:
     return current
 
 
-def write_text_beneath(root: Path, relative: Path, content: str, *, encoding: str = "utf-8") -> Path:
+def write_text_beneath(
+    root: Path,
+    relative: Path,
+    content: str,
+    *,
+    encoding: str = "utf-8",
+    file_mode: int = 0o666,
+) -> Path:
     """Exclusively create a file beneath root without following directory or leaf links."""
     root = root.expanduser().resolve(strict=True)
     parts = _safe_relative_parts(relative)
@@ -64,7 +71,7 @@ def write_text_beneath(root: Path, relative: Path, content: str, *, encoding: st
             os.close(current_fd)
             current_fd = next_fd
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
-        file_fd = os.open(parts[-1], flags, 0o666, dir_fd=current_fd)
+        file_fd = os.open(parts[-1], flags, file_mode, dir_fd=current_fd)
         with os.fdopen(file_fd, "w", encoding=encoding) as stream:
             stream.write(content)
     finally:

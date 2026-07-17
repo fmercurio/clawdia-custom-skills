@@ -18,7 +18,7 @@ def main() -> int:
     if a.action=="push":
         relative=Path(LAYERS[a.layer])/f"{safe_slug(a.title)}.md"; target=vault/relative; today=date.today().isoformat()
         content=f"---\npara: {a.layer}\nstatus: active\nsensitivity: {a.sensitivity}\nowner: {cfg['owner']}\ncreated: {today}\nupdated: {today}\nreview: ad-hoc\nrelated: []\n---\n\n# {a.title}\n\n{a.body.strip()}\n"
-        try: target=write_text_beneath(vault,relative,content)
+        try: target=write_text_beneath(vault,relative,content,file_mode=0o600 if a.sensitivity=="restricted" else 0o666)
         except FileExistsError: print(json.dumps({"ok":False,"error":"note already exists","path":str(target)})); return 2
         except (OSError,ValueError) as exc: print(json.dumps({"ok":False,"error":str(exc)})); return 2
         r=subprocess.run([sys.executable,str(script),"--vault",str(vault),"--rebuild","--json"],capture_output=True,text=True)
