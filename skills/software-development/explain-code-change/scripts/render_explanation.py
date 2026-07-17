@@ -237,7 +237,7 @@ def validate_sections(sections: Any, warnings: List[str]) -> List[Dict[str, Any]
                     fail(f"section {section_id} before_after block[{bi}] requires before and after lists")
                 if not before or not after:
                     warn(f"section {section_id} before_after block[{bi}] should include both before and after", warnings)
-            
+
             block_type_entry = block.get("type")
             if block_type_entry not in BLOCK_TYPES:
                 fail(f"section {section_id} includes invalid block type {block_type_entry!r}")

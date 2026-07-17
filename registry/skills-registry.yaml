@@ -658,10 +658,10 @@ skills:
         size_bytes: 6798
         status: "new"
       - path: "scripts/render_explanation.py"
-        size_bytes: 26853
+        size_bytes: 26841
         status: "new"
       - path: "templates/content-spec.example.json"
-        size_bytes: 7407
+        size_bytes: 7405
         status: "new"
       - path: "references/content-spec.md"
         size_bytes: 2517

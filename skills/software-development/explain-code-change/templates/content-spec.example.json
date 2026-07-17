@@ -138,7 +138,7 @@
             "A schema migration failure in production."
           ],
           "correct_index": 1,
-          "explanation": "The stated incident focused on stale values being returned." 
+          "explanation": "The stated incident focused on stale values being returned."
         },
         {
           "id": "q3",
@@ -172,7 +172,7 @@
             "Must only include remote scripts and styles for richer rendering.",
             "Must push directly to cloud storage without user review.",
             "Must include inline click handlers for immediate interaction.",
-            "Must execute remote API calls when opened." 
+            "Must execute remote API calls when opened."
           ],
           "correct_index": 0,
           "explanation": "Artifacts are local, standalone, and offline by contract."
