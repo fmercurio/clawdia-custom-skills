@@ -45,6 +45,10 @@ from typing import Any, Optional
 # Allow imports when run from the skill's scripts/ dir and support optional
 # user-local dependency installs for third-party packages.
 HERE = Path(__file__).resolve().parent
+MAX_XLSX_BYTES = 25 * 1024 * 1024
+MAX_SHEET_ROWS = 100_000
+MAX_SHEET_COLUMNS = 64
+MAX_CELL_TEXT_BYTES = 64 * 1024
 
 
 def load_bundled_agilize_login():
@@ -162,6 +166,9 @@ def get_month(t: dict) -> str:
 # ─── Sheet parsing ────────────────────────────────────────────────────────────
 
 def parse_sheet(xlsx_path: str, sheet_name: Optional[str] = None) -> list[dict]:
+    source = Path(xlsx_path).expanduser()
+    if source.stat().st_size > MAX_XLSX_BYTES:
+        raise ValueError(f"XLSX exceeds the {MAX_XLSX_BYTES}-byte input limit")
     wb = openpyxl.load_workbook(xlsx_path, data_only=True, read_only=True)
     # Auto-pick sheet
     if sheet_name and sheet_name in wb.sheetnames:
@@ -184,7 +191,16 @@ def parse_sheet(xlsx_path: str, sheet_name: Optional[str] = None) -> list[dict]:
         if not ws:
             ws = wb[wb.sheetnames[0]]
 
-    rows = list(ws.iter_rows(values_only=True))
+    rows = []
+    for row_number, row in enumerate(ws.iter_rows(values_only=True), start=1):
+        if row_number > MAX_SHEET_ROWS:
+            raise ValueError(f"worksheet exceeds the {MAX_SHEET_ROWS}-row limit")
+        if len(row) > MAX_SHEET_COLUMNS:
+            raise ValueError(f"worksheet exceeds the {MAX_SHEET_COLUMNS}-column limit")
+        for cell in row:
+            if cell is not None and len(str(cell).encode("utf-8")) > MAX_CELL_TEXT_BYTES:
+                raise ValueError(f"worksheet cell exceeds the {MAX_CELL_TEXT_BYTES}-byte limit")
+        rows.append(row)
     # Find header row (first row with >= 4 non-empty cells)
     header_idx = None
     for i, r in enumerate(rows[:10]):
