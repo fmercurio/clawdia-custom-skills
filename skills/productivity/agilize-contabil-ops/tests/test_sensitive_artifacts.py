@@ -37,6 +37,11 @@ def load_match_script(monkeypatch):
 def load_download_script(monkeypatch):
     fake_playwright = types.ModuleType("playwright")
     fake_sync_api = types.ModuleType("playwright.sync_api")
+
+    class FakePlaywrightError(Exception):
+        pass
+
+    fake_sync_api.Error = FakePlaywrightError
     fake_sync_api.sync_playwright = lambda: None
     monkeypatch.setitem(sys.modules, "playwright", fake_playwright)
     monkeypatch.setitem(sys.modules, "playwright.sync_api", fake_sync_api)
@@ -241,6 +246,28 @@ def test_onedrive_downloader_rejects_oversized_response(monkeypatch):
     )
 
     assert module.extract_valid_xml_body([oversized], max_bytes=4) is None
+
+
+def test_onedrive_downloader_skips_playwright_body_errors(monkeypatch):
+    module = load_download_script(monkeypatch)
+    playwright_error = sys.modules["playwright.sync_api"].Error
+    xml_body = b"<?xml version='1.0'?><ConsultarNfseResposta xmlns='http://www.sped.fazenda.gov.br/nfse'><CompNfse /></ConsultarNfseResposta>"
+    valid = types.SimpleNamespace(
+        status=200,
+        headers={"content-type": "text/xml", "content-length": str(len(xml_body))},
+        body=lambda: xml_body,
+    )
+
+    def fail_body():
+        raise playwright_error("response body is unavailable")
+
+    unavailable = types.SimpleNamespace(
+        status=200,
+        headers={"content-type": "text/xml", "content-length": str(len(xml_body))},
+        body=fail_body,
+    )
+
+    assert module.extract_valid_xml_body([valid, unavailable]) == xml_body
 
 
 def test_onedrive_downloader_rejects_sanitized_name_collisions(monkeypatch, tmp_path):

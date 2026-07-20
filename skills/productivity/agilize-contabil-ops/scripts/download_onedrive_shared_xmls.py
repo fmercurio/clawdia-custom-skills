@@ -15,7 +15,7 @@ import stat
 import urllib.parse
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import Error as PlaywrightError, sync_playwright
 
 EXPECTED_ONEDRIVE_DOWNLOAD_HOST = "my.microsoftpersonalcontent.com"
 MAX_XML_FILES = 100
@@ -94,7 +94,7 @@ def extract_valid_xml_body(responses, *, max_bytes: int | None = None) -> bytes 
                 continue
             if resp.status == 200 and "xml" in ctype.lower() and data.startswith(b"<?xml") and is_valid_nfse_xml(data):
                 return data
-        except (ValueError, TypeError, OSError):
+        except (PlaywrightError, ValueError, TypeError, OSError):
             continue
     return None
 
