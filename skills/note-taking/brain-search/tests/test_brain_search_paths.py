@@ -146,3 +146,34 @@ def test_main_rejects_unsafe_update_before_initializing_db(monkeypatch, tmp_path
 
     assert exc.value.code == 2
     assert init_called is False
+
+
+def test_init_db_rejects_symlinked_index_directory(monkeypatch, tmp_path):
+    vault = use_temp_vault(monkeypatch, tmp_path)
+    outside = tmp_path / "outside-index"
+    outside.mkdir()
+    brain_search.DB_DIR.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="symlinked brain index directory"):
+        brain_search.init_db()
+    assert not (outside / "brain_search.sqlite").exists()
+
+
+def test_init_db_rejects_symlinked_index_database(monkeypatch, tmp_path):
+    vault = use_temp_vault(monkeypatch, tmp_path)
+    brain_search.DB_DIR.mkdir()
+    outside = tmp_path / "outside.sqlite"
+    brain_search.DB_PATH.symlink_to(outside)
+
+    with pytest.raises(ValueError, match="symlinked brain index database"):
+        brain_search.init_db()
+    assert not outside.exists()
+
+
+def test_init_db_creates_a_local_index_for_a_normal_vault(monkeypatch, tmp_path):
+    vault = use_temp_vault(monkeypatch, tmp_path)
+
+    con = brain_search.init_db()
+    con.close()
+    assert brain_search.DB_PATH.is_file()
+    assert brain_search.DB_PATH.parent == vault / ".brain-index"
