@@ -98,6 +98,20 @@ def test_auth_form_action_rejects_external_absolute_origin(monkeypatch):
         module.absolute_action("https://attacker.example/collect", module.AUTH_URL)
 
 
+def test_oidc_callback_requires_matching_state(monkeypatch, capsys):
+    module, _ = load_script(monkeypatch)
+
+    with pytest.raises(SystemExit):
+        module.code_from_url("https://app.agilize.com.br/?code=auth-code", expected_state="tx-state")
+    assert "state missing or mismatch" in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        module.code_from_url("https://app.agilize.com.br/?code=auth-code&state=wrong", expected_state="tx-state")
+    assert "state missing or mismatch" in capsys.readouterr().err
+    assert module.code_from_url(
+        "https://app.agilize.com.br/?code=auth-code&state=tx-state", expected_state="tx-state"
+    ) == "auth-code"
+
+
 def test_auth_form_action_rejects_protocol_relative_origin(monkeypatch):
     module, _ = load_script(monkeypatch)
 

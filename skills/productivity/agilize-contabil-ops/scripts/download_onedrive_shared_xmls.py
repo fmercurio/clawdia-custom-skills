@@ -18,6 +18,9 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 EXPECTED_ONEDRIVE_DOWNLOAD_HOST = "my.microsoftpersonalcontent.com"
+MAX_XML_FILES = 100
+MAX_XML_BYTES = 10 * 1024 * 1024
+MAX_TOTAL_XML_BYTES = 100 * 1024 * 1024
 
 
 def safe_name(name: str) -> str:
@@ -76,14 +79,22 @@ def is_expected_onedrive_download_url(url: str) -> bool:
     )
 
 
-def extract_valid_xml_body(responses) -> bytes | None:
+def extract_valid_xml_body(responses, *, max_bytes: int | None = None) -> bytes | None:
+    max_bytes = MAX_XML_BYTES if max_bytes is None else max_bytes
     for resp in reversed(responses):
         try:
             ctype = resp.headers.get("content-type", "")
+            declared_length = resp.headers.get("content-length")
+            if not declared_length:
+                continue
+            if int(declared_length) < 0 or int(declared_length) > max_bytes:
+                continue
             data = resp.body()
+            if len(data) > max_bytes:
+                continue
             if resp.status == 200 and "xml" in ctype.lower() and data.startswith(b"<?xml") and is_valid_nfse_xml(data):
                 return data
-        except Exception:
+        except (ValueError, TypeError, OSError):
             continue
     return None
 
@@ -145,7 +156,10 @@ def main() -> int:
         names = list(dict.fromkeys(names))
         if not names:
             raise SystemExit("No matching XML links found")
+        if len(names) > MAX_XML_FILES:
+            raise RuntimeError(f"refusing {len(names)} XML files; limit is {MAX_XML_FILES}")
 
+        total_bytes = 0
         for name in names:
             page.keyboard.press("Escape")
             page.wait_for_timeout(300)
@@ -157,10 +171,13 @@ def main() -> int:
 
             if body is None:
                 raise RuntimeError(f"Could not capture XML body for {name}")
+            if total_bytes + len(body) > MAX_TOTAL_XML_BYTES:
+                raise RuntimeError(f"XML download exceeds the {MAX_TOTAL_XML_BYTES}-byte total limit")
 
             path = output_path_for_name(out, name, seen_output_names)
             write_secure_bytes(path, body)
             saved.append((str(path), len(body)))
+            total_bytes += len(body)
 
         browser.close()
 

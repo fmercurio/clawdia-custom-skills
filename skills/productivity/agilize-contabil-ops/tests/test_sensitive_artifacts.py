@@ -106,6 +106,45 @@ def test_match_spreadsheet_rejects_symlink_output_dir(monkeypatch, tmp_path):
         module.ensure_private_dir(linked_dir)
 
 
+def test_match_spreadsheet_rejects_oversized_input_before_loading(monkeypatch, tmp_path):
+    module = load_match_script(monkeypatch)
+    source = tmp_path / "sheet.xlsx"
+    source.write_bytes(b"x" * 8)
+    monkeypatch.setattr(module, "MAX_XLSX_BYTES", 4)
+    load_workbook = lambda *args, **kwargs: pytest.fail("workbook must not load")
+    monkeypatch.setattr(module.openpyxl, "load_workbook", load_workbook)
+
+    with pytest.raises(ValueError, match="input limit"):
+        module.parse_sheet(str(source))
+
+
+def test_match_spreadsheet_rejects_oversized_sheet(monkeypatch, tmp_path):
+    module = load_match_script(monkeypatch)
+    source = tmp_path / "sheet.xlsx"
+    source.write_bytes(b"x")
+    rows = [
+        ("MÊS", "DATA", "DESCRIÇÃO", "VALOR", "CLASSIFICAÇÃO"),
+        ("2025-01", "2025-01-01", "one", 1, "class"),
+        ("2025-01", "2025-01-02", "two", 2, "class"),
+    ]
+
+    class Sheet:
+        def iter_rows(self, **kwargs):
+            return iter(rows)
+
+    class Workbook:
+        sheetnames = ["Sheet1"]
+
+        def __getitem__(self, name):
+            return Sheet()
+
+    monkeypatch.setattr(module.openpyxl, "load_workbook", lambda *args, **kwargs: Workbook())
+    monkeypatch.setattr(module, "MAX_SHEET_ROWS", 2)
+
+    with pytest.raises(ValueError, match="row limit"):
+        module.parse_sheet(str(source))
+
+
 def test_match_spreadsheet_loads_bundled_login_before_user_local_lib(monkeypatch, tmp_path):
     user_lib = tmp_path / ".local" / "py-lib"
     user_lib.mkdir(parents=True)
@@ -182,14 +221,26 @@ def test_onedrive_downloader_accepts_only_expected_download_origin(monkeypatch):
 
 def test_onedrive_downloader_does_not_reuse_stale_responses(monkeypatch):
     module = load_download_script(monkeypatch)
+    xml_body = b"<?xml version='1.0'?><ConsultarNfseResposta xmlns='http://www.sped.fazenda.gov.br/nfse'><CompNfse /></ConsultarNfseResposta>"
     stale = types.SimpleNamespace(
         status=200,
-        headers={"content-type": "text/xml"},
-        body=lambda: b"<?xml version='1.0'?><ConsultarNfseResposta xmlns='http://www.sped.fazenda.gov.br/nfse'><CompNfse /></ConsultarNfseResposta>",
+        headers={"content-type": "text/xml", "content-length": str(len(xml_body))},
+        body=lambda: xml_body,
     )
 
     assert module.extract_valid_xml_body([stale]) is not None
     assert module.extract_valid_xml_body([]) is None
+
+
+def test_onedrive_downloader_rejects_oversized_response(monkeypatch):
+    module = load_download_script(monkeypatch)
+    oversized = types.SimpleNamespace(
+        status=200,
+        headers={"content-type": "text/xml", "content-length": "5"},
+        body=lambda: b"large",
+    )
+
+    assert module.extract_valid_xml_body([oversized], max_bytes=4) is None
 
 
 def test_onedrive_downloader_rejects_sanitized_name_collisions(monkeypatch, tmp_path):

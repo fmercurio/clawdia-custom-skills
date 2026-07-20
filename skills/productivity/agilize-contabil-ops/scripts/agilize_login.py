@@ -253,8 +253,8 @@ def code_from_url(url: str, expected_state: Optional[str] = None) -> Optional[st
     pairs.update(dict(urllib.parse.parse_qsl(parsed.query)))
     pairs.update(dict(urllib.parse.parse_qsl(parsed.fragment)))
     code = pairs.get("code")
-    if code and expected_state and pairs.get("state") and pairs.get("state") != expected_state:
-        die("OIDC state mismatch")
+    if code and expected_state is not None and pairs.get("state") != expected_state:
+        die("OIDC state missing or mismatch")
     return code
 
 
