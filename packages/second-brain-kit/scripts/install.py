@@ -64,12 +64,19 @@ def main() -> int:
     for skill in SKILLS:
         source_root = PACKAGE / "skills" / skill
         for src in sorted(source_root.rglob("*")):
+            if src.is_symlink():
+                print(json.dumps({"ok": False, "error": "symlinked package source is not installable", "path": str(src)}))
+                return 2
             if src.is_file() and "__pycache__" not in src.parts:
                 plan.append((src, install_skill_root(home, a.profile) / skill / src.relative_to(source_root)))
     script_sources = [PACKAGE / "scripts" / name for name in RUNTIME_SCRIPTS] + [
         PACKAGE / "skills" / "brain-search" / "scripts" / "brain_search.py",
         PACKAGE / "skills" / "second-brain-operations" / "scripts" / "brain_health_check.py",
     ]
+    for src in script_sources:
+        if src.is_symlink():
+            print(json.dumps({"ok": False, "error": "symlinked package source is not installable", "path": str(src)}))
+            return 2
     plan.extend((src, bin_root / src.name) for src in script_sources)
 
     wrapper = home / "scripts" / f"second-brain-health-{a.profile}.py"

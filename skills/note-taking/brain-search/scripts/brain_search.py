@@ -280,7 +280,15 @@ def chunk_markdown(text: str, title: str = "") -> list[dict]:
 
 def init_db() -> sqlite3.Connection:
     """Initialize or open the database."""
+    if DB_DIR.is_symlink():
+        raise ValueError("symlinked brain index directory is not allowed")
+    if DB_DIR.exists() and not DB_DIR.is_dir():
+        raise ValueError("brain index path is not a directory")
     DB_DIR.mkdir(parents=True, exist_ok=True)
+    if DB_PATH.is_symlink():
+        raise ValueError("symlinked brain index database is not allowed")
+    if DB_PATH.exists() and not DB_PATH.is_file():
+        raise ValueError("brain index database path is not a file")
     # Add .brain-index to .gitignore if not already there
     gitignore = VAULT_ROOT / ".gitignore"
     if gitignore.exists():

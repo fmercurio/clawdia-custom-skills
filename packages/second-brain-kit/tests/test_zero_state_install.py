@@ -73,6 +73,31 @@ class TestKitE2E(unittest.TestCase):
         self.assertEqual(before, tree_fingerprint(self.vault))
         self.assertFalse(self.home.exists())
 
+    def test_install_refuses_symlinked_package_source(self):
+        package = self.root / "second-brain-kit"
+        shutil.copytree(PACKAGE, package, symlinks=True)
+        outside = self.root / "outside-install.txt"
+        outside.write_text("disposable sentinel", encoding="utf-8")
+        linked = package / "skills" / "brain-search" / "SKILL.md"
+        linked.unlink()
+        linked.symlink_to(outside)
+        hermes_home = self.root / "isolated-hermes"
+        vault = self.root / "isolated-vault"
+        bootstrap = subprocess.run(
+            [PYTHON, str(package / "scripts" / "bootstrap.py"), "--hermes-home", str(hermes_home),
+             "--profile", self.profile, "--vault", str(vault), "--owner", "Install Test", "--apply", "--json"],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(bootstrap.returncode, 0, bootstrap.stdout + bootstrap.stderr)
+        result = subprocess.run(
+            [PYTHON, str(package / "scripts" / "install.py"), "--hermes-home", str(hermes_home),
+             "--profile", self.profile, "--apply", "--json"],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("symlinked package source", result.stdout)
+        self.assertFalse((hermes_home / "profiles" / self.profile / "skills" / "note-taking" / "brain-search" / "SKILL.md").exists())
+
     def test_nonempty_vault_cannot_be_bootstrapped_as_new(self):
         self.vault.mkdir()
         (self.vault / "legacy.md").write_text("# Existing\n", encoding="utf-8")
