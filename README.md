@@ -2,6 +2,10 @@
 
 Repositório curado de skills customizadas para o ambiente Hermes/ClawdIA.
 
+Consulte o [Catálogo de skills e packages](CATALOG.md) para o inventário público,
+os status de governança e as descrições atualizadas. O catálogo é gerado a partir
+da fonte canônica `registry/skills-registry.yaml`.
+
 ## Visão geral
 
 Este repo é a **fonte canônica** das skills desenvolvidas, melhoradas ou validadas pela equipe. Skills aqui passaram por auditoria de segurança, conformidade de frontmatter e aprovação humana antes de serem instaladas no runtime Hermes.

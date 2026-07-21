@@ -1,0 +1,34 @@
+name: Catalog and Validation
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  catalog-validation:
+    name: Skills Catalog Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Run catalog-focused unit tests
+        run: python3 -m unittest discover -s tools/tests -p "test_generate_catalog.py"
+
+      - name: Verify generated catalog is up to date
+        run: python3 tools/generate_catalog.py --check
+
+      - name: Validate all tracked SKILL.md files
+        shell: bash
+        run: |
+          while IFS= read -r -d '' path; do
+            python3 tools/validate_skill.py "$path"
+          done < <(git ls-files -z '*SKILL.md')

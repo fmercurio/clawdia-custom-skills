@@ -21,8 +21,10 @@ passa por revisão humana, de segurança e de governança antes de ser aceita.
 1. Faça um fork do repositório.
 2. Crie uma branch curta e descritiva a partir de `main`.
 3. Faça uma mudança focada; evite misturar assuntos independentes.
-4. Rode as validações e testes relevantes.
-5. Abra um pull request preenchendo o template por completo.
+4. Se você alterar `registry/skills-registry.yaml`, uma skill em `skills/` ou um
+   package em `packages/`, regenere o catálogo e execute a verificação anti-drift.
+5. Rode as validações e testes relevantes.
+6. Abra um pull request preenchendo o template por completo.
 
 Exemplo:
 
@@ -74,6 +76,8 @@ python3 -m pytest caminho/para/tests
 Antes de enviar:
 
 ```bash
+python3 tools/generate_catalog.py
+python3 tools/generate_catalog.py --check
 git diff --check
 git status --short
 ```
