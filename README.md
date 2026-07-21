@@ -53,6 +53,15 @@ custom-skills/
 | `deprecated` | Substituída, mantida por histórico |
 | `rejected` | Avaliada e descartada |
 
+## Contribuições
+
+Pull requests de terceiros são bem-vindos. Leia o [guia de contribuição](CONTRIBUTING.md)
+e preencha o template do pull request com escopo, proveniência, riscos e resultados
+reais de validação.
+
+Toda contribuição passa por revisão humana, de segurança e de governança. A aceitação
+de um PR não instala nem habilita automaticamente uma skill no runtime Hermes.
+
 ## Regras
 
 - **Nunca instalar automaticamente** — toda instalação requer aprovação
