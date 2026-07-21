@@ -557,6 +557,81 @@ skills:
           their own agent to configure specialist topic/channel profiles. Status:
           candidate — awaiting Skills Lab review/approval.
 
+  - name: autonomous-context-to-spec
+    status: candidate
+    version: 1.0.1
+    category: productivity
+    description: >
+      Convert ambiguous context into a traceable concept and specification workflow:
+      structured refinement, assumption handling, risk-aware decision gates, vertical
+      slicing, and evidence-backed traceability before any authorized execution.
+    source:
+      type: internal-with-external-method-adaptation
+      origin: "Hermes-native synthesis from public ideation, grilling, critical-challenge, specification, and RFC skills"
+      author: "Skills Lab"
+      created: "2026-07-21"
+      approved: null
+      approved_by: null
+      repository_url: "https://github.com/addyosmani/agent-skills"
+      source_commit: "2fbfa004a0192529bc997d103fc12f19a3804aab"
+      source_license: "MIT for the primary repository; CC-BY-4.0 for Tech Leads Club skill-content adaptations"
+      sibling_sources: >
+        Matt Pocock skills (MIT): ed37663cc5fbef691ddfecd080dff42f7e7e350d
+        Tech Leads Club agent-skills (CC-BY-4.0): 4beb50707194bc8c7861c7480f80eb756f7983ee
+    installation:
+      runtime_path: null
+      repo_path: "skills/productivity/autonomous-context-to-spec/"
+      installed_date: null
+      installed_by: null
+      note: "Candidate only. No runtime install. Revalidate on upstream revision change or material edit."
+    audit:
+      security_review: "2026-07-21"
+      security_status: "passed"
+      findings:
+        - "No executable Python or scripts in package; protocol-only workflow and templates."
+        - "No tenant, customer, or developer-person identifiers in package files."
+        - "External public skills are treated as optional references and never auto-installed dependencies."
+        - "Execution and mutation gates preserved; explicit authorization required before side effects."
+        - "Provenance includes exact reviewed commits and license attributions in references/provenance.md."
+      frontmatter_valid: true
+      company_agnostic: true
+      pitfalls_documented: true
+    files:
+      - path: "SKILL.md"
+        status: "new"
+        size_bytes: 13171
+      - path: "README.md"
+        status: "new"
+        size_bytes: 3930
+      - path: "references/full-workflow.md"
+        status: "new"
+        size_bytes: 5017
+      - path: "references/business-model-refinement.md"
+        status: "new"
+        size_bytes: 6370
+      - path: "references/safe-installation-stewardship.md"
+        status: "new"
+        size_bytes: 3116
+      - path: "references/provenance.md"
+        status: "new"
+        size_bytes: 5663
+      - path: "templates/context-input.md"
+        status: "new"
+        size_bytes: 1156
+      - path: "templates/result.md"
+        status: "new"
+        size_bytes: 2364
+      - path: "MANIFEST.sha256"
+        status: "new"
+        size_bytes: 731
+    changelog:
+      - date: "2026-07-21"
+        action: "created generic candidate"
+        details: >
+          Added Skills Lab candidate package from sanitized public/public-portable sources,
+          with reusable protocol, safer external composition, updated related skills, and
+          complete provenance ledger tied to reviewed public SHAs.
+
   - name: second-brain-kit
     status: candidate
     version: 0.1.0-rc2
@@ -611,6 +686,67 @@ skills:
         details: >
           Added a package-scoped handoff document and tests for one-question-at-a-time
           safe deployment interviews. Updated versioning to 0.1.0-rc2.
+
+  - name: markdown-knowledge-vaults
+    status: candidate
+    version: 1.0.0
+    category: note-taking
+    description: >
+      Class-level workflow for inspecting, validating, and operating Markdown knowledge
+      vaults in Hermes through durable source handling, inspect-first gates, schema and
+      retrieval validation, explicit apply controls, and rollback-safe lifecycle management.
+    source:
+      type: internal-class-level-synthesis
+      origin: "Class-level adaptation from second-brain-kit governance and operational model"
+      author: "Skills Lab"
+      created: "2026-07-21"
+      approved: null
+      approved_by: null
+      repository_url: null
+      no_repository_reason: "Internal class-level synthesis derived from the governed second-brain-kit package"
+      source_url: "packages/second-brain-kit/"
+      source_commit: "d01d6079ed32b06bf5e2440d5604abbe658ce450"
+      source_license: "MIT"
+    installation:
+      runtime_path: null
+      repo_path: "skills/note-taking/markdown-knowledge-vaults/"
+      installed_date: null
+      installed_by: null
+      note: "Candidate only. Runtime install must be explicit and audited; package assumptions revalidated before use."
+    audit:
+      security_review: "2026-07-21"
+      security_status: "passed"
+      findings:
+        - "No executable Python in package; no direct scripts shipped."
+        - "No hardcoded tenants, people names, local absolute paths, or production scope assumptions."
+        - "No unconditional install/deployment paths; apply gates, dry-runs, and rollback are explicit."
+        - "Includes package-specific revalidation requirement in references/provenance.md before reuse."
+        - "Frontmatter and related skills are sanitized for public reuse."
+      frontmatter_valid: true
+      company_agnostic: true
+      pitfalls_documented: true
+      test_coverage:
+        - "Workflow gate checks: inspect, dry-run, apply, retrieval smoke, and rollback dry-run."
+    files:
+      - path: "SKILL.md"
+        status: "new"
+        size_bytes: 12778
+      - path: "references/second-brain-kit-rc2.md"
+        status: "new"
+        size_bytes: 4227
+      - path: "references/provenance.md"
+        status: "new"
+        size_bytes: 4250
+      - path: "MANIFEST.sha256"
+        status: "new"
+        size_bytes: 267
+    changelog:
+      - date: "2026-07-21"
+        action: "created generic candidate"
+        details: >
+          Added class-level markdown knowledge-vault governance candidate derived from second-brain-kit
+          safety patterns. Replaced internal-only references with public-safe operational flow and
+          explicit revalidation requirements.
 
   - name: explain-code-change
     status: approved
