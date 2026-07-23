@@ -997,27 +997,29 @@ skills:
           positives and corrected the package-local validator path. Candidate remains repo-only.
 
   - name: archiver-contextual-recall
-    status: approved
-    version: 1.1.0
+    status: candidate
+    version: 1.2.0
     category: productivity
     description: >
       Contextual link recall with deterministic weekly Archiver operational reviews for
       integrity and curation health.
     source:
       type: internal
-      origin: "Archive topic/FM HQ"
-      author: "Felippe M. + Hermes Agent"
+      origin: "Public packaging adaptation of a validated Archiver runtime"
+      author: "Felippe M. and Skills Lab"
       created: "2026-07-23"
-      approved: "2026-07-23"
-      approved_by: "Felippe M."
-      repository_url: null
-      no_repository_reason: "Skill local e operacao interna do perfil Archiver em Hermes"
+      approved: null
+      approved_by: null
+      repository_url: "https://github.com/fmercurio/clawdia-custom-skills"
+      source_commit: "7fe64290863e0793bb9c89ba95489208283b17a0"
+      source_license: "MIT"
+      no_repository_reason: null
     installation:
       runtime_path: "~/.hermes/skills/productivity/archiver-contextual-recall/"
       repo_path: "skills/productivity/archiver-contextual-recall/"
-      installed_date: "2026-07-23"
-      installed_by: "Hermes Agent"
-      note: "v1.1.0 adds deterministic weekly review and operational report artifacts."
+      installed_date: null
+      installed_by: null
+      note: "Candidate public package awaiting re-review; deploy through private overlay for environment-specific routing."
     audit:
       security_review: "2026-07-23"
       security_status: "passed"
@@ -1027,44 +1029,70 @@ skills:
         - "URL normalization redacts query, fragment, and credentials before reporting"
         - "Reports written atomically with mode 0600"
         - "No secrets or raw extracted text emitted in findings or artifacts"
+        - "v1.2 remains candidate pending independent re-review"
       frontmatter_valid: true
-      company_agnostic: false
+      company_agnostic: true
       pitfalls_documented: true
     files:
       - path: "SKILL.md"
-        size_bytes: 12529
+        size_bytes: 4995
         status: "new"
       - path: "README.md"
-        size_bytes: 3883
+        size_bytes: 4204
         status: "new"
       - path: "references/pdf-extraction-existing-links.md"
-        size_bytes: 3283
+        size_bytes: 3270
         status: "new"
       - path: "references/reconcile-kanban-archive-tasks.md"
-        size_bytes: 4205
+        size_bytes: 1948
         status: "new"
       - path: "references/weekly-review-operations.md"
-        size_bytes: 2577
+        size_bytes: 2826
         status: "new"
       - path: "references/x-twitter-content-extraction.md"
-        size_bytes: 3419
+        size_bytes: 872
         status: "new"
       - path: "templates/archive-weekly-review.md"
         size_bytes: 1198
         status: "new"
       - path: "scripts/archive_weekly_review.py"
-        size_bytes: 35306
+        size_bytes: 43190
         status: "new"
       - path: "scripts/archive_weekly_review_cron.py"
-        size_bytes: 886
+        size_bytes: 1519
+        status: "new"
+      - path: "scripts/archiver_db.py"
+        size_bytes: 14179
+        status: "new"
+      - path: "scripts/archiver_extract_context.py"
+        size_bytes: 7717
+        status: "new"
+      - path: "scripts/archiver_recall.py"
+        size_bytes: 18712
+        status: "new"
+      - path: "scripts/archive_item.py"
+        size_bytes: 6847
+        status: "new"
+      - path: "scripts/backfill_link_contexts.py"
+        size_bytes: 18151
         status: "new"
       - path: "tests/test_archive_weekly_review.py"
-        size_bytes: 22193
+        size_bytes: 54664
+        status: "new"
+      - path: "references/provenance.md"
+        size_bytes: 937
         status: "new"
       - path: "MANIFEST.sha256"
-        size_bytes: 1011
+        size_bytes: 1557
         status: "new"
     changelog:
+      - date: "2026-07-23"
+        action: "v1.2.0 candidate public hardening"
+        details: >
+          Public-package adaptation now includes self-contained intake/recall/backfill scripts
+          from validated runtime sources, parameterized Archiver paths (home/vault/db),
+          generic runtime boundary documentation, explicit optional index recovery with
+          backup, and expanded regression tests for security-critical invariants.
       - date: "2026-07-23"
         action: "v1.1.0 update"
         details: >
