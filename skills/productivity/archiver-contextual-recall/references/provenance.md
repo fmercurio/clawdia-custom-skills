@@ -1,7 +1,7 @@
 # Provenance
 
 - Package: `archiver-contextual-recall`
-- Version: `1.2.0`
+- Version: `1.2.1`
 - Repository URL: `https://github.com/fmercurio/clawdia-custom-skills`
 - Source baseline SHA: `7fe64290863e0793bb9c89ba95489208283b17a0`
 - Package maintainer: `Skills Lab`

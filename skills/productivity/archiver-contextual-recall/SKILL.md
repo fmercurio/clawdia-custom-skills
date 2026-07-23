@@ -1,7 +1,7 @@
 ---
 name: archiver-contextual-recall
 description: Use when you need generic Archiver intake, contextual recall, and deterministic weekly health reviews.
-version: 1.2.0
+version: 1.2.1
 author: Felippe M. and Skills Lab
 license: MIT
 metadata:
@@ -23,12 +23,26 @@ Use this skill when you need a public, company-agnostic workflow for Archiver in
 
 ## Overview
 
+### Hub installation
+
+Use the full skills.sh identifier and inspect the bundle before overriding the community-source caution policy:
+
+```bash
+ARCHIVER_SKILL_ID="skills-sh/fmercurio/clawdia-custom-skills/skills/productivity/archiver-contextual-recall"
+hermes skills inspect "${ARCHIVER_SKILL_ID}"
+hermes skills install "${ARCHIVER_SKILL_ID}" --force
+```
+
+The complete executable bundle currently receives an expected `CAUTION` verdict because it reads runtime environment variables, invokes subprocesses for Hermes/git checks, and includes an optional cron wrapper. `--force` is appropriate only after inspection confirms those expected `python_os_environ`, `python_subprocess`, and `persistence_cron` findings and no additional or `dangerous` finding. Do not use `--yes` for a human-operated install unless non-interactive confirmation is intentional.
+
 ### Progressive disclosure
 
 1. **Configure runtime paths**
-- Set `ARCHIVER_SKILL_DIR="$HOME/.hermes/skills/productivity/archiver-contextual-recall"` first.
+- Set `ARCHIVER_SKILL_DIR="${HERMES_HOME:-$HOME/.hermes}/skills/archiver-contextual-recall"` for the default Hub layout.
+- Set `ARCHIVER_SKILL_DIR` to the actual install directory for named profiles, external install dirs, or manual category installs (for example `.../skills/productivity/archiver-contextual-recall` or an external path).
 - Set `ARCHIVER_HOME`, `ARCHIVER_VAULT`, and `ARCHIVER_DB` (all parameterizable) for all helper scripts (`archive_item.py`, `archiver_recall.py`, `backfill_link_contexts.py`, etc.).
 - Provide `--archiver-home`, `--archiver-vault`, `--archiver-db` only for `archive_weekly_review.py` when explicit overrides are needed.
+- `hermes` invocation surfaces the actual runtime skill directory for non-default installations; set `ARCHIVER_SKILL_DIR` accordingly.
 
 2. **Intake**
 
@@ -52,6 +66,24 @@ Use this skill when you need a public, company-agnostic workflow for Archiver in
 
 ## Command contract
 
+### Support files / bundle inventory
+
+Hermes Hub bundles are allowlisted by direct path references. The runtime support set is:
+
+- [archive_item.py](scripts/archive_item.py)
+- [archive_weekly_review.py](scripts/archive_weekly_review.py)
+- [archive_weekly_review_cron.py](scripts/archive_weekly_review_cron.py)
+- [archiver_db.py](scripts/archiver_db.py)
+- [archiver_extract_context.py](scripts/archiver_extract_context.py)
+- [archiver_recall.py](scripts/archiver_recall.py)
+- [backfill_link_contexts.py](scripts/backfill_link_contexts.py)
+- [pdf-extraction-existing-links.md](references/pdf-extraction-existing-links.md)
+- [provenance.md](references/provenance.md)
+- [reconcile-kanban-archive-tasks.md](references/reconcile-kanban-archive-tasks.md)
+- [weekly-review-operations.md](references/weekly-review-operations.md)
+- [x-twitter-content-extraction.md](references/x-twitter-content-extraction.md)
+- [archive-weekly-review.md](templates/archive-weekly-review.md)
+
 ### Prerequisites
 
 - Python 3.10+
@@ -68,7 +100,7 @@ Use this skill when you need a public, company-agnostic workflow for Archiver in
 ### Intake
 
 ```bash
-ARCHIVER_SKILL_DIR="$HOME/.hermes/skills/productivity/archiver-contextual-recall"
+ARCHIVER_SKILL_DIR="${HERMES_HOME:-$HOME/.hermes}/skills/archiver-contextual-recall"
 python3 "${ARCHIVER_SKILL_DIR}/scripts/archive_item.py" \
   --title "<title>" \
   --source "https://..." \
@@ -101,8 +133,8 @@ python3 "${ARCHIVER_SKILL_DIR}/scripts/archive_weekly_review.py" \
 
 ```bash
 cp "${ARCHIVER_SKILL_DIR}/scripts/archive_weekly_review_cron.py" \
-  "$HOME/.hermes/scripts/archive_weekly_review_cron.py"
-chmod +x "$HOME/.hermes/scripts/archive_weekly_review_cron.py"
+  "${HERMES_HOME:-$HOME/.hermes}/scripts/archive_weekly_review_cron.py"
+chmod +x "${HERMES_HOME:-$HOME/.hermes}/scripts/archive_weekly_review_cron.py"
 
 hermes cron create "15 9 * * 1" \
   --no-agent \
@@ -110,7 +142,7 @@ hermes cron create "15 9 * * 1" \
   --deliver origin \
   --name "archive-weekly-review"
 
-python3 "$HOME/.hermes/scripts/archive_weekly_review_cron.py" --timeout 180 --days 30
+python3 "${HERMES_HOME:-$HOME/.hermes}/scripts/archive_weekly_review_cron.py" --timeout 180 --days 30
 ```
 
 ### Reconciliation

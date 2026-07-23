@@ -4,21 +4,40 @@
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 
+def _hermes_home_path() -> Path:
+    raw_home = os.environ.get("HERMES_HOME") or str(Path.home() / ".hermes")
+    return Path(raw_home).expanduser()
+
+
+def _hub_skill_dir() -> Path:
+    return _hermes_home_path() / "skills" / "archiver-contextual-recall"
+
+
+def _candidate_skill_dirs() -> list[Path]:
+    dirs = []
+    explicit = os.environ.get("ARCHIVER_SKILL_DIR")
+    if explicit:
+        dirs.append(Path(explicit).expanduser())
+
+    hermes_home = _hermes_home_path()
+    dirs.append(_hub_skill_dir())
+    dirs.append(hermes_home / "skills" / "productivity" / "archiver-contextual-recall")
+    return dirs
+
+
 def installed_main_script() -> Path:
-    return (
-        Path.home()
-        / ".hermes"
-        / "skills"
-        / "productivity"
-        / "archiver-contextual-recall"
-        / "scripts"
-        / "archive_weekly_review.py"
-    )
+    for skill_dir in _candidate_skill_dirs():
+        candidate = skill_dir / "scripts" / "archive_weekly_review.py"
+        if candidate.exists():
+            return candidate
+
+    return _hub_skill_dir() / "scripts" / "archive_weekly_review.py"
 
 
 def main(argv: list[str] | None = None) -> int:

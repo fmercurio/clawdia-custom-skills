@@ -998,7 +998,7 @@ skills:
 
   - name: archiver-contextual-recall
     status: candidate
-    version: 1.2.0
+    version: 1.2.1
     category: productivity
     description: >
       Contextual link recall with deterministic weekly Archiver operational reviews for
@@ -1015,11 +1015,11 @@ skills:
       source_license: "MIT"
       no_repository_reason: null
     installation:
-      runtime_path: "~/.hermes/skills/productivity/archiver-contextual-recall/"
+      runtime_path: "~/.hermes/skills/archiver-contextual-recall/"
       repo_path: "skills/productivity/archiver-contextual-recall/"
       installed_date: null
       installed_by: null
-      note: "Candidate public package awaiting re-review; deploy through private overlay for environment-specific routing."
+      note: "Candidate public package. Default Hub path is `${HERMES_HOME:-$HOME/.hermes}/skills/archiver-contextual-recall/`; set ARCHIVER_SKILL_DIR for profile/category/external installs."
     audit:
       security_review: "2026-07-23"
       security_status: "passed"
@@ -1029,16 +1029,17 @@ skills:
         - "URL normalization redacts query, fragment, and credentials before reporting"
         - "Reports written atomically with mode 0600"
         - "No secrets or raw extracted text emitted in findings or artifacts"
-        - "v1.2 remains candidate pending independent re-review"
+        - "Full 14-file Hub bundle installs only with explicit --force after the expected environment, subprocess, and cron caution findings are reviewed"
+        - "v1.2.1 remains candidate pending independent re-review"
       frontmatter_valid: true
       company_agnostic: true
       pitfalls_documented: true
     files:
       - path: "SKILL.md"
-        size_bytes: 4995
+        size_bytes: 7243
         status: "new"
       - path: "README.md"
-        size_bytes: 4204
+        size_bytes: 5220
         status: "new"
       - path: "references/pdf-extraction-existing-links.md"
         size_bytes: 3270
@@ -1059,7 +1060,7 @@ skills:
         size_bytes: 43190
         status: "new"
       - path: "scripts/archive_weekly_review_cron.py"
-        size_bytes: 1519
+        size_bytes: 2187
         status: "new"
       - path: "scripts/archiver_db.py"
         size_bytes: 14179
@@ -1077,7 +1078,7 @@ skills:
         size_bytes: 18151
         status: "new"
       - path: "tests/test_archive_weekly_review.py"
-        size_bytes: 54664
+        size_bytes: 59271
         status: "new"
       - path: "references/provenance.md"
         size_bytes: 937
@@ -1086,6 +1087,13 @@ skills:
         size_bytes: 1557
         status: "new"
     changelog:
+      - date: "2026-07-23"
+        action: "v1.2.1 installability hotfix"
+        details: >
+          Bounded Bundler installability for Hermes Hub category removal and default path
+          migration. Added explicit runtime allowlist support file inventory, updated
+          path contract documentation, switched to flat Hub runtime_path and precedence
+          (`ARCHIVER_SKILL_DIR`, Hub flat path, legacy category path) in cron wrapper.
       - date: "2026-07-23"
         action: "v1.2.0 candidate public hardening"
         details: >
