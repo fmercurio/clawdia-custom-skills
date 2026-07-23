@@ -995,3 +995,71 @@ skills:
           Replaced regex-based pyproject scanning with TOML-aware dependency extraction for
           PEP 621, Poetry, and dependency groups; added regression tests for metadata false
           positives and corrected the package-local validator path. Candidate remains repo-only.
+
+  - name: archiver-contextual-recall
+    status: approved
+    version: 1.1.0
+    category: productivity
+    description: >
+      Deterministic weekly Archiver review for capture integrity, hygiene, and curation
+      backlog signals.
+    source:
+      type: internal
+      origin: "Archive topic/FM HQ"
+      author: "Felippe M. + Hermes Agent"
+      created: "2026-07-23"
+      approved: "2026-07-23"
+      approved_by: "Felippe M."
+      repository_url: null
+      no_repository_reason: "Skill local e operacao interna do perfil Archiver em Hermes"
+    installation:
+      runtime_path: "~/.hermes/skills/productivity/archiver-contextual-recall/"
+      repo_path: "skills/productivity/archiver-contextual-recall/"
+      installed_date: "2026-07-23"
+      installed_by: "Hermes Agent"
+      note: "v1.1.0 adds deterministic weekly review and operational report artifacts."
+    audit:
+      security_review: "2026-07-23"
+      security_status: "passed"
+      findings:
+        - "Review script opens archive DB in read-only mode; no mutations"
+        - "No outbound network calls in review path"
+        - "URL normalization redacts query, fragment, and credentials before reporting"
+        - "Reports written atomically with mode 0600"
+        - "No secrets or raw extracted text emitted in findings or artifacts"
+      frontmatter_valid: true
+      company_agnostic: false
+      pitfalls_documented: true
+    files:
+      - path: "SKILL.md"
+        size_bytes: 4622
+        status: "new"
+      - path: "README.md"
+        size_bytes: 3613
+        status: "new"
+      - path: "references/weekly-review-operations.md"
+        size_bytes: 2577
+        status: "new"
+      - path: "templates/archive-weekly-review.md"
+        size_bytes: 1198
+        status: "new"
+      - path: "scripts/archive_weekly_review.py"
+        size_bytes: 35306
+        status: "new"
+      - path: "scripts/archive_weekly_review_cron.py"
+        size_bytes: 886
+        status: "new"
+      - path: "tests/test_archive_weekly_review.py"
+        size_bytes: 22193
+        status: "new"
+      - path: "MANIFEST.sha256"
+        size_bytes: 681
+        status: "new"
+    changelog:
+      - date: "2026-07-23"
+        action: "v1.1.0 update"
+        details: >
+          Added deterministic weekly Archiver operational review with governance outputs:
+          weekly metrics and findings, atomic 0600 artifacts (`YYYY-MM-DD.{json,md}`,
+          latest.*, index.json), idempotent index updates, safe subprocess invocation,
+          URL redaction rules, and regression tests for critical and attention states.
