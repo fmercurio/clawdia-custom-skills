@@ -1,7 +1,8 @@
 # Archiver Contextual Recall + Weekly Review
 
-This package adds a deterministic Archiver weekly review on top of existing contextual recall behavior.
-It only reads archive DB and note paths and writes audit artifacts in local `~/.hermes` paths.
+This package is additive v1.1: it keeps the original Archiver contextual recall/intake/reconciliation
+workflow and adds deterministic weekly integrity and operations reviews.
+It writes audit artifacts in local `~/.hermes` paths and does not replace recall behavior.
 
 ## Overview
 
@@ -14,6 +15,13 @@ The review run writes:
 - `index.json`
 
 `index.json` stores checksum registry entries and is the canonical map for persisted artifacts.
+
+## References
+
+- `references/pdf-extraction-existing-links.md`
+- `references/reconcile-kanban-archive-tasks.md`
+- `references/x-twitter-content-extraction.md`
+- `references/weekly-review-operations.md`
 
 ## When to Use
 

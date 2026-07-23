@@ -1001,8 +1001,8 @@ skills:
     version: 1.1.0
     category: productivity
     description: >
-      Deterministic weekly Archiver review for capture integrity, hygiene, and curation
-      backlog signals.
+      Contextual link recall with deterministic weekly Archiver operational reviews for
+      integrity and curation health.
     source:
       type: internal
       origin: "Archive topic/FM HQ"
@@ -1032,13 +1032,22 @@ skills:
       pitfalls_documented: true
     files:
       - path: "SKILL.md"
-        size_bytes: 4622
+        size_bytes: 12529
         status: "new"
       - path: "README.md"
-        size_bytes: 3613
+        size_bytes: 3883
+        status: "new"
+      - path: "references/pdf-extraction-existing-links.md"
+        size_bytes: 3283
+        status: "new"
+      - path: "references/reconcile-kanban-archive-tasks.md"
+        size_bytes: 4205
         status: "new"
       - path: "references/weekly-review-operations.md"
         size_bytes: 2577
+        status: "new"
+      - path: "references/x-twitter-content-extraction.md"
+        size_bytes: 3436
         status: "new"
       - path: "templates/archive-weekly-review.md"
         size_bytes: 1198
@@ -1053,7 +1062,7 @@ skills:
         size_bytes: 22193
         status: "new"
       - path: "MANIFEST.sha256"
-        size_bytes: 681
+        size_bytes: 1011
         status: "new"
     changelog:
       - date: "2026-07-23"
