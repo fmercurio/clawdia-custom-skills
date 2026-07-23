@@ -15,8 +15,8 @@
 ### Por status
 | Status | Quantidade |
 | --- | ---: |
-| approved | 5 |
-| candidate | 11 |
+| approved | 4 |
+| candidate | 12 |
 | draft | 0 |
 | profile-overlay | 0 |
 | deprecated | 0 |
@@ -28,7 +28,6 @@
 | --- | --- | --- | --- | --- |
 | note-taking | second-brain-operations | approved | Step-by-step playbook for setting up and operating a PARA-first Second Brain with Hermes — vault creation, semantic search engine, pull/push skills, health-check cron, weekly review, and operational rhythm. | [second-brain-operations](skills/note-taking/second-brain-operations/SKILL.md) |
 | productivity | agilize-contabil-ops | approved | Agilize contábil platform operations: Keycloak/OIDC PKCE authentication, finance transaction classification, NFS-e evidence linking, transaction splitting, pro-labore reconciliation, monthly close, and audit workflows. Company-agnostic — works for any Agilize tenant. | [agilize-contabil-ops](skills/productivity/agilize-contabil-ops/SKILL.md) |
-| productivity | archiver-contextual-recall | approved | Contextual link recall with deterministic weekly Archiver operational reviews for integrity and curation health. | [archiver-contextual-recall](skills/productivity/archiver-contextual-recall/SKILL.md) |
 | social-media | discord-voice-meetings | approved | Build a Discord voice meeting transcription system — capture audio, identify speakers, transcribe via Groq Whisper, generate LLM-powered meeting minutes/atas. Framework-agnostic reference implementation included. | [discord-voice-meetings](skills/social-media/discord-voice-meetings/SKILL.md) |
 | software-development | explain-code-change | approved | Generate a source-grounded explanation artifact for code changes with a fact/interpretation split, structured content sections, quiz quality validations, deterministic option shuffling, and a single offline HTML artifact output. | [explain-code-change](skills/software-development/explain-code-change/SKILL.md) |
 
@@ -42,6 +41,7 @@
 | note-taking | markdown-knowledge-vaults | candidate | Class-level workflow for inspecting, validating, and operating Markdown knowledge vaults in Hermes through durable source handling, inspect-first gates, schema and retrieval validation, explicit apply controls, and rollback-safe lifecycle management. | [markdown-knowledge-vaults](skills/note-taking/markdown-knowledge-vaults/SKILL.md) |
 | note-taking | pull-brain | candidate | Generic template — recover and load consolidated context from a PARA-first Second Brain vault. Retrieves knowledge in PARA order, uses brain-search for concept-level queries, and separates vault facts from session memory. | [pull-brain](skills/note-taking/pull-brain/SKILL.md) |
 | note-taking | push-brain | candidate | Generic template — save, consolidate, and sync a PARA-first Second Brain vault after a meaningful session. Classifies into PARA, writes durable knowledge, runs health-check, commits, pushes, and rebuilds search index. | [push-brain](skills/note-taking/push-brain/SKILL.md) |
+| productivity | archiver-contextual-recall | candidate | Contextual link recall with deterministic weekly Archiver operational reviews for integrity and curation health. | [archiver-contextual-recall](skills/productivity/archiver-contextual-recall/SKILL.md) |
 | productivity | autonomous-context-to-spec | candidate | Convert ambiguous context into a traceable concept and specification workflow: structured refinement, assumption handling, risk-aware decision gates, vertical slicing, and evidence-backed traceability before any authorized execution. | [autonomous-context-to-spec](skills/productivity/autonomous-context-to-spec/SKILL.md) |
 | productivity | nfse-emissor-nacional | candidate | Safe NFS-e draft preparation in the Brazilian Emissor Nacional portal (nfse.gov.br) using Playwright — taker history import, Select2/Chosen widget handling, draft-only workflow with human review stop. | [nfse-emissor-nacional](skills/productivity/nfse-emissor-nacional/SKILL.md) |
 | productivity | skill-architecture-workflow | candidate | Hermes-native workflow for deciding whether a recurring need deserves a skill, then designing its scope, trigger contract, progressive disclosure, safety gates, validation, provenance, and promotion path through the governed custom-skills library. | [skill-architecture-workflow](skills/productivity/skill-architecture-workflow/SKILL.md) |

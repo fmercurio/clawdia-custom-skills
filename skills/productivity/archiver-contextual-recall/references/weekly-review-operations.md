@@ -78,7 +78,7 @@ No-agent jobs should run:
 ~/.hermes/scripts/archive_weekly_review_cron.py --days 30
 ```
 
-Recommended schedule is Monday 09:15 local time:
+Recommended schedule example (local time):
 
 ```
 15 9 * * 1
@@ -108,3 +108,13 @@ hermes kanban list --archived --json
 ```
 
 with `HERMES_KANBAN_BOARD=archive`.
+
+## Review command contract and recoverability
+
+Use explicit recovery only when intentional:
+
+```bash
+python3 .../archive_weekly_review.py --recover-index --days 30 --json
+```
+
+Private runtime routing and profile IDs should remain in deployment overlays.

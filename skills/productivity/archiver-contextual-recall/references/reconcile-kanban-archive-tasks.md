@@ -1,94 +1,53 @@
-# Reconcile Archive Kanban tasks with Archiver DB
+# Reconcile Kanban tasks with Archiver DB
 
-Use this when Felippe remembers sending a link to the Archive topic on a specific date, but `archiver_recall.py`, `archive-vault` Markdown search, and the current `archiver.sqlite3` tables do not find it.
+Use this when a user reports a link through Kanban and the current Archiver control plane does not immediately show it.
 
 ## Why this exists
 
-Some historical archive-worker runs processed Telegram archive messages through Kanban and wrote/claimed a note outside the current Archiver control plane. In those cases:
-
-- The Archive Kanban task may be `done`.
-- The archiver worker transcript may contain the original Telegram body, extracted URLs, and fetched page metadata.
-- The current Archiver DB may still have no `items`, `links`, or `link_contexts` rows for those URLs.
-- A final note path mentioned by the worker may not exist anymore in the current vault path.
-
-Do not report “not archived” until checking both the control-plane DB and the Kanban/session trail.
+Some operational histories may contain links in Kanban task payloads that are not yet reflected in SQLite tables.
+Treat Kanban and DB evidence together; do not mark an item missing from Archiver without cross-checking both.
 
 ## Control-plane checks
 
 ```bash
-DB="$HOME/.hermes/profiles/archiver/archive-vault/90-meta/archiver.sqlite3"
-
+DB="$ARCHIVER_DB"
 sqlite3 "$DB" '.tables'
-sqlite3 "$DB" "select id,title,source,path,created_at from items where created_at like '2026-05-11%' order by created_at;"
-sqlite3 "$DB" "select l.id,l.url,i.path,l.created_at from links l join items i on i.id=l.item_id where l.created_at like '2026-05-11%' order by l.created_at;"
+sqlite3 "$DB" "SELECT id,title,source,path,created_at FROM items WHERE created_at >= '$START' ORDER BY created_at;"
+sqlite3 "$DB" "SELECT l.id,l.url,i.path,l.created_at FROM links l JOIN items i ON i.id=l.item_id WHERE l.created_at >= '$START' ORDER BY l.created_at;"
 ```
 
-For a specific URL, compare normalized forms: strip trailing slash, `http` vs `https`, `www.` vs bare host where appropriate.
+Normalize URLs when comparing by URL family:
 
-## Archive Kanban checks
+- protocol changes (`http` ↔ `https`)
+- trailing slash normalization
+- host canonicalization (`www.` vs bare host)
+
+## Kanban checks
 
 ```bash
-hermes kanban --board archive show <task_id>
+hermes kanban --board "${ARCHIVER_KANBAN_BOARD:-archive}" show <task_id>
 ```
 
-If the task id is unknown, inspect likely archive-board tasks around the remembered date through the Kanban CLI or board DB. The task body often preserves:
+If the exact task id is unknown, inspect nearby tasks on the configured board and collect source URLs from task bodies.
 
-- original Telegram text
-- all URLs in the message
-- chat/thread/user/message_id provenance
+## Backfill workflow
 
-## Archiver profile session DB checks
-
-Historical worker transcripts live in the archiver profile state DB:
+- If a missing link is confirmed, run intake-safe backfill/rebuild tools instead of direct file edits:
 
 ```bash
-STATE="$HOME/.hermes/profiles/archiver/state.db"
+python3 .../scripts/backfill_link_contexts.py --dry-run --json
+python3 .../scripts/backfill_link_contexts.py --extract-existing --json
 ```
 
-Search by local date and `http` content:
+- Use `--dry-run` first to inspect counts and candidate IDs before writing.
 
-```bash
-python3 - <<'PY'
-import sqlite3, datetime, zoneinfo, os, json
-p=os.path.expanduser('~/.hermes/profiles/archiver/state.db')
-con=sqlite3.connect(p); con.row_factory=sqlite3.Row
-tz=zoneinfo.ZoneInfo('America/Sao_Paulo')
-start=datetime.datetime(2026,5,11,0,0,tzinfo=tz).timestamp()
-end=datetime.datetime(2026,5,12,0,0,tzinfo=tz).timestamp()
-rows=con.execute('''
-  select m.id,m.session_id,m.role,m.content,m.timestamp,m.platform_message_id,s.source,s.title
-  from messages m join sessions s on s.id=m.session_id
-  where m.timestamp>=? and m.timestamp<? and m.content like '%http%'
-  order by m.timestamp
-''',(start,end)).fetchall()
-for r in rows:
-    d=dict(r)
-    d['dt']=datetime.datetime.fromtimestamp(d['timestamp'],tz).isoformat()
-    d['content']=(d.get('content') or '')[:1200]
-    print(json.dumps(d,ensure_ascii=False))
-PY
-```
-
-Once you identify the worker session, inspect surrounding messages/tool calls. Useful evidence can appear in:
-
-- the Kanban task payload/tool output containing the task body
-- tool outputs from web readers/extractors containing page title/description/url/content
-- assistant final message naming the note destination
-- `write_file` tool-call arguments containing the note content/path
-
-## Outcome classification
-
-Classify each URL as one of:
+## Outcome classes
 
 - `in_control`: present in `items`/`links` and has a current note path.
-- `extracted_only`: appears in worker transcript/tool output but absent from `archiver.sqlite3`.
-- `note_only`: appears in a Markdown note but not in `links`/`link_contexts`.
-- `missing`: not found in DB, vault, Kanban task, or session transcript.
+- `extracted_only`: present in task trail but absent from `archiver.sqlite3`.
+- `note_only`: present in markdown history but missing `links`/`link_contexts`.
+- `missing`: no match after checking DB and Kanban evidence.
 
-For `extracted_only`/`note_only`, recommend a backfill into the current Archiver control plane, preserving provenance fields from the Kanban task: platform, chat, thread, user, message_id, task_id, and archived date.
+## Note
 
-## Reporting pattern
-
-Be explicit that the current recall DB can be correct while still missing historical worker output:
-
-> The current Archiver DB has no Firecrawl rows, but the Archive Kanban task from 2026-05-11 does contain `https://www.firecrawl.dev/`, and the worker transcript extracted its title/description. So the issue is persistence/reconciliation, not user memory.
+Private routing IDs, historical state DB paths, and recovery branches are deployment-specific and are excluded from this package.

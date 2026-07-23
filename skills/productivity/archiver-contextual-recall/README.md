@@ -1,98 +1,58 @@
 # Archiver Contextual Recall + Weekly Review
 
-This package is additive v1.1: it keeps the original Archiver contextual recall/intake/reconciliation
-workflow and adds deterministic weekly integrity and operations reviews.
-It writes audit artifacts in local `~/.hermes` paths and does not replace recall behavior.
+Profile-agnostic Archiver package with deterministic review artifacts and runtime-safe recovery checks.
 
-## Overview
+## Overview (progressive disclosure)
 
-The review run writes:
+1. **Install and configure environment**
+   - Set `ARCHIVER_HOME`, `ARCHIVER_VAULT`, `ARCHIVER_DB` (optional, all have defaults).
+   - Prefer running with `--json` during validation.
 
-- `YYYY-MM-DD.json`
-- `YYYY-MM-DD.md`
-- `latest.json`
-- `latest.md`
-- `index.json`
+2. **Create intake and recall workflows**
+   - `archive_item.py` to capture links and metadata.
+   - `archiver_recall.py` to query structured links, markdown notes, and context.
 
-`index.json` stores checksum registry entries and is the canonical map for persisted artifacts.
+3. **Run reconciliation**
+   - `backfill_link_contexts.py` to add missing DB rows from existing vault files.
+   - `archiver_extract_context.py` is used by intake/backfill to generate HTML/text/PDF context.
 
-## References
+4. **Run weekly operations**
+   - `archive_weekly_review.py` for deterministic health outputs.
+   - `archive_weekly_review_cron.py` for Hermes no-agent cron.
 
-- `references/pdf-extraction-existing-links.md`
-- `references/reconcile-kanban-archive-tasks.md`
-- `references/x-twitter-content-extraction.md`
-- `references/weekly-review-operations.md`
-
-## When to Use
-
-Use this package when requesting:
-
-- periodic Archiver operational governance,
-- capture integrity checks (missing notes, orphan rows, failed contexts),
-- duplicate/normalization signal checks,
-- backlog visibility for `inbox` and curation pacing.
-
-## Prerequisites
-
-- Archive home: `~/.hermes/profiles/archiver`
-- Archive DB: `~/.hermes/profiles/archiver/archive-vault/90-meta/archiver.sqlite3`
-- Installed main script:
-  `~/.hermes/skills/productivity/archiver-contextual-recall/scripts/archive_weekly_review.py`
-- Cron wrapper copied to: `~/.hermes/scripts/archive_weekly_review_cron.py`
-
-## How to Run
-
-- `--days` must be greater than `0`.
-- Default review window is `--days 30`; keep 30 for weekly backlog context.
-- No command runs with a shell, only direct process arguments.
-
-## Quick Reference
+## Runtime commands
 
 ```bash
-python3 ~/.hermes/skills/productivity/archiver-contextual-recall/scripts/archive_weekly_review.py --days 30 --json
+ARCHIVER_SKILL_DIR="$HOME/.hermes/skills/productivity/archiver-contextual-recall"
+
+python3 "${ARCHIVER_SKILL_DIR}/scripts/archive_item.py" --title "..." --source "https://example.com" --body "..." --json
+python3 "${ARCHIVER_SKILL_DIR}/scripts/archiver_recall.py" --query "..." --limit 10 --json
+python3 "${ARCHIVER_SKILL_DIR}/scripts/backfill_link_contexts.py" --dry-run --json
+python3 "${ARCHIVER_SKILL_DIR}/scripts/archive_weekly_review.py" --days 30 --json
+python3 "${ARCHIVER_SKILL_DIR}/scripts/archive_weekly_review_cron.py" --timeout 300 --days 30
 ```
 
-```bash
-python3 ~/.hermes/skills/productivity/archiver-contextual-recall/scripts/archive_weekly_review.py --days 30 --no-write
-```
+## Defaults and configuration
+
+- `ARCHIVER_HOME` (default: `~/.hermes/profiles/archiver`)
+- `ARCHIVER_VAULT` (default: `${ARCHIVER_HOME}/archive-vault`)
+- `ARCHIVER_DB` (default: `${ARCHIVER_VAULT}/90-meta/archiver.sqlite3`)
+- `ARCHIVER_KANBAN_BOARD` (default: `archive`)
+
+`ARCHIVER_HOME`, `ARCHIVER_VAULT`, and `ARCHIVER_DB` configure all helper scripts.
+`--archiver-home`, `--archiver-vault`, `--archiver-db` only apply to
+`archive_weekly_review.py` CLI:
+
+- `--kanban-board` remains available on `archive_weekly_review.py` and pairs with
+  `ARCHIVER_KANBAN_BOARD`.
+
+Hermes no-agent cron setup example:
 
 ```bash
-python3 ~/.hermes/scripts/archive_weekly_review_cron.py --days 30
-```
+cp "${ARCHIVER_SKILL_DIR}/scripts/archive_weekly_review_cron.py" \
+  "$HOME/.hermes/scripts/archive_weekly_review_cron.py"
+chmod +x "$HOME/.hermes/scripts/archive_weekly_review_cron.py"
 
-## Procedure
-
-1. Write full artifacts:
-
-```bash
-python3 ~/.hermes/skills/productivity/archiver-contextual-recall/scripts/archive_weekly_review.py \
-  --archiver-home ~/.hermes/profiles/archiver \
-  --output-dir ~/.hermes/profiles/archiver/reports/archive-reviews \
-  --days 30
-```
-
-2. Print payload only:
-
-```bash
-python3 ~/.hermes/skills/productivity/archiver-contextual-recall/scripts/archive_weekly_review.py --days 30 --json
-```
-
-3. Run in inspection mode (no files written):
-
-```bash
-python3 ~/.hermes/skills/productivity/archiver-contextual-recall/scripts/archive_weekly_review.py --no-write --days 30
-```
-
-4. Copy the wrapper into the Hermes cron script sandbox:
-
-```bash
-cp ~/.hermes/skills/productivity/archiver-contextual-recall/scripts/archive_weekly_review_cron.py \
-  ~/.hermes/scripts/archive_weekly_review_cron.py
-```
-
-5. Create the no-agent job using Hermes cron semantics (not system `crontab`):
-
-```bash
 hermes cron create "15 9 * * 1" \
   --no-agent \
   --script archive_weekly_review_cron.py \
@@ -100,21 +60,39 @@ hermes cron create "15 9 * * 1" \
   --name "archive-weekly-review"
 ```
 
-The schedule is Mondays at 09:15 local time (`15 9 * * 1`).
+## Deterministic review artifacts
 
-## Pitfalls
+`archive_weekly_review.py` writes:
 
-- `latest.json` and `latest.md` are byte-identical to the dated files.
-- `index.json` is authoritative for SHA-256 and byte sizes of persisted artifacts.
-- URL redaction removes query, fragment, and credentials before persistence.
-- Kanban lookup failures are reported as info-only and do not force critical status.
-- Schema validation failures, foreign key violations, and critical integrity failures are marked critical.
+- `YYYY-MM-DD.json`
+- `YYYY-MM-DD.md`
+- `latest.json`
+- `latest.md`
+- `index.json`
 
-## Verification
+All payloads are stable and written atomically with mode `0600`. Same-day re-runs overwrite only that day’s review entry in `index.json` while keeping the remainder of history intact.
 
-- `python3 tools/validate_skill.py skills/productivity/archiver-contextual-recall/SKILL.md`
-- `python3 -m pytest skills/productivity/archiver-contextual-recall/tests`
-- `python3 -m py_compile $(find skills/productivity/archiver-contextual-recall/scripts -name '*.py')`
-- Regenerate and verify `skills/productivity/archiver-contextual-recall/MANIFEST.sha256`
-- `git diff --check`
-- `git status --short`
+## Runtime safety behavior
+
+- `archiver_recall.py` opens the archive DB in read-only mode and performs no schema migration or writes.
+- `backfill_link_contexts.py` with `--dry-run` performs a strict read-only pass only: no DB file is created, no backups are written, and no schema/FTS/trigger changes are performed.
+- Escaped/missing item paths are critical findings.
+- URL normalization redacts credentials, query strings, and fragments for both schemeless and standard URL forms.
+- Kanban board is parameterized through `--kanban-board`/`ARCHIVER_KANBAN_BOARD`.
+- Index loading is fail-closed on malformed JSON or schema mismatch unless `--recover-index` is explicitly passed.
+- Path, checksum, and size metadata are tracked in `index.json`.
+
+## Governance notes
+
+- The package intentionally includes only public controls and placeholders.
+- Deployment routing, chat/group identifiers, private overlays, and historical recovery branches remain in private overlays and are not embedded in public files.
+
+## Verification commands
+
+```bash
+python3 tools/validate_skill.py skills/productivity/archiver-contextual-recall/SKILL.md
+python3 -m pytest skills/productivity/archiver-contextual-recall/tests/test_archive_weekly_review.py
+python3 -m py_compile \
+  skills/productivity/archiver-contextual-recall/scripts/*.py \
+  skills/productivity/archiver-contextual-recall/tests/test_archive_weekly_review.py
+```

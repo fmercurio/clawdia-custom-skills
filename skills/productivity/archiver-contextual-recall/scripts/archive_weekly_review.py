@@ -23,8 +23,25 @@ from urllib.parse import urlsplit, urlunsplit
 SCHEMA_VERSION = "archive-weekly-review.v1"
 INDEX_SCHEMA_VERSION = "archive-weekly-review.v1-index"
 DEFAULT_DAYS = 30
-DB_RELATIVE_PATH = Path("archive-vault/90-meta/archiver.sqlite3")
+DB_RELATIVE_PATH = Path("90-meta/archiver.sqlite3")
+DEFAULT_OUTPUT_RELATIVE = Path("reports") / "archive-reviews"
 MAX_EXAMPLE_COUNT = 8
+INDEX_BACKUP_SUFFIX = ".corrupt"
+ARCHIVER_VAULT_DEFAULT_REL = Path("archive-vault")
+
+
+def _default_archiver_home() -> Path:
+    return Path(os.environ.get("ARCHIVER_HOME", str(Path("~/.hermes/profiles/archiver").expanduser())))
+
+
+def _default_archiver_vault() -> Path:
+    return Path(
+        os.environ.get("ARCHIVER_VAULT", str(_default_archiver_home() / ARCHIVER_VAULT_DEFAULT_REL))
+    ).expanduser()
+
+
+def _default_archiver_db(vault_root: Path) -> Path:
+    return (vault_root / DB_RELATIVE_PATH).expanduser()
 
 
 def _utcnow() -> datetime:
@@ -44,14 +61,25 @@ def _normalize_netloc(parsed: Any) -> str:
     if ":" in host and not host.startswith("["):
         host = f"[{host}]"
 
-    if parsed.port:
-        return f"{host}:{parsed.port}"
+    try:
+        port = parsed.port
+    except ValueError:
+        return ""
+    if port:
+        return f"{host}:{port}"
     return host
+
+
+def _safe_urlsplit(value: str) -> Any:
+    try:
+        return urlsplit(value)
+    except ValueError:
+        return None
 
 
 def _normalize_path(path: str) -> str:
     if not path:
-        return "/"
+        return ""
     normalized = path.rstrip("/")
     return normalized or "/"
 
@@ -68,23 +96,31 @@ def normalize_url(value: Optional[str]) -> str:
         return ""
 
     if "://" in text:
-        parsed = urlsplit(text)
-        if parsed.scheme and parsed.hostname:
+        parsed = _safe_urlsplit(text)
+        if parsed and parsed.scheme and parsed.hostname:
             netloc = _normalize_netloc(parsed)
             if not netloc:
-                return ""
+                return _strip_query_and_fragment(text)
             return urlunsplit((parsed.scheme.lower(), netloc, _normalize_path(parsed.path), "", ""))
         return _strip_query_and_fragment(text)
 
     if text.startswith("//"):
-        parsed = urlsplit(text)
-        if parsed.hostname:
+        parsed = _safe_urlsplit(text)
+        if parsed and parsed.hostname:
             netloc = _normalize_netloc(parsed)
             if not netloc:
-                return ""
+                return _strip_query_and_fragment(text)
             return f"{netloc}{_normalize_path(parsed.path)}"
         return _strip_query_and_fragment(text)
 
+    # Raw schemeless URL-like values (example.com/path, user:pass@example/path).
+    parsed = _safe_urlsplit(f"//{text}")
+    if parsed and parsed.hostname:
+        netloc = _normalize_netloc(parsed)
+        if netloc:
+            return f"{netloc}{_normalize_path(parsed.path)}"
+
+    # Last resort fallback for non-URL values.
     return _strip_query_and_fragment(text)
 
 
@@ -175,10 +211,13 @@ def compute_git_health(home: Path) -> Dict[str, Any]:
     }
 
 
-def compute_kanban_health() -> Dict[str, Any]:
+def compute_kanban_health(board: str) -> Dict[str, Any]:
+    env = {
+        "HERMES_KANBAN_BOARD": board,
+    }
     result = run_subprocess(
         ["hermes", "kanban", "list", "--archived", "--json"],
-        env_var={"HERMES_KANBAN_BOARD": "archive"},
+        env_var=env,
     )
     if result["returncode"] != 0:
         return {
@@ -212,6 +251,7 @@ def compute_kanban_health() -> Dict[str, Any]:
 
     return {
         "status": "available",
+        "board": board,
         "tasks": len(tasks),
         "status_counts": dict(status_counts),
     }
@@ -281,7 +321,56 @@ def _to_int_or_none(value: Any) -> Optional[int]:
         return None
 
 
-def collect_metrics(conn: sqlite3.Connection, archiver_home: Path, days: int) -> Dict[str, Any]:
+def _safe_text(value: Any) -> str:
+    if value is None:
+        return ""
+    text = str(value).strip()
+    return text[:240]
+
+
+def _path_under_root(root: Path, candidate: Path) -> bool:
+    try:
+        root_resolved = root.resolve()
+        candidate_resolved = candidate.resolve()
+        return candidate_resolved.is_relative_to(root_resolved)
+    except AttributeError:
+        root_str = os.path.normcase(str(root.resolve()))
+        candidate_str = os.path.normcase(str(candidate.resolve()))
+        return os.path.commonpath([candidate_str, root_str]) == root_str
+    except (OSError, ValueError):
+        # Resolve can fail on unreadable parts; use string-based fallback.
+        root_str = os.path.normcase(str(root.absolute()))
+        candidate_str = os.path.normcase(str(candidate.absolute()))
+        return os.path.commonpath([candidate_str, root_str]) == root_str
+
+
+def _normalize_note_path(vault_root: Path, raw: Any) -> tuple[bool, Path | None, str]:
+    if raw is None:
+        return False, None, ""
+    text = str(raw).strip()
+    if not text:
+        return False, None, ""
+
+    candidate = Path(text)
+    if not candidate.is_absolute():
+        candidate = vault_root / candidate
+
+    try:
+        resolved = candidate.resolve()
+    except OSError:
+        resolved = candidate
+
+    safe = _path_under_root(vault_root, resolved)
+    return safe, resolved, str(resolved)
+
+
+def collect_metrics(
+    conn: sqlite3.Connection,
+    archiver_home: Path,
+    vault_root: Path,
+    kanban_board: str,
+    days: int,
+) -> Dict[str, Any]:
     conn.row_factory = sqlite3.Row
 
     for required in ("items", "links", "link_contexts"):
@@ -370,18 +459,32 @@ def collect_metrics(conn: sqlite3.Connection, archiver_home: Path, days: int) ->
             foreign_examples,
         )
 
-    # Missing note paths.
+    # Critical: escaped note path, missing note path.
     title_expr = f"COALESCE({item_title_col}, '') AS title" if item_title_col else "'' AS title"
     missing_note_paths = 0
+    escaped_note_paths = 0
     missing_note_examples: List[Dict[str, Any]] = []
+    escaped_path_examples: List[Dict[str, Any]] = []
     for row in conn.execute(f"SELECT id, {item_note_col}, {title_expr} FROM items"):
         note_path_raw = row[item_note_col]
+        safe, resolved_path, resolved_text = _normalize_note_path(vault_root, note_path_raw)
+
         exists = False
         if note_path_raw:
-            path = Path(str(note_path_raw))
-            if not path.is_absolute():
-                path = archiver_home / "archive-vault" / path
-            exists = path.exists()
+            if not safe:
+                escaped_note_paths += 1
+                if len(escaped_path_examples) < MAX_EXAMPLE_COUNT:
+                    escaped_path_examples.append(
+                        {
+                            "item_id": int(row["id"]),
+                            "note_path": str(note_path_raw),
+                            "resolved_path": resolved_text,
+                            "title": _safe_text(row["title"]),
+                        }
+                    )
+                continue
+            exists = bool(resolved_path and resolved_path.exists())
+
         if not exists:
             missing_note_paths += 1
             if len(missing_note_examples) < MAX_EXAMPLE_COUNT:
@@ -389,9 +492,21 @@ def collect_metrics(conn: sqlite3.Connection, archiver_home: Path, days: int) ->
                     {
                         "item_id": int(row["id"]),
                         "note_path": str(note_path_raw or ""),
+                        "resolved_path": resolved_text,
                         "title": _safe_text(row["title"]),
                     }
                 )
+
+    if escaped_note_paths:
+        append_finding(
+            findings,
+            "critical",
+            "critical.note_path_escape",
+            "Item note path escapes vault root",
+            "One or more archived note paths resolve outside the configured vault root.",
+            {"count": escaped_note_paths},
+            escaped_path_examples,
+        )
 
     if missing_note_paths:
         append_finding(
@@ -548,7 +663,7 @@ def collect_metrics(conn: sqlite3.Connection, archiver_home: Path, days: int) ->
                 link_id = int(row[context_link_key])
             else:
                 link_ref = conn.execute(
-                    "SELECT id FROM links WHERE item_id=? LIMIT 1",
+                    "SELECT id FROM links WHERE item_id = ? LIMIT 1",
                     (row[context_link_key],),
                 ).fetchone()
                 link_id = int(link_ref[0]) if link_ref is not None else None
@@ -640,7 +755,6 @@ def collect_metrics(conn: sqlite3.Connection, archiver_home: Path, days: int) ->
 
     # Markdown notes count.
     markdown_notes = 0
-    vault_root = archiver_home / "archive-vault"
     if vault_root.exists():
         for path in vault_root.rglob("*.md"):
             if "90-meta" in path.parts:
@@ -649,7 +763,7 @@ def collect_metrics(conn: sqlite3.Connection, archiver_home: Path, days: int) ->
                 markdown_notes += 1
 
     git = compute_git_health(archiver_home)
-    kanban = compute_kanban_health()
+    kanban = compute_kanban_health(kanban_board)
 
     if git.get("status") == "dirty":
         append_finding(
@@ -694,6 +808,7 @@ def collect_metrics(conn: sqlite3.Connection, archiver_home: Path, days: int) ->
         "item_status_counts": dict(item_status_counts),
         "context_status_counts": dict(context_status_counts),
         "missing_note_paths": missing_note_paths,
+        "escaped_note_paths": escaped_note_paths,
         "missing_note_examples": missing_note_examples,
         "orphan_links": orphan_links,
         "orphan_contexts": orphan_contexts,
@@ -722,13 +837,6 @@ def collect_metrics(conn: sqlite3.Connection, archiver_home: Path, days: int) ->
         "git": git,
         "kanban": kanban,
     }
-
-
-def _safe_text(value: Any) -> str:
-    if value is None:
-        return ""
-    text = str(value).strip()
-    return text[:240]
 
 
 def decide_status(metrics: Dict[str, Any]) -> str:
@@ -773,8 +881,8 @@ def findings_markdown(findings: Sequence[Dict[str, Any]]) -> str:
 
 
 def render_markdown(payload: Dict[str, Any]) -> str:
-    template = Path(__file__).resolve().parent.parent / "templates" / "archive-weekly-review.md"
-    text = template.read_text(encoding="utf-8")
+    template = Path(__file__).resolve().parent / "../templates" / "archive-weekly-review.md"
+    text = template.resolve().read_text(encoding="utf-8")
     metrics = payload["metrics"]
     replacements = {
         "{{schema}}": payload["schema"],
@@ -808,7 +916,34 @@ def render_markdown(payload: Dict[str, Any]) -> str:
     return text
 
 
-def load_index(path: Path) -> Dict[str, Any]:
+def _validate_index_payload(payload: Dict[str, Any]) -> None:
+    if not isinstance(payload, dict):
+        raise ValueError("index payload is not an object")
+    if payload.get("schema") != INDEX_SCHEMA_VERSION:
+        raise ValueError("index schema mismatch")
+    reviews = payload.get("reviews", {})
+    if not isinstance(reviews, dict):
+        raise ValueError("index.reviews must be an object")
+    for date, item in reviews.items():
+        if not isinstance(item, dict):
+            raise ValueError(f"index entry {date} must be an object")
+        json_entry = item.get("json")
+        md_entry = item.get("markdown")
+        for key, name in ((json_entry, "json"), (md_entry, "markdown")):
+            if not isinstance(key, dict):
+                raise ValueError(f"index entry {date} missing {name}")
+            for field in ("path", "size_bytes", "sha256"):
+                if field not in key:
+                    raise ValueError(f"index entry {date} missing {name}.{field}")
+            if not isinstance(key.get("path"), str):
+                raise ValueError(f"index entry {date} {name}.path must be str")
+            if not isinstance(key.get("size_bytes"), int):
+                raise ValueError(f"index entry {date} {name}.size_bytes must be int")
+            if not isinstance(key.get("sha256"), str):
+                raise ValueError(f"index entry {date} {name}.sha256 must be str")
+
+
+def load_index(path: Path, *, recover: bool = False) -> Dict[str, Any]:
     if not path.exists():
         return {
             "schema": INDEX_SCHEMA_VERSION,
@@ -816,17 +951,37 @@ def load_index(path: Path) -> Dict[str, Any]:
             "latest_date": "",
             "reviews": {},
         }
+
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return {
-            "schema": INDEX_SCHEMA_VERSION,
-            "generated_at": "",
-            "latest_date": "",
-            "reviews": {},
-        }
-    if not isinstance(data, dict):
-        return {"schema": INDEX_SCHEMA_VERSION, "generated_at": "", "latest_date": "", "reviews": {}}
+    except Exception as exc:
+        if recover:
+            backup_path = path.with_suffix(path.suffix + INDEX_BACKUP_SUFFIX)
+            path.replace(backup_path)
+            os.chmod(backup_path, 0o600)
+            return {
+                "schema": INDEX_SCHEMA_VERSION,
+                "generated_at": "",
+                "latest_date": "",
+                "reviews": {},
+            }
+        raise RuntimeError(f"Malformed index JSON at {path}: {exc}") from exc
+
+    try:
+        _validate_index_payload(data)
+    except ValueError as exc:
+        if recover:
+            backup_path = path.with_suffix(path.suffix + INDEX_BACKUP_SUFFIX)
+            path.replace(backup_path)
+            os.chmod(backup_path, 0o600)
+            return {
+                "schema": INDEX_SCHEMA_VERSION,
+                "generated_at": "",
+                "latest_date": "",
+                "reviews": {},
+            }
+        raise RuntimeError(f"Invalid index schema at {path}: {exc}") from exc
+
     if "reviews" not in data or not isinstance(data["reviews"], dict):
         data["reviews"] = {}
     data.setdefault("schema", INDEX_SCHEMA_VERSION)
@@ -834,7 +989,7 @@ def load_index(path: Path) -> Dict[str, Any]:
 
 
 def update_index(path: Path, payload: Dict[str, Any], artifacts: Dict[str, Any]) -> Dict[str, Any]:
-    index = load_index(path)
+    index = load_index(path, recover=False)
     index["schema"] = INDEX_SCHEMA_VERSION
     index["generated_at"] = payload["generated_at"]
     index["latest_date"] = payload["date"]
@@ -856,14 +1011,31 @@ def update_index(path: Path, payload: Dict[str, Any], artifacts: Dict[str, Any])
     return index
 
 
-def gather_payload(archiver_home: Path, output_dir: Path, days: int, no_write: bool) -> Dict[str, Any]:
-    db_path = (archiver_home / DB_RELATIVE_PATH).expanduser()
+def gather_payload(
+    archiver_home: Path,
+    db_path: Path,
+    vault_root: Path,
+    output_dir: Path,
+    days: int,
+    kanban_board: str,
+    no_write: bool,
+    recover_index: bool,
+) -> Dict[str, Any]:
+    db_path = db_path.expanduser()
+    if not db_path.is_absolute():
+        db_path = (archiver_home / db_path).resolve()
     if not db_path.exists():
         raise RuntimeError(f"Archive DB missing at {db_path}")
 
     try:
         with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as conn:
-            metrics = collect_metrics(conn, archiver_home=archiver_home, days=days)
+            metrics = collect_metrics(
+                conn,
+                archiver_home=archiver_home,
+                vault_root=vault_root,
+                kanban_board=kanban_board,
+                days=days,
+            )
     except sqlite3.OperationalError as exc:
         raise RuntimeError(f"Cannot open archive DB: {exc}")
 
@@ -889,6 +1061,7 @@ def gather_payload(archiver_home: Path, output_dir: Path, days: int, no_write: b
             "output_dir": str(output_dir),
             "days": days,
             "window_start": metrics["recent_items"]["window_start"],
+            "kanban_board": kanban_board,
         },
         "metrics": {
             "items_total": metrics["items_total"],
@@ -930,11 +1103,12 @@ def gather_payload(archiver_home: Path, output_dir: Path, days: int, no_write: b
     if no_write:
         return payload
 
+    index_path = output_dir / "index.json"
+    index = load_index(index_path, recover=recover_index)
     json_path = output_dir / f"{date_str}.json"
     md_path = output_dir / f"{date_str}.md"
     latest_json_path = output_dir / "latest.json"
     latest_md_path = output_dir / "latest.md"
-    index_path = output_dir / "index.json"
 
     json_text = stable_json(payload)
     md_text = render_markdown(payload)
@@ -972,8 +1146,18 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Generate Archiver weekly review artifacts.")
     p.add_argument(
         "--archiver-home",
-        default=str(Path("~/.hermes/profiles/archiver").expanduser()),
-        help="Archiver profile root directory.",
+        default=None,
+        help="Archiver profile root directory (default: $ARCHIVER_HOME or ~/.hermes/profiles/archiver).",
+    )
+    p.add_argument(
+        "--archiver-vault",
+        default=None,
+        help="Root directory for archive-vault (default: $ARCHIVER_VAULT or <archiver_home>/archive-vault).",
+    )
+    p.add_argument(
+        "--archiver-db",
+        default=None,
+        help="Path to archiver.sqlite3 (default derived from --archiver-vault or ARCHIVER_VAULT/ARCHIVER_DB).",
     )
     p.add_argument(
         "--output-dir",
@@ -981,6 +1165,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Directory for review artifacts (default: <archiver_home>/reports/archive-reviews).",
     )
     p.add_argument("--days", type=int, default=DEFAULT_DAYS, help="Review window in days.")
+    p.add_argument("--kanban-board", default=os.environ.get("ARCHIVER_KANBAN_BOARD", "archive"), help="Kanban board for reconciliation checks.")
+    p.add_argument("--recover-index", action="store_true", help="Recover from malformed index.json by backing it up and regenerating history.")
     p.add_argument("--json", action="store_true", help="Print JSON payload to stdout.")
     p.add_argument("--no-write", action="store_true", help="Run in inspection mode without writing files.")
     return p
@@ -994,18 +1180,47 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print("ERROR: --days must be greater than 0.", file=sys.stderr)
         return 2
 
-    archiver_home = Path(args.archiver_home).expanduser()
+    explicit_home = args.archiver_home is not None
+    archiver_home = (
+        Path(args.archiver_home).expanduser()
+        if explicit_home
+        else _default_archiver_home().expanduser()
+    )
+    if args.archiver_vault is not None:
+        vault_root = Path(args.archiver_vault).expanduser()
+    elif explicit_home:
+        vault_root = archiver_home / ARCHIVER_VAULT_DEFAULT_REL
+    else:
+        vault_root = Path(
+            os.environ.get(
+                "ARCHIVER_VAULT",
+                str(archiver_home / ARCHIVER_VAULT_DEFAULT_REL),
+            )
+        ).expanduser()
+
+    if args.archiver_db is not None:
+        archiver_db = args.archiver_db
+    elif args.archiver_vault is not None or explicit_home:
+        archiver_db = str(_default_archiver_db(vault_root))
+    else:
+        env_db = os.environ.get("ARCHIVER_DB", "")
+        archiver_db = env_db if env_db else str(_default_archiver_db(vault_root))
     if args.output_dir:
         output_dir = Path(args.output_dir).expanduser()
     else:
-        output_dir = archiver_home / "reports" / "archive-reviews"
+        output_dir = archiver_home / DEFAULT_OUTPUT_RELATIVE
+    archiver_db = Path(archiver_db).expanduser()
 
     try:
         payload = gather_payload(
             archiver_home=archiver_home,
+            db_path=archiver_db,
+            vault_root=vault_root,
             output_dir=output_dir,
             days=args.days,
+            kanban_board=args.kanban_board,
             no_write=args.no_write,
+            recover_index=args.recover_index,
         )
     except (RuntimeError, ValueError, sqlite3.OperationalError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

@@ -1,6 +1,6 @@
-# Archiver PDF extraction and existing-link enrichment — 2026-05-30
+# Archiver PDF extraction and existing-link enrichment
 
-This note captures the durable workflow for improving Archiver recall when existing links are already indexed with weak `body_only` context.
+# This note captures the durable workflow for improving Archiver recall when existing links are already indexed with weak `body_only` context.
 
 ## Problem
 
