@@ -4,9 +4,24 @@ Profile-agnostic Archiver package with deterministic review artifacts and runtim
 
 ## Overview (progressive disclosure)
 
+### Install from Hermes Hub
+
+Inspect first, then override only the expected community-source caution findings:
+
+```bash
+ARCHIVER_SKILL_ID="skills-sh/fmercurio/clawdia-custom-skills/skills/productivity/archiver-contextual-recall"
+hermes skills inspect "${ARCHIVER_SKILL_ID}"
+hermes skills install "${ARCHIVER_SKILL_ID}" --force
+```
+
+The full bundle is expected to trigger `python_os_environ`, `python_subprocess`, and `persistence_cron` scanner findings because its reviewed runtime behavior reads path configuration, runs local Hermes/git checks, and provides an optional cron wrapper. Do not override additional or `dangerous` findings.
+
 1. **Install and configure environment**
    - Set `ARCHIVER_HOME`, `ARCHIVER_VAULT`, `ARCHIVER_DB` (optional, all have defaults).
+   - Default install location is `${HERMES_HOME:-$HOME/.hermes}/skills/archiver-contextual-recall`.
+   - Set `ARCHIVER_SKILL_DIR` to the actual skill directory when installed through a named profile, external path, or manual category path.
    - Prefer running with `--json` during validation.
+   - Hermes invocation and `skill_view` expose the concrete skill directory for non-default installs.
 
 2. **Create intake and recall workflows**
    - `archive_item.py` to capture links and metadata.
@@ -23,7 +38,7 @@ Profile-agnostic Archiver package with deterministic review artifacts and runtim
 ## Runtime commands
 
 ```bash
-ARCHIVER_SKILL_DIR="$HOME/.hermes/skills/productivity/archiver-contextual-recall"
+ARCHIVER_SKILL_DIR="${HERMES_HOME:-$HOME/.hermes}/skills/archiver-contextual-recall"
 
 python3 "${ARCHIVER_SKILL_DIR}/scripts/archive_item.py" --title "..." --source "https://example.com" --body "..." --json
 python3 "${ARCHIVER_SKILL_DIR}/scripts/archiver_recall.py" --query "..." --limit 10 --json
@@ -50,8 +65,8 @@ Hermes no-agent cron setup example:
 
 ```bash
 cp "${ARCHIVER_SKILL_DIR}/scripts/archive_weekly_review_cron.py" \
-  "$HOME/.hermes/scripts/archive_weekly_review_cron.py"
-chmod +x "$HOME/.hermes/scripts/archive_weekly_review_cron.py"
+  "${HERMES_HOME:-$HOME/.hermes}/scripts/archive_weekly_review_cron.py"
+chmod +x "${HERMES_HOME:-$HOME/.hermes}/scripts/archive_weekly_review_cron.py"
 
 hermes cron create "15 9 * * 1" \
   --no-agent \

@@ -5,6 +5,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import sqlite3
 import subprocess
 import sys
@@ -23,6 +24,23 @@ ARCHIVE_ITEM_PATH = SCRIPTS_DIR / "archive_item.py"
 ARCHIVER_RECALL_PATH = SCRIPTS_DIR / "archiver_recall.py"
 BACKFILL_PATH = SCRIPTS_DIR / "backfill_link_contexts.py"
 ARCHIVER_DB_PATH = SCRIPTS_DIR / "archiver_db.py"
+SKILL_PATH = Path(__file__).resolve().parent.parent / "SKILL.md"
+
+EXPECTED_SUPPORT_LINKS = {
+    "scripts/archive_item.py",
+    "scripts/archive_weekly_review.py",
+    "scripts/archive_weekly_review_cron.py",
+    "scripts/archiver_db.py",
+    "scripts/archiver_extract_context.py",
+    "scripts/archiver_recall.py",
+    "scripts/backfill_link_contexts.py",
+    "references/pdf-extraction-existing-links.md",
+    "references/provenance.md",
+    "references/reconcile-kanban-archive-tasks.md",
+    "references/weekly-review-operations.md",
+    "references/x-twitter-content-extraction.md",
+    "templates/archive-weekly-review.md",
+}
 
 
 @pytest.fixture
@@ -84,6 +102,20 @@ def run_script(path: Path, args: list[str], *, env: dict[str, str] | None = None
 
 def read_json(path: Path):
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def support_inventory_targets() -> set[str]:
+    text = SKILL_PATH.read_text(encoding="utf-8")
+    section = re.search(
+        r"### Support files / bundle inventory(.*?)(?:\n### |\n## |\Z)",
+        text,
+        re.S,
+    )
+    assert section, "support files / bundle inventory section not found"
+    return {
+        match.group(1)
+        for match in re.finditer(r"\[[^\]]+\]\(([^)]+)\)", section.group(1))
+    }
 
 
 def write_notes(archive_root: Path, notes, *, vault_root: Path | None = None):
@@ -512,10 +544,20 @@ def test_compute_kanban_uses_list_with_board_env(module_archive_review, monkeypa
 
 def test_wrapper_uses_installed_script_path(module_cron, tmp_path, monkeypatch):
     home = tmp_path / "home"
-    scripts_dir = home / ".hermes/skills/productivity/archiver-contextual-recall/scripts"
+    explicit_dir = tmp_path / "explicit-skill"
+    flat_dir = home / ".hermes/skills/archiver-contextual-recall"
+    legacy_dir = home / ".hermes/skills/productivity/archiver-contextual-recall"
+
+    scripts_dir = explicit_dir / "scripts"
     scripts_dir.mkdir(parents=True)
     fake_script = scripts_dir / "archive_weekly_review.py"
     fake_script.write_text("", encoding="utf-8")
+    flat_script = flat_dir / "scripts" / "archive_weekly_review.py"
+    flat_script.parent.mkdir(parents=True)
+    flat_script.write_text("", encoding="utf-8")
+    legacy_script = legacy_dir / "scripts" / "archive_weekly_review.py"
+    legacy_script.parent.mkdir(parents=True)
+    legacy_script.write_text("", encoding="utf-8")
 
     captured = {}
 
@@ -525,6 +567,8 @@ def test_wrapper_uses_installed_script_path(module_cron, tmp_path, monkeypatch):
         return SimpleNamespace(returncode=0)
 
     monkeypatch.setattr(module_cron.Path, "home", lambda: home)
+    monkeypatch.setenv("HERMES_HOME", str(home / ".hermes"))
+    monkeypatch.setenv("ARCHIVER_SKILL_DIR", str(explicit_dir))
     monkeypatch.setattr(module_cron.subprocess, "run", fake_run)
 
     result = module_cron.main(["--days", "30", "--json"])
@@ -534,6 +578,81 @@ def test_wrapper_uses_installed_script_path(module_cron, tmp_path, monkeypatch):
     assert captured["cmd"][1] == str(fake_script)
     assert captured["cmd"][2:] == ["--days", "30", "--json"]
     assert all(isinstance(x, str) for x in captured["cmd"])
+
+
+def test_wrapper_prefers_hermes_home_flat_install(module_cron, tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    flat_script = (home / ".hermes/skills/archiver-contextual-recall/scripts/archive_weekly_review.py")
+    flat_script.parent.mkdir(parents=True)
+    flat_script.write_text("", encoding="utf-8")
+
+    legacy_script = (home / ".hermes/skills/productivity/archiver-contextual-recall/scripts/archive_weekly_review.py")
+    legacy_script.parent.mkdir(parents=True)
+    legacy_script.write_text("", encoding="utf-8")
+
+    captured = {}
+
+    def fake_run(cmd, check=False, text=False, timeout=None):
+        captured["cmd"] = cmd
+        captured["timeout"] = timeout
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(module_cron.Path, "home", lambda: home)
+    monkeypatch.setenv("HERMES_HOME", str(home / ".hermes"))
+    monkeypatch.delenv("ARCHIVER_SKILL_DIR", raising=False)
+    monkeypatch.setattr(module_cron.subprocess, "run", fake_run)
+
+    result = module_cron.main(["--days", "7"])
+
+    assert result == 0
+    assert captured["cmd"][1] == str(flat_script)
+
+
+def test_wrapper_prefers_legacy_category_path_as_fallback(module_cron, tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    legacy_script = (home / ".hermes/skills/productivity/archiver-contextual-recall/scripts/archive_weekly_review.py")
+    legacy_script.parent.mkdir(parents=True)
+    legacy_script.write_text("", encoding="utf-8")
+
+    captured = {}
+
+    def fake_run(cmd, check=False, text=False, timeout=None):
+        captured["cmd"] = cmd
+        captured["timeout"] = timeout
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(module_cron.Path, "home", lambda: home)
+    monkeypatch.setenv("HERMES_HOME", str(home / ".hermes"))
+    monkeypatch.delenv("ARCHIVER_SKILL_DIR", raising=False)
+    monkeypatch.setattr(module_cron.subprocess, "run", fake_run)
+
+    result = module_cron.main(["--days", "1"])
+
+    assert result == 0
+    assert captured["cmd"][1] == str(legacy_script)
+
+
+def test_wrapper_reports_flat_path_when_no_script_found(module_cron, tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    missing_dir = tmp_path / "missing"
+
+    monkeypatch.setattr(module_cron.Path, "home", lambda: home)
+    monkeypatch.setenv("HERMES_HOME", str(home / ".hermes"))
+    monkeypatch.setenv("ARCHIVER_SKILL_DIR", str(missing_dir))
+    code, _, err = run_main_error(module_cron, ["--days", "1"])
+
+    expected = f"{home / '.hermes/skills/archiver-contextual-recall/scripts/archive_weekly_review.py'}"
+    assert code == 2
+    assert f"ERROR: main script not found at {expected}" in err
+
+    monkeypatch.delenv("ARCHIVER_SKILL_DIR")
+    code, _, err = run_main_error(module_cron, ["--days", "1"])
+    assert code == 2
+    assert f"ERROR: main script not found at {expected}" in err
+
+
+def test_skill_bundle_inventory_includes_exact_support_targets():
+    assert support_inventory_targets() == EXPECTED_SUPPORT_LINKS
 
 
 @pytest.mark.parametrize(
