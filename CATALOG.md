@@ -9,13 +9,13 @@
 ### Por tipo de artefato
 | Tipo de artefato | Quantidade |
 | --- | ---: |
-| skill | 14 |
+| skill | 15 |
 | package | 1 |
 
 ### Por status
 | Status | Quantidade |
 | --- | ---: |
-| approved | 4 |
+| approved | 5 |
 | candidate | 11 |
 | draft | 0 |
 | profile-overlay | 0 |
@@ -28,6 +28,7 @@
 | --- | --- | --- | --- | --- |
 | note-taking | second-brain-operations | approved | Step-by-step playbook for setting up and operating a PARA-first Second Brain with Hermes — vault creation, semantic search engine, pull/push skills, health-check cron, weekly review, and operational rhythm. | [second-brain-operations](skills/note-taking/second-brain-operations/SKILL.md) |
 | productivity | agilize-contabil-ops | approved | Agilize contábil platform operations: Keycloak/OIDC PKCE authentication, finance transaction classification, NFS-e evidence linking, transaction splitting, pro-labore reconciliation, monthly close, and audit workflows. Company-agnostic — works for any Agilize tenant. | [agilize-contabil-ops](skills/productivity/agilize-contabil-ops/SKILL.md) |
+| productivity | archiver-contextual-recall | approved | Contextual link recall with deterministic weekly Archiver operational reviews for integrity and curation health. | [archiver-contextual-recall](skills/productivity/archiver-contextual-recall/SKILL.md) |
 | social-media | discord-voice-meetings | approved | Build a Discord voice meeting transcription system — capture audio, identify speakers, transcribe via Groq Whisper, generate LLM-powered meeting minutes/atas. Framework-agnostic reference implementation included. | [discord-voice-meetings](skills/social-media/discord-voice-meetings/SKILL.md) |
 | software-development | explain-code-change | approved | Generate a source-grounded explanation artifact for code changes with a fact/interpretation split, structured content sections, quiz quality validations, deterministic option shuffling, and a single offline HTML artifact output. | [explain-code-change](skills/software-development/explain-code-change/SKILL.md) |
 
