@@ -12,7 +12,7 @@ When extracting content from X/Twitter URLs and the primary methods fail, use th
 
 ```bash
 curl -sL -A "Mozilla/5.0" \
-  "https://api.fxtwitter.com/<username>/status/<tweet_id>" 
+  "https://api.fxtwitter.com/<username>/status/<tweet_id>"
 ```
 
 Replace `<username>` and `<tweet_id>` from the original URL:
@@ -53,11 +53,11 @@ import json
 def blocks_to_markdown(article_data):
     blocks = article_data["content"]["blocks"]
     entities = article_data["content"].get("entityMap", [])
-    
+
     lines = []
     for block in blocks:
         text = block["text"]
-        
+
         if block["type"] == "header-two":
             lines.append(f"\n## {text}\n")
         elif block["type"] == "unordered-list-item":
@@ -71,7 +71,7 @@ def blocks_to_markdown(article_data):
             pass
         else:
             lines.append(text)
-    
+
     return "\n\n".join(lines)
 ```
 

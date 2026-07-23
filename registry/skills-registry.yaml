@@ -1047,7 +1047,7 @@ skills:
         size_bytes: 2577
         status: "new"
       - path: "references/x-twitter-content-extraction.md"
-        size_bytes: 3436
+        size_bytes: 3419
         status: "new"
       - path: "templates/archive-weekly-review.md"
         size_bytes: 1198
