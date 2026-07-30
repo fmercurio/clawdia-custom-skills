@@ -15,3 +15,10 @@ Adapted concepts include sequential workflow, context-aware selection, domain-sp
 The package also synthesizes generic contracts from five internally operated Second Brain skills and a real vault implementation. Tenant identities, paths, notes, and proprietary fixtures are excluded.
 
 Optional OKF 1.6 static rendering behavior is documented from https://okfgem.com/docs/cli/render/ .
+
+## Internal v0.1 Brain MCP provenance
+
+- The compatibility baseline was characterized from internal source repository commit `0d627ed`.
+- Only deterministic read-only behavioral facts were generalized: the tool allowlist, bounds, path checks, restricted-result filtering, intent-aware pull order, and response-shape constraints.
+- No tenant identity, vault path, note content, policy configuration, runtime state, secret, service setting, or deployment artifact was copied.
+- This provenance is a documentation and test-fixture reference only; it introduces no runtime dependency or network relationship to the internal source.

@@ -1,0 +1,72 @@
+{
+  "schema_version": "1.0",
+  "contract_version": "v0.1",
+  "read_limits": {
+    "default_chars": 12000,
+    "min_chars": 1,
+    "max_chars": 50000
+  },
+  "search_limits": {
+    "default_limit": 8,
+    "min_limit": 1,
+    "max_limit": 20
+  },
+  "path_safety": {
+    "allowed_extensions": [
+      ".md"
+    ],
+    "supported_extensions": [
+      ".md"
+    ],
+    "unsupported_examples": [
+      "notes/overview.json",
+      "notes/overview.txt",
+      "notes/overview.yaml",
+      "notes/overview.py"
+    ],
+    "forbidden_segments": [
+      ".git",
+      ".obsidian",
+      ".brain-index",
+      "tests",
+      "__pycache__",
+      ".venv",
+      "runtime",
+      "config",
+      "secrets",
+      "scripts"
+    ],
+    "safety_cases": [
+      {
+        "case": "absolute_path",
+        "value": "/tmp/demo/notes/public.md",
+        "allowed": false,
+        "reason": "non_relative_paths_rejected"
+      },
+      {
+        "case": "traversal_path",
+        "value": "notes/../secrets/private.md",
+        "allowed": false,
+        "reason": "path_traversal_rejected"
+      },
+      {
+        "case": "forbidden_segment",
+        "value": "notes/.git/config.md",
+        "allowed": false,
+        "reason": "forbidden_directory_segment"
+      },
+      {
+        "case": "unsupported_extension",
+        "value": "notes/reference.json",
+        "allowed": false,
+        "reason": "unsupported_extension"
+      },
+      {
+        "case": "accepted_path",
+        "value": "notes/public/resource.md",
+        "allowed": true,
+        "reason": "relative_markdown_path"
+      }
+    ]
+  }
+}

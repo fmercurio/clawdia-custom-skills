@@ -1,0 +1,100 @@
+{
+  "schema_version": "1.0",
+  "contract_version": "v0.1",
+  "pull_context": {
+    "max_results": 20,
+    "query_modes": [
+      "intent_first",
+      "lexical_fallback"
+    ],
+    "dedupe_field": "path",
+    "trace_contract": {
+      "has_retrieval_trace": true,
+      "has_warnings": true,
+      "has_gaps": true,
+      "has_provenance": true
+    },
+    "intents": {
+      "state": [
+        "Project State",
+        "Area Context"
+      ],
+      "decision": [
+        "Decision"
+      ],
+      "concept": [
+        "Concept",
+        "Query"
+      ],
+      "procedure": [
+        "Playbook"
+      ],
+      "source": [
+        "Source"
+      ],
+      "auto": [
+        "Project State",
+        "Area Context",
+        "Decision",
+        "Concept",
+        "Query",
+        "Playbook",
+        "Source"
+      ]
+    },
+    "intent_order": [
+      "state",
+      "decision",
+      "concept",
+      "procedure",
+      "source",
+      "auto"
+    ],
+    "intent_examples": [
+      {
+        "intent": "state",
+        "typed_order": [
+          "Project State",
+          "Area Context"
+        ],
+        "ordered_candidates": [
+          {
+            "path": "notes/project-state.md",
+            "source": "typed",
+            "evidence": "typed state intent matched first"
+          },
+          {
+            "path": "notes/shared-reference.md",
+            "source": "typed",
+            "evidence": "typed state intent matched second"
+          }
+        ]
+      },
+      {
+        "intent": "decision",
+        "typed_order": [
+          "Decision"
+        ],
+        "typed_lookup": {
+          "had_results": false,
+          "status": "no typed matches"
+        },
+        "ordered_candidates": [
+          {
+            "path": "notes/any-context.md",
+            "source": "lexical_fallback",
+            "evidence": "generic lexical fallback after no typed matches"
+          }
+        ]
+      }
+    ],
+    "duplication_examples": [
+      {
+        "path": "notes/shared-reference.md",
+        "typed_source": "typed",
+        "fallback_source": "lexical",
+        "dedupe_result": "single_return_item"
+      }
+    ]
+  }
+}
