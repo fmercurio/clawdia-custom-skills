@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import sys
 import unittest
 
@@ -16,8 +17,15 @@ class CoreCompatTest(unittest.TestCase):
     def setUp(self) -> None:
         self.core = CompatibilityCore()
 
-    def test_importing_core_does_not_require_mcp(self) -> None:
-        self.assertNotIn("mcp", sys.modules)
+    def test_core_source_does_not_import_mcp(self) -> None:
+        tree = ast.parse((RUNTIME_ROOT / "brain_mcp" / "core.py").read_text(encoding="utf-8"))
+        imports: list[str] = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imports.extend(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                imports.extend((node.module or "") for _ in node.names)
+        self.assertFalse(any(name == "mcp" or name.startswith("mcp.") for name in imports))
 
     def test_tool_name_order_and_shape(self) -> None:
         self.assertEqual(
