@@ -1,0 +1,12 @@
+[project]
+name = "second-brain-kit-runtime"
+version = "0.0.0"
+description = "Compatibility MCP runtime for second-brain-kit (optional slice)"
+requires-python = ">=3.11"
+dependencies = ["mcp>=2,<3"]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.uv]
+package = false
