@@ -263,13 +263,15 @@ class TestKitE2E(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stdout, "")
 
-    def test_cron_registration_invokes_cli_only_with_explicit_flags(self):
+    def test_cron_activation_is_separate_and_explicit(self):
         self.bootstrap()
         log = self.root / "cron-cli.log"
         fake = self.root / "fake-hermes"
         fake.write_text(f"#!/bin/sh\nprintf '%s\\n' \"$*\" > {str(log)!r}\nprintf 'Created job: fake-job-id\\n'\n", encoding="utf-8")
         fake.chmod(0o755)
-        self.install("--enable-cron", "--register-cron", "--hermes-cli", str(fake))
+        self.install("--enable-cron")
+        activation = run("activate_cron.py", "--hermes-home", str(self.home), "--profile", self.profile, "--apply", "--hermes-cli", str(fake))
+        self.assertTrue(json.loads(activation.stdout)["ok"])
         command = log.read_text(encoding="utf-8")
         self.assertIn("cron create", command)
         self.assertIn("--no-agent", command)
@@ -286,7 +288,8 @@ class TestKitE2E(unittest.TestCase):
         fake = self.root / "fake-hermes"
         fake.write_text("#!/bin/sh\nprintf 'Created job: fake-job-id\\n'\n", encoding="utf-8")
         fake.chmod(0o755)
-        self.install("--enable-cron", "--register-cron", "--hermes-cli", str(fake))
+        self.install("--enable-cron")
+        run("activate_cron.py", "--hermes-home", str(self.home), "--profile", self.profile, "--apply", "--hermes-cli", str(fake))
         self.install()
         inventory = self.home / "second-brain-kit" / "profiles" / self.profile / "install-inventory.json"
         self.assertTrue(json.loads(inventory.read_text(encoding="utf-8"))["cron_registered"])

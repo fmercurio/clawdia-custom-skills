@@ -111,7 +111,7 @@ class TestAgentGuidedSetup(unittest.TestCase):
                 registry_version = match.group(1)
                 break
         expected = assert_consistent("registry version", registry_version)
-        self.assertEqual(expected, "0.1.0-rc2")
+        self.assertEqual(expected, "0.2.0-rc1")
 
     def test_manifest_includes_changed_and_new_files(self):
         entries = {line.split("  ", 1)[1].strip() for line in MANIFEST.read_text(encoding="utf-8").splitlines() if line.strip()}

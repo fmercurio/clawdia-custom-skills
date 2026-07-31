@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>{SERVICE_LABEL}</string>
+
+  <!--
+  Strict render-only template.
+  Binding is provided by rendered config, and is tenant-reviewed before launch.
+  -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>{LAUNCHER_PATH}</string>
+    <string>--config</string>
+    <string>{CONFIG_PATH}</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>SECOND_BRAIN_KIT_RUNTIME</key>
+    <string>{RUNTIME_ROOT}</string>
+    <key>SECOND_BRAIN_KIT_PYTHON</key>
+    <string>{RUNTIME_PYTHON}</string>
+  </dict>
+
+  <key>WorkingDirectory</key>
+  <string>{INSTANCE_DIR}</string>
+
+  <key>RunAtLoad</key>
+  <false/>
+  <key>KeepAlive</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>{STDOUT_LOG_PATH}</string>
+  <key>StandardErrorPath</key>
+  <string>{STDERR_LOG_PATH}</string>
+</dict>
+</plist>

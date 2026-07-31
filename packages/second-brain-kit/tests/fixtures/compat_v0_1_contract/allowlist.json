@@ -1,0 +1,46 @@
+{
+  "schema_version": "1.0",
+  "contract_version": "v0.1",
+  "tool_allowlist": [
+    {
+      "name": "brain_status",
+      "readonly": true,
+      "open_world": false,
+      "read_only_note": "status introspection only",
+      "annotation": "tool present in v0.1 compatibility set"
+    },
+    {
+      "name": "search_brain",
+      "readonly": true,
+      "open_world": false,
+      "read_only_note": "index-backed lexical search only",
+      "annotation": "tool present in v0.1 compatibility set"
+    },
+    {
+      "name": "read_brain_note",
+      "readonly": true,
+      "open_world": false,
+      "read_only_note": "path-scoped note read only",
+      "annotation": "tool present in v0.1 compatibility set"
+    },
+    {
+      "name": "pull_brain_context",
+      "readonly": true,
+      "open_world": false,
+      "read_only_note": "intent-aware context retrieval only",
+      "annotation": "tool present in v0.1 compatibility set"
+    }
+  ],
+  "prohibited_exactly_forbiddens": [
+    "git_write",
+    "shell_exec",
+    "filesystem_write",
+    "arbitrary_sql",
+    "index_rebuild",
+    "policy_override"
+  ],
+  "notes": [
+    "The contract boundary is exact: four read-only MCP endpoints and no generic write APIs.",
+    "Tool names are authoritative contract identifiers for this slice."
+  ]
+}

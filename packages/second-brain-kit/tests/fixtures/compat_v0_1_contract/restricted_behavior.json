@@ -1,0 +1,92 @@
+{
+  "schema_version": "1.0",
+  "contract_version": "v0.1",
+  "restricted_policy": {
+    "read": {
+      "default_allowed": false,
+      "ok": false,
+      "error_shape": {
+        "type": "dict",
+        "required_keys": [
+          "ok",
+          "error"
+        ]
+      },
+      "error_payload": {
+        "relative_path_echo": "notes/restricted.md",
+        "forbidden_path_leak": false
+      }
+    },
+    "search": {
+      "default_included": false,
+      "query_gate": "sensitivity_filter",
+      "response_shape": {
+        "required_keys": [
+          "ok",
+          "query",
+          "canonical_results",
+          "retrieval_trace",
+          "warnings"
+        ]
+      },
+      "index_filtering": {
+        "restricted_rows_preexist_ok": true,
+        "notes": "restricted rows may exist in index and are excluded at retrieval/canonical-result stage"
+      }
+    },
+    "pull_context": {
+      "default_included": false,
+      "response_shape": {
+        "required_keys": [
+          "ok",
+          "query",
+          "intent",
+          "canonical_results",
+          "retrieval_trace",
+          "warnings",
+          "gaps",
+          "provenance"
+        ]
+      },
+      "index_filtering": {
+        "restricted_rows_preexist_ok": true,
+        "notes": "restricted results are excluded from canonical results during retrieval"
+      }
+    }
+  },
+  "result_shape": {
+    "search": {
+      "required_keys": [
+        "ok",
+        "query",
+        "canonical_results",
+        "retrieval_trace",
+        "warnings"
+      ]
+    },
+    "pull": {
+      "required_keys": [
+        "ok",
+        "query",
+        "intent",
+        "canonical_results",
+        "retrieval_trace",
+        "warnings",
+        "gaps",
+        "provenance"
+      ]
+    },
+    "status": {
+      "required_keys": [
+        "ok"
+      ],
+      "forbidden_keys": [
+        "vault_root",
+        "db_root",
+        "index_db_path",
+        "home_root",
+        "filesystem_root"
+      ]
+    }
+  }
+}

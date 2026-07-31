@@ -634,7 +634,7 @@ skills:
 
   - name: second-brain-kit
     status: candidate
-    version: 0.1.0-rc2
+    version: 0.2.0-rc1
     category: note-taking
     description: >
       Hermes-native installable suite for bootstrapping a new Second Brain or

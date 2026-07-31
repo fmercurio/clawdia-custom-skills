@@ -9,7 +9,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-VERSION = "0.1.0-rc2"
+VERSION = "0.2.0-rc1"
 SCHEMA_VERSION = 1
 LAYERS = {
     "inbox": "00_Inbox",
@@ -28,7 +28,22 @@ def _safe_relative_parts(relative: Path) -> tuple[str, ...]:
     return relative.parts
 
 
-def private_directory(root: Path, relative: Path) -> Path:
+def _validate_private_directory_chain(root: Path, relative: Path) -> Path:
+    root = root.expanduser().resolve(strict=True)
+    parts = _safe_relative_parts(relative)
+    current = root
+    for part in parts:
+        current = current / part
+        if current.is_symlink():
+            raise ValueError(f"symlinked directory is not allowed beneath {root}")
+        if not current.is_dir():
+            raise ValueError(f"directory path is not a directory: {current}")
+        if not current.resolve(strict=True).is_relative_to(root):
+            raise ValueError(f"directory escapes configured root: {current}")
+    return current
+
+
+def private_directory(root: Path, relative: Path, *, create: bool = True) -> Path:
     """Create or validate an owner-only real directory beneath a trusted root."""
     root = root.expanduser().resolve(strict=True)
     parts = _safe_relative_parts(relative)
@@ -37,9 +52,12 @@ def private_directory(root: Path, relative: Path) -> Path:
         current = current / part
         if current.is_symlink():
             raise ValueError(f"symlinked directory is not allowed beneath {root}")
-        if current.exists() and not current.is_dir():
+        if create and not current.exists():
+            current.mkdir(mode=0o700, exist_ok=True)
+        if not current.exists():
             raise ValueError(f"directory path is not a directory: {current}")
-        current.mkdir(mode=0o700, exist_ok=True)
+        if not current.is_dir():
+            raise ValueError(f"directory path is not a directory: {current}")
         if current.is_symlink() or not current.resolve(strict=True).is_relative_to(root):
             raise ValueError(f"directory escapes configured root: {current}")
     current.chmod(0o700)
@@ -107,6 +125,14 @@ def inventory_path(home: Path, profile: str) -> Path:
     return home / "second-brain-kit" / "profiles" / profile_name(profile) / "install-inventory.json"
 
 
+def ensure_inventory_directory(home: Path, profile: str) -> Path:
+    """Ensure the install inventory parent chain is trusted and owner-only."""
+    return private_directory(
+        home.expanduser().resolve(strict=True),
+        Path("second-brain-kit") / "profiles" / profile_name(profile),
+    )
+
+
 def default_config(owner: str, vault: Path, profile: str, organization: str | None = None, mode: str = "hybrid", vault_mode: str = "new") -> dict[str, Any]:
     if mode not in {"para", "hybrid", "okf"}:
         raise ValueError("mode must be para, hybrid, or okf")
@@ -132,6 +158,7 @@ def default_config(owner: str, vault: Path, profile: str, organization: str | No
         },
         "embeddings": {"enabled": "auto", "provider": None, "endpoint": None, "model": None, "allow_remote": False},
         "cron": {"enabled": False, "schedule": "0 9 * * 1", "deliver": "local"},
+        "mcp_readonly": {"enabled": False, "instance_name": None},
     }
 
 
@@ -154,6 +181,24 @@ def validate_config(data: dict[str, Any]) -> list[str]:
         errors.append("mode must be para, hybrid, or okf")
     if data.get("vault_mode") not in {"new", "existing"}:
         errors.append("vault_mode must be new or existing")
+    mcp_cfg = data.get("mcp_readonly", {"enabled": False, "instance_name": None})
+    if not isinstance(mcp_cfg, dict):
+        errors.append("mcp_readonly must be a mapping")
+    else:
+        if "enabled" not in mcp_cfg:
+            errors.append("mcp_readonly.enabled is required")
+        elif not isinstance(mcp_cfg.get("enabled"), bool):
+            errors.append("mcp_readonly.enabled must be a boolean")
+        instance_name = mcp_cfg.get("instance_name")
+        if instance_name is None:
+            pass
+        elif not isinstance(instance_name, str):
+            errors.append("mcp_readonly.instance_name must be null or a string")
+        else:
+            if not instance_name.strip():
+                errors.append("mcp_readonly.instance_name must not be blank")
+            elif re.search(r"[\\\/]", instance_name):
+                errors.append("mcp_readonly.instance_name must not contain path separators")
     emb = data.get("embeddings", {})
     endpoint = emb.get("endpoint") if isinstance(emb, dict) else None
     if endpoint and not emb.get("allow_remote", False):

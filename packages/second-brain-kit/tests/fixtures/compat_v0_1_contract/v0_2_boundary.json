@@ -1,0 +1,42 @@
+{
+  "schema_version": "1.0",
+  "contract_version": "v0.1",
+  "status": "characterized",
+  "implemented": {
+    "note_identity": "path_compat_only",
+    "bounded_reads": "implemented",
+    "bounded_queries": "implemented",
+    "read_only_sqlite": "implemented",
+    "path_safety": "fd_relative_no_follow_checks",
+    "sensitivity_enforcement": "sensitivity_normalization_and_filtering",
+    "policy_bypass": "not_present",
+    "detection_gaps": "captured_as_warnings"
+  },
+  "planned_v0_2": {
+    "stable_note_id": {
+      "status": "deferred",
+      "notes": "path-only ids used as migration-compatible payload in this slice"
+    },
+    "evidence_states": {
+      "status": "deferred",
+      "notes": "no separate evidencing states added in v0.1 characterization"
+    },
+    "policy_dlp": {
+      "status": "deferred",
+      "notes": "versioned eligibility policy and deterministic DLP preflight are deferred"
+    },
+    "semantic_domain_filtering": {
+      "status": "deferred",
+      "notes": "intent-only filter and lexical fallback only"
+    },
+    "section_refs": {
+      "status": "deferred",
+      "notes": "section references outside v0.1 boundaries"
+    },
+    "provenance_expansion": {
+      "status": "deferred",
+      "notes": "v0.1 includes canonical provenance but not external source traces"
+    }
+  },
+  "compatibility_note": "This file defines slice boundary; no runtime behavior is added or changed."
+}

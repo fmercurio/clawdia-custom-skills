@@ -27,8 +27,10 @@ class TestRealHermesCli(unittest.TestCase):
             profile = "second-brain"
             common = ["--hermes-home", str(home), "--profile", profile]
             subprocess.run([PYTHON, str(SCRIPTS / "bootstrap.py"), *common, "--vault", str(vault), "--owner", "Integration Test", "--apply", "--json"], check=True, capture_output=True, text=True)
-            installed = subprocess.run([PYTHON, str(SCRIPTS / "install.py"), *common, "--apply", "--json", "--enable-cron", "--register-cron", "--hermes-cli", str(hermes)], check=True, capture_output=True, text=True)
+            installed = subprocess.run([PYTHON, str(SCRIPTS / "install.py"), *common, "--apply", "--json", "--enable-cron"], check=True, capture_output=True, text=True)
             self.assertTrue(json.loads(installed.stdout)["ok"])
+            activated = subprocess.run([PYTHON, str(SCRIPTS / "activate_cron.py"), *common, "--apply", "--hermes-cli", str(hermes)], check=True, capture_output=True, text=True)
+            self.assertTrue(json.loads(activated.stdout)["ok"])
             inventory = home / "second-brain-kit" / "profiles" / profile / "install-inventory.json"
             job_id = json.loads(inventory.read_text(encoding="utf-8"))["cron_job_id"]
             self.assertTrue(job_id)
