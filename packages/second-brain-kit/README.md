@@ -1,4 +1,4 @@
-# second-brain-kit 0.1.0-rc2
+# second-brain-kit 0.2.0-rc1
 
 Hermes-native candidate package for creating a new Second Brain or connecting an existing Markdown vault without hardcoded identities, paths, optional services, or credentials.
 
@@ -8,7 +8,7 @@ Hermes-native candidate package for creating a new Second Brain or connecting an
 - SQLite with FTS5
 - A writable explicit `HERMES_HOME` and vault path
 
-OKF, embeddings, Obsidian, Git remote, and cron are optional.
+OKF, embeddings, Obsidian, Git remote, cron, and read-only MCP are optional.
 
 ## Quick clean-room flow
 
@@ -22,9 +22,41 @@ python3 scripts/doctor.py --hermes-home "$HERMES_HOME" --profile second-brain --
 
 No gateway restart is performed or required by these scripts.
 
+## Optional read-only MCP artifacts
+
+Enable read-only MCP wiring with an explicit opt-in flag only:
+
+```bash
+python3 scripts/install.py --hermes-home "$HERMES_HOME" --profile second-brain --enable-mcp --apply --json
+```
+
+This creates deterministic, owner-only artifact files outside the vault at:
+- `second-brain-kit/instances/<instance>/runtime-config.json`
+- `second-brain-kit/instances/<instance>/policy.json`
+
+It also installs helper scripts under `second-brain-kit/bin`:
+- `brain_policy_check.py`
+- `mcp_smoke.py`
+
+No server is launched, no listener is registered, and no network call is made during installation.
+
+Run the production smoke check against an endpoint:
+
+```bash
+uv run --offline --project runtime python scripts/mcp_smoke.py --url https://example.invalid/mcp
+```
+
+The helper uses the official MCP Python SDK transport; it does not handcraft protocol HTTP requests.
+
+Validate the copied policy file locally without network traffic:
+
+```bash
+python3 scripts/brain_policy_check.py second-brain-kit/instances/<instance>/policy.json
+```
+
 ## Portable install from an exported ZIP
 
-Build the deterministic artifact on the source machine, copy it to the target environment, then run the same explicit-home flow from the extracted directory:
+Build the deterministic artifact on the source machine, copy it to the target environment, then run the explicit-home flow from the extracted directory:
 
 ```bash
 python3 scripts/export.py --output /tmp/second-brain-kit.zip
@@ -65,10 +97,10 @@ The adapter requires the configured OKF version, validates the bundle before ren
 ## Lifecycle
 
 - `bootstrap.py`: new/existing selection and idempotent config/vault creation.
-- `install.py`: profile-aware managed installation; cron requires explicit flags.
-- `doctor.py`: config, FTS5, vault, skills, and optional capability report.
+- `install.py`: profile-aware managed installation; cron and MCP require explicit flags.
+- `doctor.py`: config, FTS5, vault, skills, optional capability report.
 - `brain_ops.py`: deterministic pull/push smoke harness.
-- `uninstall.py`: hash-aware managed removal; vault preserved.
+- `uninstall.py`: hash-aware removal of managed files and optional MCP instance artifacts, vault preserved.
 - `export.py`: deterministic checksums and reproducible ZIP.
 
 If a cron was registered, remove it with `hermes cron list` / `hermes cron remove JOB_ID` before uninstalling, then pass `--cron-removed`. The RC refuses to orphan a scheduler job silently.

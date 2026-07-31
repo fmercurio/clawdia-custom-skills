@@ -1,6 +1,6 @@
 schema_version: 1
 name: second-brain-kit
-version: 0.1.0-rc2
+version: 0.2.0-rc1
 status: candidate
 license: MIT
 python: ">=3.11"
@@ -17,4 +17,5 @@ optional_capabilities:
   - obsidian
   - git-remote
   - cron
+  - mcp-readonly
 checksums: MANIFEST.sha256
