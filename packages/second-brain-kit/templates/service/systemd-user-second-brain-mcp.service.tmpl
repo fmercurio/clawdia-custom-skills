@@ -8,7 +8,7 @@ Type=simple
 WorkingDirectory={INSTANCE_DIR}
 Environment=SECOND_BRAIN_KIT_RUNTIME={RUNTIME_ROOT}
 Environment=SECOND_BRAIN_KIT_PYTHON={RUNTIME_PYTHON}
-ExecStart=/bin/sh {LAUNCHER_PATH} --config {CONFIG_PATH}
+ExecStart=/bin/bash {LAUNCHER_PATH} --config {CONFIG_PATH}
 Restart=on-failure
 RestartSec=5
 StartLimitIntervalSec=120

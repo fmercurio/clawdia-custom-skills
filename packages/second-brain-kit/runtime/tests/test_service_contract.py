@@ -136,7 +136,7 @@ def test_service_templates_are_loopback_and_instance_bound() -> None:
         assert "--host" not in rendered
         assert "--port" not in rendered
     assert launchd_args == [
-        "/bin/sh",
+        "/bin/bash",
         READYSTATE["LAUNCHER_PATH"],
         "--config",
         READYSTATE["CONFIG_PATH"],
@@ -149,7 +149,7 @@ def test_service_templates_inject_service_environment_and_launcher_contract() ->
     launchd_xml = ElementTree.fromstring(launchd)
     args = _parse_launchd_array(launchd_xml, "ProgramArguments")
     assert args == [
-        "/bin/sh",
+        "/bin/bash",
         READYSTATE["LAUNCHER_PATH"],
         "--config",
         READYSTATE["CONFIG_PATH"],
@@ -160,8 +160,8 @@ def test_service_templates_inject_service_environment_and_launcher_contract() ->
 
     assert f"Environment=SECOND_BRAIN_KIT_RUNTIME={READYSTATE['RUNTIME_ROOT']}" in systemd
     assert f"Environment=SECOND_BRAIN_KIT_PYTHON={READYSTATE['RUNTIME_PYTHON']}" in systemd
-    assert f"ExecStart=/bin/sh {READYSTATE['LAUNCHER_PATH']} --config {READYSTATE['CONFIG_PATH']}" in systemd
-    assert "/bin/sh" in systemd
+    assert f"ExecStart=/bin/bash {READYSTATE['LAUNCHER_PATH']} --config {READYSTATE['CONFIG_PATH']}" in systemd
+    assert "/bin/bash" in systemd
 
 
 def test_service_templates_do_not_auto_activate_or_manage_services() -> None:
