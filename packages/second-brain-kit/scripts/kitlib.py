@@ -28,7 +28,22 @@ def _safe_relative_parts(relative: Path) -> tuple[str, ...]:
     return relative.parts
 
 
-def private_directory(root: Path, relative: Path) -> Path:
+def _validate_private_directory_chain(root: Path, relative: Path) -> Path:
+    root = root.expanduser().resolve(strict=True)
+    parts = _safe_relative_parts(relative)
+    current = root
+    for part in parts:
+        current = current / part
+        if current.is_symlink():
+            raise ValueError(f"symlinked directory is not allowed beneath {root}")
+        if not current.is_dir():
+            raise ValueError(f"directory path is not a directory: {current}")
+        if not current.resolve(strict=True).is_relative_to(root):
+            raise ValueError(f"directory escapes configured root: {current}")
+    return current
+
+
+def private_directory(root: Path, relative: Path, *, create: bool = True) -> Path:
     """Create or validate an owner-only real directory beneath a trusted root."""
     root = root.expanduser().resolve(strict=True)
     parts = _safe_relative_parts(relative)
@@ -37,9 +52,12 @@ def private_directory(root: Path, relative: Path) -> Path:
         current = current / part
         if current.is_symlink():
             raise ValueError(f"symlinked directory is not allowed beneath {root}")
-        if current.exists() and not current.is_dir():
+        if create and not current.exists():
+            current.mkdir(mode=0o700, exist_ok=True)
+        if not current.exists():
             raise ValueError(f"directory path is not a directory: {current}")
-        current.mkdir(mode=0o700, exist_ok=True)
+        if not current.is_dir():
+            raise ValueError(f"directory path is not a directory: {current}")
         if current.is_symlink() or not current.resolve(strict=True).is_relative_to(root):
             raise ValueError(f"directory escapes configured root: {current}")
     current.chmod(0o700)
@@ -105,6 +123,14 @@ def install_bin_root(home: Path) -> Path:
 
 def inventory_path(home: Path, profile: str) -> Path:
     return home / "second-brain-kit" / "profiles" / profile_name(profile) / "install-inventory.json"
+
+
+def ensure_inventory_directory(home: Path, profile: str) -> Path:
+    """Ensure the install inventory parent chain is trusted and owner-only."""
+    return private_directory(
+        home.expanduser().resolve(strict=True),
+        Path("second-brain-kit") / "profiles" / profile_name(profile),
+    )
 
 
 def default_config(owner: str, vault: Path, profile: str, organization: str | None = None, mode: str = "hybrid", vault_mode: str = "new") -> dict[str, Any]:

@@ -1,7 +1,7 @@
 ---
 name: second-brain-operations
 description: Bootstrap, connect, diagnose, and maintain a Hermes-native Second Brain. Use for a new vault, an existing vault connection, health checks, optional cron, rollback, or package lifecycle work. Do not use for a one-off lookup or a single note save.
-version: 0.1.0-rc2
+version: 0.2.0-rc1
 author: Skills Lab
 license: MIT
 metadata:
@@ -42,6 +42,10 @@ Use for “quero criar meu Segundo Cérebro”, “conecte este vault”, “rod
 FTS5 is the minimum. Embeddings, OKF, Obsidian, Git remote, and cron are optional. Remote embeddings and restricted-content publication require explicit opt-in. Keep vault data, Hermes runtime, and backups separate.
 
 OKF 1.6 static rendering is available only through the explicit adapter. A rendered page is a frozen snapshot; rebuild it after bundle changes. Large bundles produce large HTML files.
+
+## Public core and tenant overlays
+
+The package skill is the portable **core**. A richer locally installed operational skill may exist as a tenant overlay, but it must declare the core version it extends and keep tenant-specific paths, identities, policies, and adapters outside this package. Do not maintain an unrelated second public copy of `second-brain-operations`; promote reusable changes into this core first and retain local additions as an explicit overlay.
 
 ## Exit criteria
 

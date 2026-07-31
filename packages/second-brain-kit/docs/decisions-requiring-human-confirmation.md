@@ -10,6 +10,8 @@
 - Creating a Hermes cron job and selecting its delivery target.
 - Enabling OKF static render and choosing title, layout, link, and output.
 - Enabling the optional MCP read-only bridge (`--enable-mcp`) and selecting/accepting the MCP instance name.
+- Rendering MCP service plan manifests and approving launchd/systemd target type.
+- Authorizing launchdaemon owner and domain when rendering and applying that plan.
 - Removing modified runtime artifacts during uninstall.
 
 No confirmation is needed for read-only audit, dry-run, local FTS5 rebuild over authorized non-restricted notes, or silent health checks.

@@ -1,11 +1,11 @@
 # MCP service render templates (G5)
 
-This package ships render-only templates for `launchd` and `systemd` user units.
+This package ships render-only templates for `launchd` (`launchagent`/`launchdaemon`) and `systemd` user units.
 
 - Rendered output is **not** installed, enabled, started, or registered by this package.
 - Deployment must be done by an explicit tenant-slice workflow with separate review approval.
-- Rendering is render-only; it does not install, enable, start, or register a service.
-- Tenant approval must select service account and domain separately from this render operation.
+- Rendering is render-only and is executed by `scripts/service_plan.py` with `--service` selectors; it does not install, enable, start, or register a service.
+- Tenant approval must select service account and domain separately from this render operation (`--accept-owner`, `--accept-domain`).
 - Per-tenant persistence requires a separate approved tenant-slice deployment.
 
 ## Placeholder vocabulary
@@ -36,8 +36,9 @@ STDERR_LOG_PATH=/absolute/path/to/second-brain-kit/instances/second-brain-readon
 
 Runtime launch contract:
 
-- `launchd` runs `/bin/sh {LAUNCHER_PATH} --config {CONFIG_PATH}` via `ProgramArguments`.
-- `systemd` runs `/bin/sh {LAUNCHER_PATH} --config {CONFIG_PATH}` via `ExecStart`.
+- `launchd` and `launchdaemon` run `/bin/bash {LAUNCHER_PATH} --config {CONFIG_PATH}` via `ProgramArguments`.
+- `systemd` runs `/bin/bash {LAUNCHER_PATH} --config {CONFIG_PATH}` via `ExecStart`.
+- `launchdaemon` includes explicit `UserName` and `GroupName`.
 - Both templates inject:
   - `SECOND_BRAIN_KIT_RUNTIME={RUNTIME_ROOT}`
   - `SECOND_BRAIN_KIT_PYTHON={RUNTIME_PYTHON}`

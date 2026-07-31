@@ -7,9 +7,14 @@ import json
 from pathlib import Path
 import sys
 
-RUNTIME_ROOT = Path(__file__).resolve().parent.parent / "runtime"
-if str(RUNTIME_ROOT) not in sys.path:
-    sys.path.insert(0, str(RUNTIME_ROOT))
+SCRIPT_DIR = Path(__file__).resolve().parent
+PACKAGE_ROOT = SCRIPT_DIR.parent
+RUNTIME_ROOT = PACKAGE_ROOT / "runtime"
+RUNTIME_PACKAGE = PACKAGE_ROOT / "bin" / "brain_mcp"
+RUNTIME_SCRIPT_PACKAGE = SCRIPT_DIR / "brain_mcp"
+for runtime_root in (RUNTIME_ROOT, RUNTIME_PACKAGE, RUNTIME_SCRIPT_PACKAGE):
+    if runtime_root.is_dir() and str(runtime_root) not in sys.path:
+        sys.path.insert(0, str(runtime_root))
 
 from brain_mcp.policy import RuntimePolicy
 

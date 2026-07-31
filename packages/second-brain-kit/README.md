@@ -33,12 +33,36 @@ python3 scripts/install.py --hermes-home "$HERMES_HOME" --profile second-brain -
 This creates deterministic, owner-only artifact files outside the vault at:
 - `second-brain-kit/instances/<instance>/runtime-config.json`
 - `second-brain-kit/instances/<instance>/policy.json`
+- `second-brain-kit/instances/<instance>/projection-manifest.json` (expected by policy; external manifest path is not created automatically)
 
 It also installs helper scripts under `second-brain-kit/bin`:
 - `brain_policy_check.py`
 - `mcp_smoke.py`
 
 No server is launched, no listener is registered, and no network call is made during installation.
+
+The generated MCP configuration now contains a runtime contract for local validation and serving:
+- `runtime_schema_version` (currently `v0.2`)
+- `mode` (`readonly`)
+- `transport` (`http`)
+- `listener` with explicit `host`, `port`, and `path` contract
+- `policy_path` and `projection_manifest_path` as instance-relative artifact names
+
+Use the runner with trusted local files:
+
+```bash
+python3 scripts/run_mcp.py --config second-brain-kit/instances/<instance>/runtime-config.json --check --json
+python3 scripts/run_mcp.py --config second-brain-kit/instances/<instance>/runtime-config.json --serve
+```
+
+`--check` validates local policy and projection manifest and never contacts network services.
+`--serve` starts the official MCP SDK's Streamable HTTP transport only at the configured loopback host/path; it blocks for the server lifetime and requires a separately prepared runtime with `mcp>=2,<3`. Starting it remains explicit HITL work.
+
+Render a deterministic LaunchAgent service plan without installing or starting anything:
+
+```bash
+python3 scripts/service_plan.py --config second-brain-kit/instances/<instance>/runtime-config.json --output-dir /tmp/second-brain-mcp-service --service launchagent --json
+```
 
 Run the production smoke check against an endpoint:
 
@@ -68,7 +92,13 @@ python3 scripts/install.py --hermes-home "$HERMES_HOME" --profile second-brain -
 python3 scripts/doctor.py --hermes-home "$HERMES_HOME" --profile second-brain --smoke --json
 ```
 
-For OKF rendering, install the pinned optional dependency with `gem install okf -v 1.6.0`. Cron registration requires a compatible `hermes` CLI and is always explicit.
+For OKF rendering, install the pinned optional dependency with `gem install okf -v 1.6.0`.
+Cron enablement is split from installation:
+
+```bash
+python3 scripts/install.py --hermes-home "$HERMES_HOME" --profile second-brain --enable-cron --apply --json
+python3 scripts/activate_cron.py --hermes-home "$HERMES_HOME" --profile second-brain --apply --hermes-cli <hermes path or hermes> --json
+```
 
 ## Agent-guided setup handoff
 

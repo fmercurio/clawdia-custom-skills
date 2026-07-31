@@ -31,13 +31,17 @@
   - deduplicate by note path
   - include retrieval trace, warnings, gaps, and provenance in payload shape
 
-## Intentionally Deferred Work (v0.2)
+## v0.2 Additions, preserving v0.1 compatibility
 
-- Stable `note_id` semantics beyond vault path strings.
-- Policy/DLP expansion and policy bypass surfaces.
-- Evidence state tracking and section reference extraction.
-- Semantic domain filtering and advanced provenance targets.
-- Additional hardened metadata shaping for non-test payload fields.
+The four v0.1 read-only tools and their bounded response contract remain the public compatibility surface. v0.2 adds a stricter runtime boundary without adding write or open-world tools:
+
+- Stable canonical IDs and section references are carried by an externally compiled projection manifest.
+- The public runtime consumes only projection records, policy, and instance configuration; it never enumerates or reads a tenant vault.
+- Policy/DLP checks run again after projection parsing and before a record enters the searchable core.
+- Projection records require an explicit eligibility flag, classification, sensitivity, provenance, and freshness metadata.
+- The runner accepts only an instance-relative policy/manifest pair and a loopback listener contract; serve mode fails closed until a verified MCP HTTP transport is available.
+
+The following remain intentionally unsupported: policy bypass, generic filesystems, direct vault ingestion, writes, shell/Git/SQL execution, index rebuild, and remote egress.
 
 ## Non-Goals and Security Invariants
 
