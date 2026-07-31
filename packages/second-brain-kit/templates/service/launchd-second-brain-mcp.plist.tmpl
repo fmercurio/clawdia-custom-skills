@@ -8,20 +8,23 @@
 
   <!--
   Strict render-only template.
-  Binding is fixed to loopback (127.0.0.1); a tenant deployment may not widen it
-  without a separately reviewed template change.
+  Binding is provided by rendered config, and is tenant-reviewed before launch.
   -->
   <key>ProgramArguments</key>
   <array>
-    <string>{RUNTIME_PYTHON}</string>
-    <string>{SERVER_ENTRYPOINT}</string>
+    <string>/bin/sh</string>
+    <string>{LAUNCHER_PATH}</string>
     <string>--config</string>
     <string>{CONFIG_PATH}</string>
-    <string>--host</string>
-    <string>127.0.0.1</string>
-    <string>--port</string>
-    <string>{SERVICE_PORT}</string>
   </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>SECOND_BRAIN_KIT_RUNTIME</key>
+    <string>{RUNTIME_ROOT}</string>
+    <key>SECOND_BRAIN_KIT_PYTHON</key>
+    <string>{RUNTIME_PYTHON}</string>
+  </dict>
 
   <key>WorkingDirectory</key>
   <string>{INSTANCE_DIR}</string>

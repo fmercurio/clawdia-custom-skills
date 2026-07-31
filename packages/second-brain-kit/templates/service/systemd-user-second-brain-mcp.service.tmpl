@@ -2,11 +2,13 @@
 Description={SERVICE_LABEL}
 After=network.target
 
-# Strict render-only template. Binding is fixed to loopback (127.0.0.1).
+# Strict render-only template. Binding is configured through the rendered config.
 [Service]
 Type=simple
 WorkingDirectory={INSTANCE_DIR}
-ExecStart={RUNTIME_PYTHON} {SERVER_ENTRYPOINT} --config {CONFIG_PATH} --host 127.0.0.1 --port {SERVICE_PORT}
+Environment=SECOND_BRAIN_KIT_RUNTIME={RUNTIME_ROOT}
+Environment=SECOND_BRAIN_KIT_PYTHON={RUNTIME_PYTHON}
+ExecStart=/bin/sh {LAUNCHER_PATH} --config {CONFIG_PATH}
 Restart=on-failure
 RestartSec=5
 StartLimitIntervalSec=120

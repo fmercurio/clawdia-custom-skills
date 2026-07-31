@@ -4,6 +4,8 @@ This package ships render-only templates for `launchd` and `systemd` user units.
 
 - Rendered output is **not** installed, enabled, started, or registered by this package.
 - Deployment must be done by an explicit tenant-slice workflow with separate review approval.
+- Rendering is render-only; it does not install, enable, start, or register a service.
+- Tenant approval must select service account and domain separately from this render operation.
 - Per-tenant persistence requires a separate approved tenant-slice deployment.
 
 ## Placeholder vocabulary
@@ -12,10 +14,10 @@ Render these templates with explicit values for:
 
 - `SERVICE_LABEL`: per-instance identity (service label)
 - `INSTANCE_DIR`: absolute external instance directory
+- `LAUNCHER_PATH`: shell entrypoint/launcher path
 - `RUNTIME_PYTHON`: runtime Python executable
-- `SERVER_ENTRYPOINT`: server module/script entrypoint path
+- `RUNTIME_ROOT`: runtime root directory for the launch context
 - `CONFIG_PATH`: external instance config path
-- `SERVICE_PORT`: loopback bind port
 - `STDOUT_LOG_PATH`: stdout destination path
 - `STDERR_LOG_PATH`: stderr destination path
 
@@ -24,14 +26,22 @@ Recommended synthetic render map:
 ```text
 SERVICE_LABEL=second-brain-readonly
 INSTANCE_DIR=/absolute/path/to/instance-dir
+LAUNCHER_PATH=/absolute/path/to/launcher.sh
 RUNTIME_PYTHON=/absolute/path/to/python
-SERVER_ENTRYPOINT=/absolute/path/to/server-entrypoint.py
+RUNTIME_ROOT=/absolute/path/to/runtime
 CONFIG_PATH=/absolute/path/to/second-brain-kit/instances/second-brain-readonly/runtime-config.json
-SERVICE_PORT=6282
-# Host is deliberately fixed by both templates: 127.0.0.1
 STDOUT_LOG_PATH=/absolute/path/to/second-brain-kit/instances/second-brain-readonly/logs/mcp-stdout.log
 STDERR_LOG_PATH=/absolute/path/to/second-brain-kit/instances/second-brain-readonly/logs/mcp-stderr.log
 ```
+
+Runtime launch contract:
+
+- `launchd` runs `/bin/sh {LAUNCHER_PATH} --config {CONFIG_PATH}` via `ProgramArguments`.
+- `systemd` runs `/bin/sh {LAUNCHER_PATH} --config {CONFIG_PATH}` via `ExecStart`.
+- Both templates inject:
+  - `SECOND_BRAIN_KIT_RUNTIME={RUNTIME_ROOT}`
+  - `SECOND_BRAIN_KIT_PYTHON={RUNTIME_PYTHON}`
+- No `--host` or `--port` arguments are injected; binding is controlled by the rendered config and tenant policy.
 
 ## Operational posture
 
