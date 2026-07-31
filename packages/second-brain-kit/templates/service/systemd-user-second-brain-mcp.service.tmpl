@@ -1,0 +1,15 @@
+[Unit]
+Description={SERVICE_LABEL}
+After=network.target
+
+# Strict render-only template. Binding is fixed to loopback (127.0.0.1).
+[Service]
+Type=simple
+WorkingDirectory={INSTANCE_DIR}
+ExecStart={RUNTIME_PYTHON} {SERVER_ENTRYPOINT} --config {CONFIG_PATH} --host 127.0.0.1 --port {SERVICE_PORT}
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=120
+StartLimitBurst=4
+StandardOutput=append:{STDOUT_LOG_PATH}
+StandardError=append:{STDERR_LOG_PATH}

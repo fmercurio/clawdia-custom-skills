@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>{SERVICE_LABEL}</string>
+
+  <!--
+  Strict render-only template.
+  Binding is fixed to loopback (127.0.0.1); a tenant deployment may not widen it
+  without a separately reviewed template change.
+  -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>{RUNTIME_PYTHON}</string>
+    <string>{SERVER_ENTRYPOINT}</string>
+    <string>--config</string>
+    <string>{CONFIG_PATH}</string>
+    <string>--host</string>
+    <string>127.0.0.1</string>
+    <string>--port</string>
+    <string>{SERVICE_PORT}</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>{INSTANCE_DIR}</string>
+
+  <key>RunAtLoad</key>
+  <false/>
+  <key>KeepAlive</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>{STDOUT_LOG_PATH}</string>
+  <key>StandardErrorPath</key>
+  <string>{STDERR_LOG_PATH}</string>
+</dict>
+</plist>
