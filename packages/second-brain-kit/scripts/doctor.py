@@ -24,6 +24,7 @@ from kitlib import (  # noqa: E402
     install_bin_root,
     install_skill_root,
     load_config,
+    require_supported_python,
 )
 RUNTIME_SCHEMA_VERSION = "v0.2"
 
@@ -253,6 +254,12 @@ def main() -> int:
     parser.add_argument("--check-optional", action="store_true")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
+    try:
+        require_supported_python()
+    except RuntimeError as exc:
+        report = {"ok": False, "error": str(exc)}
+        print(json.dumps(report, ensure_ascii=False, indent=2) if args.json else report["error"])
+        return 2
 
     home = hermes_home(args.hermes_home)
     checks: list[dict] = []

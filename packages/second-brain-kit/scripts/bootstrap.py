@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from kitlib import REQUIRED_DIRS, ROOT_DOCS, config_path, default_config, hermes_home, load_config, save_config, write_if_missing
+from kitlib import REQUIRED_DIRS, ROOT_DOCS, config_path, default_config, hermes_home, load_config, require_supported_python, save_config, write_if_missing
 
 
 def audit(vault: Path) -> dict:
@@ -57,6 +57,12 @@ def main() -> int:
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
+    try:
+        require_supported_python()
+    except RuntimeError as exc:
+        print(json.dumps({"ok": False, "error": str(exc)}))
+        return 2
+
     home = hermes_home(args.hermes_home)
     vault = Path(args.vault).expanduser().resolve()
     cfg_path = config_path(home, args.profile)
