@@ -25,6 +25,9 @@ jobs:
       - name: Run catalog-focused unit tests
         run: python3 -m unittest discover -s tools/tests -p "test_generate_catalog.py"
 
+      - name: Run llm-wiki staging validator tests
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest skills/research/llm-wiki/tests/test_validate_staging.py -v
+
       - name: Verify generated catalog is up to date
         run: python3 tools/generate_catalog.py --check
 

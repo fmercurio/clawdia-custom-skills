@@ -1108,3 +1108,77 @@ skills:
           weekly metrics and findings, atomic 0600 artifacts (`YYYY-MM-DD.{json,md}`,
           latest.*, index.json), idempotent index updates, safe subprocess invocation,
           URL redaction rules, and regression tests for critical and attention states.
+
+  - name: llm-wiki
+    status: candidate
+    version: 2.2.0-candidate.1
+    category: research
+    description: >
+      Build or query a standalone Markdown wiki, or produce governed, source-backed
+      Second Brain staging artifacts and Brain Delta proposals without canonical writes.
+    source:
+      type: external-adaptation
+      origin: "https://github.com/CharlesLuxinger/llm-wiki-skill"
+      author: "Charles Luxinger; governed adaptation by Hermes Agent"
+      created: "2026-08-10"
+      approved: null
+      approved_by: null
+      repository_url: "https://github.com/CharlesLuxinger/llm-wiki-skill"
+      revision: "016a81078df121f377627ed314e3807e620e3d92"
+      license: "CC-BY-4.0"
+    installation:
+      runtime_path: "~/.hermes/skills/research/llm-wiki/"
+      repo_path: "skills/research/llm-wiki/"
+      installed_date: null
+      installed_by: null
+      note: "Candidate only; merge does not authorize runtime installation or canonical promotion"
+    audit:
+      security_review: "2026-08-10"
+      security_status: "passed"
+      findings:
+        - "Deterministic read-only validator; no network or canonical writes"
+        - "Fail-closed path, symlink, TOCTOU and canonical Git drift checks"
+        - "DLP and secret-pattern rejection with sanitized error output"
+        - "Approval, inventory, source, candidate, Brain Delta and promotion hash bindings"
+        - "Hierarchical exclusion conflicts and non-fetched content digests fail closed"
+        - "Strict UTF-8 rejects lossy checklist and inventory decoding before DLP or hashing"
+        - "Platform contract limited to Linux/macOS; portable temporary workspace supports Linux CI"
+        - "Independent review findings remediated with adversarial regression tests"
+      frontmatter_valid: true
+      company_agnostic: true
+      pitfalls_documented: true
+    files:
+      - path: "NOTICE.md"
+        size_bytes: 1470
+        status: "new"
+      - path: "README.md"
+        size_bytes: 4194
+        status: "new"
+      - path: "SKILL.md"
+        size_bytes: 29775
+        status: "new"
+      - path: "references/provenance.md"
+        size_bytes: 4998
+        status: "new"
+      - path: "references/second-brain-staging.md"
+        size_bytes: 16735
+        status: "new"
+      - path: "references/validator-contract.md"
+        size_bytes: 9349
+        status: "new"
+      - path: "scripts/validate_staging.py"
+        size_bytes: 70108
+        status: "new"
+      - path: "tests/test_validate_staging.py"
+        size_bytes: 79974
+        status: "new"
+      - path: "MANIFEST.sha256"
+        size_bytes: 709
+        status: "new"
+    changelog:
+      - date: "2026-08-10"
+        action: "governed Second Brain staging adaptation"
+        details: >
+          Preserved standalone behavior and upstream CC-BY-4.0 attribution while adding
+          explicit approval, staging, DLP, tenant isolation, Brain Delta handoff,
+          read-only validation, no-write evidence, and push-brain-only promotion gates.
