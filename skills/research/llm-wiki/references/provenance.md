@@ -14,7 +14,7 @@
 ## Other primary influence
 
 - Andrej Karpathy's LLM Wiki pattern: https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f
-- Existing Hermes runtime skill baseline: `/Users/clawdia/.hermes/skills/research/llm-wiki/SKILL.md`, version `2.1.0`, SHA-256 `a37ae04745b04b8e9bbd8de37cdcbc2b2187ccafb68418e436a46ebb1e491ee5` at proposal baseline.
+- Existing Hermes runtime skill baseline: `${HERMES_HOME}/skills/research/llm-wiki/SKILL.md`, version `2.1.0`, SHA-256 `a37ae04745b04b8e9bbd8de37cdcbc2b2187ccafb68418e436a46ebb1e491ee5` at proposal baseline.
 
 ## Internal composing skills and contracts
 
@@ -24,7 +24,7 @@
 - `push-brain`
 - `brain-search`
 - `grounded-citations`
-- FMercurio hybrid OKF/PARA source-integrity and evidence-gate references
+- Hybrid OKF/PARA source-integrity and evidence-gate references
 
 ## Mechanisms adopted from the external source
 
@@ -60,16 +60,14 @@
 
 ## Governed package paths and status
 
-- Runtime baseline at implementation start: `/Users/clawdia/.hermes/skills/research/llm-wiki/`, version `2.1.0`
-- Reviewed proposal: `/Users/clawdia/.hermes/skills-lab/proposals/llm-wiki-second-brain/`
-- Governed repository path: `skills/research/llm-wiki/` in `fmercurio/clawdia-custom-skills`
-- Skills Lab catalog ID: `charles-luxinger-llm-wiki-skill`
+- Runtime baseline at implementation start: `${HERMES_HOME}/skills/research/llm-wiki/`, version `2.1.0`
+- Governed repository path: `skills/research/llm-wiki/` in this repository
 - Package status: **candidate implementation; runtime promotion remains evidence-gated**
 - Canonical Second Brain status: **not modified by package implementation or validator tests**
 
 ## Attribution and licensing note
 
-The upstream `SKILL.md` declares `CC-BY-4.0`; the reviewed upstream tree contains no repository-level `LICENSE`. This adapted skill documentation is therefore distributed under `CC-BY-4.0`, with the source, revision, attribution, change summary, and license URL preserved in `NOTICE.md` and this file. Original deterministic validator code and tests authored for the ClawdIA custom-skills repository remain covered by that repository's MIT license.
+The upstream `SKILL.md` declares `CC-BY-4.0`; the reviewed upstream tree contains no repository-level `LICENSE`. This adapted skill documentation is therefore distributed under `CC-BY-4.0`, with the source, revision, attribution, change summary, and license URL preserved in `NOTICE.md` and this file. Original deterministic validator code and tests authored for this repository remain covered by its MIT license.
 
 The package is a selective Hermes-native adaptation, not a verbatim installation. It preserves standalone behavior while adding an isolated Second Brain staging contract, deterministic validation, tenant/sensitivity controls, and a `push-brain`-only promotion boundary. Charles Luxinger and the upstream project do not endorse this adaptation.
 
