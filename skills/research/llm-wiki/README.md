@@ -2,7 +2,7 @@
 
 This package includes a strict, read-only validator for Second Brain staging artifacts produced by `llm-wiki`.
 
-- Package version: `2.2.0-candidate.1`
+- Package version: `2.2.0-candidate.2`
 - Lifecycle: governed repository candidate; merge does not imply runtime installation or canonical promotion
 - Compatibility: the standalone wiki workflow remains available without activating Second Brain staging; this governed candidate declares and tests Linux/macOS only
 - Licensing: adapted skill documentation is `CC-BY-4.0`; original validator code/tests are MIT under the repository license. See `NOTICE.md` and `references/provenance.md`.

@@ -1586,6 +1586,70 @@ class ValidateStagingTests(unittest.TestCase):
             self.assertEqual(code, 1)
             self._assert_err(payload, message="budget.max_total_bytes exceeded")
 
+    def test_public_anonymization_contract_surface_scan(self):
+        package_root = Path(__file__).resolve().parents[1]
+        notice = (package_root / "NOTICE.md").read_text(encoding="utf-8")
+        provenance = (package_root / "references/provenance.md").read_text(
+            encoding="utf-8"
+        )
+        required_attribution = {
+            "Charles Luxinger": notice,
+            "https://github.com/CharlesLuxinger/llm-wiki-skill": notice,
+            "016a81078df121f377627ed314e3807e620e3d92": provenance,
+            "CC-BY-4.0": notice,
+            "https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f": provenance,
+        }
+        for required, document in required_attribution.items():
+            self.assertIn(required, document)
+
+        local_user = "".join(["claw", "dia"])
+        organization = "".join(["fm", "ercurio"])
+        product_brand = "".join(["clawd", "ia"])
+        operator_name = "".join(["fel", "ippe"])
+        internal_workspace = "".join(["skills", "-lab"])
+        forbidden_tokens = {
+            "deployment_user": local_user,
+            "organization_name": organization,
+            "product_brand": product_brand,
+            "operator_name": operator_name,
+            "macos_home_path": "".join(["/Users/", local_user, "/.hermes/"]),
+            "proposal_path": "".join(
+                ["/Users/", local_user, "/.hermes/", internal_workspace, "/proposals/"]
+            ),
+            "catalog_reference": "".join(
+                ["charles", "-luxinger", "-llm-wiki-skill"]
+            ),
+            "repository_reference": "".join(
+                [organization, "/", product_brand, "-custom-skills"]
+            ),
+            "internal_workspace_reference": "".join(
+                [internal_workspace, "/", "proposals"]
+            ),
+        }
+        users_root_prefix = "".join(["/Users", "/"])
+        users_home_like = re.compile(rf"{re.escape(users_root_prefix)}[^/\s\"']+")
+
+        for path in package_root.rglob("*"):
+            if (
+                not path.is_file()
+                or "__pycache__" in path.parts
+                or path.suffix == ".pyc"
+            ):
+                continue
+            text = path.read_text(encoding="utf-8")
+            match = users_home_like.search(text)
+            self.assertIsNone(
+                match,
+                f"detected macOS user-home-like path in {path.relative_to(package_root)}",
+            )
+            normalized_text = text.lower()
+            for reason, token in forbidden_tokens.items():
+                self.assertNotIn(
+                    token.lower(),
+                    normalized_text,
+                    f"{reason} leaked in {path.relative_to(package_root)}",
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -17,7 +17,7 @@ The material was selectively adapted rather than installed verbatim. Changes
 include:
 
 - preserving standalone wiki behavior from the existing Hermes runtime skill;
-- adding the FMercurio role boundary `researcher -> llm-wiki staging ->
+- adding a role boundary `researcher -> llm-wiki staging ->
   second-brain governance -> push-brain promotion`;
 - defining isolated staging, provenance, sensitivity, tenant, approval, and
   no-canonical-write contracts;

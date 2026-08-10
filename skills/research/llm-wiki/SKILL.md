@@ -1,7 +1,7 @@
 ---
 name: llm-wiki
 description: "Use when building/querying a wiki or staging source-backed Second Brain deltas."
-version: 2.2.0-candidate.1
+version: 2.2.0-candidate.2
 author: Hermes Agent
 license: CC-BY-4.0
 platforms: [linux, macos]

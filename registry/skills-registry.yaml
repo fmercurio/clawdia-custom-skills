@@ -1111,7 +1111,7 @@ skills:
 
   - name: llm-wiki
     status: candidate
-    version: 2.2.0-candidate.1
+    version: 2.2.0-candidate.2
     category: research
     description: >
       Build or query a standalone Markdown wiki, or produce governed, source-backed
@@ -1144,12 +1144,13 @@ skills:
         - "Strict UTF-8 rejects lossy checklist and inventory decoding before DLP or hashing"
         - "Platform contract limited to Linux/macOS; portable temporary workspace supports Linux CI"
         - "Independent review findings remediated with adversarial regression tests"
+        - "Deployment references sanitized: path and owner-specific provenance fields replaced with repository-agnostic language and placeholders"
       frontmatter_valid: true
       company_agnostic: true
       pitfalls_documented: true
     files:
       - path: "NOTICE.md"
-        size_bytes: 1470
+        size_bytes: 1458
         status: "new"
       - path: "README.md"
         size_bytes: 4194
@@ -1158,7 +1159,7 @@ skills:
         size_bytes: 29775
         status: "new"
       - path: "references/provenance.md"
-        size_bytes: 4998
+        size_bytes: 4770
         status: "new"
       - path: "references/second-brain-staging.md"
         size_bytes: 16735
@@ -1170,7 +1171,7 @@ skills:
         size_bytes: 70108
         status: "new"
       - path: "tests/test_validate_staging.py"
-        size_bytes: 79974
+        size_bytes: 82727
         status: "new"
       - path: "MANIFEST.sha256"
         size_bytes: 709
@@ -1182,3 +1183,10 @@ skills:
           Preserved standalone behavior and upstream CC-BY-4.0 attribution while adding
           explicit approval, staging, DLP, tenant isolation, Brain Delta handoff,
           read-only validation, no-write evidence, and push-brain-only promotion gates.
+      - date: "2026-08-10"
+        action: "public anonymization hardening"
+        details: >
+          Replaced deployment-specific provenance and path references with repository-agnostic
+          language and `${HERMES_HOME}` placeholders where runtime/path context is referenced.
+          Added a package-local regression scan for forbidden private identifiers and macOS home
+          leaks in `tests/test_validate_staging.py`.
