@@ -527,6 +527,13 @@ def _read_json(
     return rel, data, evidence
 
 
+def _decode_utf8(payload: bytes, label: str) -> str:
+    try:
+        return payload.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValidationError(f"{label} must be valid UTF-8") from exc
+
+
 def _parse_json_payload(payload: bytes, label: str) -> Dict[str, Any]:
     try:
         data = json.loads(payload.decode("utf-8"), object_pairs_hook=_reject_duplicate_json_pairs)
@@ -618,7 +625,7 @@ def _parse_approval(
     if _sha256_bytes(checklist_payload) != checklist_sha256:
         raise ValidationError("checklist_sha256 mismatch")
 
-    checklist_text = checklist_payload.decode("utf-8", "ignore")
+    checklist_text = _decode_utf8(checklist_payload, "approval checklist")
     _validate_secret_free(checklist_text, "approval checklist")
 
     all_candidates, checked_candidates = _parse_candidate_ids_from_checklist(checklist_text)
@@ -787,7 +794,8 @@ def _parse_batch(
 
         entry_payload_path, entry_payload, entry_evidence = _read_file_bytes(root_real, root_fd, entry_path, seam=seam)
         # Scan raw artifact bytes before extracting identifiers that may later be echoed.
-        _validate_secret_free(entry_payload.decode("utf-8", "ignore"), "inventory artifact")
+        entry_text = _decode_utf8(entry_payload, f"inventory artifact {entry_path}")
+        _validate_secret_free(entry_text, "inventory artifact")
 
         declared_size = entry.get("size")
         declared_sha = entry.get("sha256")
@@ -829,7 +837,7 @@ def _parse_batch(
             if approved_candidate_id not in approval["approved_candidate_ids"]:
                 raise ValidationError(f"unapproved candidate in source snapshot entry: {entry_path}")
 
-            frontmatter, body = _parse_frontmatter(entry_payload.decode("utf-8", "ignore"))
+            frontmatter, body = _parse_frontmatter(entry_text)
             approval_ref = _require_non_empty_string(frontmatter.get("approval_ref"), f"{entry_path} frontmatter.approval_ref")
             if "#" not in approval_ref:
                 raise ValidationError(f"approval_ref missing fragment in source snapshot: {entry_path}")
@@ -874,7 +882,7 @@ def _parse_batch(
             if snapshot_sensitivity not in approval["authorization_context"]["allowed_sensitivities"]:
                 raise ValidationError(f"source snapshot sensitivity exceeds authorization: {entry_path}")
 
-            _validate_secret_free(entry_payload.decode("utf-8", "ignore"), f"source snapshot {entry_path}")
+            _validate_secret_free(entry_text, f"source snapshot {entry_path}")
 
             source_snapshots[source_id] = {
                 "id": source_id,

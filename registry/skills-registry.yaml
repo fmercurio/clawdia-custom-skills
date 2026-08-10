@@ -1141,6 +1141,7 @@ skills:
         - "DLP and secret-pattern rejection with sanitized error output"
         - "Approval, inventory, source, candidate, Brain Delta and promotion hash bindings"
         - "Hierarchical exclusion conflicts and non-fetched content digests fail closed"
+        - "Strict UTF-8 rejects lossy checklist and inventory decoding before DLP or hashing"
         - "Platform contract limited to Linux/macOS; portable temporary workspace supports Linux CI"
         - "Independent review findings remediated with adversarial regression tests"
       frontmatter_valid: true
@@ -1151,7 +1152,7 @@ skills:
         size_bytes: 1470
         status: "new"
       - path: "README.md"
-        size_bytes: 4100
+        size_bytes: 4194
         status: "new"
       - path: "SKILL.md"
         size_bytes: 29775
@@ -1160,16 +1161,16 @@ skills:
         size_bytes: 4998
         status: "new"
       - path: "references/second-brain-staging.md"
-        size_bytes: 16534
+        size_bytes: 16735
         status: "new"
       - path: "references/validator-contract.md"
-        size_bytes: 9149
+        size_bytes: 9349
         status: "new"
       - path: "scripts/validate_staging.py"
-        size_bytes: 69888
+        size_bytes: 70108
         status: "new"
       - path: "tests/test_validate_staging.py"
-        size_bytes: 77673
+        size_bytes: 79974
         status: "new"
       - path: "MANIFEST.sha256"
         size_bytes: 709

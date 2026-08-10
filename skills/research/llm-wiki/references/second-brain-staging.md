@@ -161,6 +161,8 @@ Staging metadata does not grant authorization. `push-brain` reclassifies and may
 
 ## Source integrity record
 
+The checklist, Markdown snapshots, and JSON artifacts must be strict UTF-8. Invalid byte sequences are rejected; lossy decoding cannot participate in DLP, provenance, or `content_sha256` calculation.
+
 Every ingested source version needs metadata equivalent to:
 
 ```yaml

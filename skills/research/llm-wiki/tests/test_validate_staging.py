@@ -669,6 +669,23 @@ class ValidateStagingTests(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertIn("absolute", " ".join(e["message"] for e in payload["errors"]))
 
+    def test_invalid_utf8_approval_checklist_rejected(self):
+        with TemporaryDirectory() as tmp:
+            fixture = self._make_valid_fixture(tmp)
+            approval_path = fixture["staging"] / fixture["approval_manifest"]
+            approval = json.loads(approval_path.read_text(encoding="utf-8"))
+            checklist = fixture["staging"] / approval["checklist_path"]
+            raw = checklist.read_bytes()
+            self.assertIn(b"Candidate example", raw)
+            checklist.write_bytes(raw.replace(b"Candidate example", b"Candidate \xffexample", 1))
+            approval["checklist_sha256"] = self._sha256(checklist)
+            self._write_json(approval_path, approval)
+            self._refresh_checks(fixture)
+
+            code, payload = self._run_cli(fixture["staging"], fixture["canonical"])
+            self.assertEqual(code, 1)
+            self._assert_err(payload, message="approval checklist must be valid UTF-8")
+
     def test_batch_exclusion_path_rejections(self):
         with TemporaryDirectory() as tmp:
             fixture = self._make_valid_fixture(tmp)
@@ -1024,6 +1041,31 @@ class ValidateStagingTests(unittest.TestCase):
             self._refresh_checks(fixture)
             code, payload = self._run_cli(fixture["staging"], fixture["canonical"])
             self.assertEqual(code, 1)
+
+    def test_invalid_utf8_source_snapshot_rejected_before_lossy_hashing(self):
+        with TemporaryDirectory() as tmp:
+            fixture = self._make_valid_fixture(tmp)
+            snapshot = fixture["snapshot"]
+            raw = snapshot.read_bytes()
+            self.assertIn(b"authoritative", raw)
+            snapshot.write_bytes(raw.replace(b"authoritative", b"auth\xfforitative", 1))
+
+            batch_path = fixture["staging"] / fixture["batch_manifest"]
+            batch = json.loads(batch_path.read_text(encoding="utf-8"))
+            snapshot_entry = next(entry for entry in batch["inventory"] if entry["state"] == "source_snapshot")
+            snapshot_entry["size"] = snapshot.stat().st_size
+            snapshot_entry["sha256"] = self._sha256(snapshot)
+            self._write_json(batch_path, batch)
+            batch_sha = self._sha256(batch_path)
+
+            delta_path = fixture["staging"] / fixture["brain_delta"]
+            delta = json.loads(delta_path.read_text(encoding="utf-8"))
+            delta["staging_manifest_sha256"] = batch_sha
+            self._write_json(delta_path, delta)
+
+            code, payload = self._run_cli(fixture["staging"], fixture["canonical"])
+            self.assertEqual(code, 1)
+            self._assert_err(payload, message="inventory artifact sources/source-ex-v1.md must be valid UTF-8")
 
     def test_non_fetched_source_requires_unavailable_content_hash(self):
         for capture_status in ("locator-only", "rejected", "quarantined"):

@@ -73,6 +73,7 @@ python3 -m unittest skills/research/llm-wiki/tests/test_validate_staging.py -v
 - symlinks are rejected in roots and inventory paths
 - exclusions conflict with inventory on exact paths and ancestor/descendant boundaries
 - non-fetched source snapshots must mark `content_sha256: unavailable`; they cannot carry an unverified digest
+- checklist and inventory text require strict UTF-8 before parsing, scanning, or body hashing
 - non-git or unborn canonical roots are `unverifiable`
 - no canonical writes are allowed by validator
 - no inferred authorization from source text

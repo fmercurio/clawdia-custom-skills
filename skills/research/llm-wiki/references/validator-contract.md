@@ -117,6 +117,7 @@ Batch checks:
 - every source snapshot and source summary must be tied together exactly one-to-one
 - every source snapshot must be approved and reference valid `approval_ref`, `approval_manifest_sha256`, and `approved_candidate_id`
 - source snapshot `capture_status` drives `content_sha256` expectations and candidate/source capture cross-checks: `fetched` requires the exact body SHA-256; `locator-only`, `rejected`, and `quarantined` require the literal `unavailable`
+- all checklist and inventory text must be strict UTF-8; malformed byte sequences are rejected before parsing, DLP, or body-hash validation, so no lossy decoding can change the bytes under validation
 
 ### 3) Candidate artifact (`schema_version: llm-wiki-candidate/v1`)
 
