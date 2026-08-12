@@ -686,6 +686,14 @@ skills:
         details: >
           Added a package-scoped handoff document and tests for one-question-at-a-time
           safe deployment interviews. Updated versioning to 0.1.0-rc2.
+      - date: "2026-08-04"
+        action: "enforced documented Python baseline"
+        details: >
+          Added a shared Python 3.11+ preflight across lifecycle entry points before
+          state-changing work. Verified all entry points reject Python 3.9 before
+          writing state; Python 3.11 passed 43 package tests (3 skipped) and 49
+          isolated runtime tests. Status remains candidate: this validation does not
+          authorize runtime installation or promotion to approved.
 
   - name: markdown-knowledge-vaults
     status: candidate

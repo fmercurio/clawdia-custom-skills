@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from kitlib import config_path, hermes_home, inventory_path, profile_name, sha256
+from kitlib import config_path, hermes_home, inventory_path, profile_name, require_supported_python, sha256
 
 
 def _validate_inventory_profile_chain(home: Path, profile: str) -> None:
@@ -99,6 +99,11 @@ def main() -> int:
     parser.add_argument("--service-removed", action="store_true")
     parser.add_argument("--cron-removed", action="store_true", help="confirm a registered cron job was removed separately")
     args = parser.parse_args()
+    try:
+        require_supported_python()
+    except RuntimeError as exc:
+        print(json.dumps({"ok": False, "error": str(exc)}))
+        return 2
 
     home = hermes_home(args.hermes_home)
     try:

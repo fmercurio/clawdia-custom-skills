@@ -6,11 +6,13 @@ import json
 import os
 import re
 import sqlite3
+import sys
 from pathlib import Path
 from typing import Any
 
 VERSION = "0.2.0-rc1"
 SCHEMA_VERSION = 1
+MINIMUM_PYTHON_VERSION = (3, 11)
 LAYERS = {
     "inbox": "00_Inbox",
     "project": "10_Projects",
@@ -20,6 +22,18 @@ LAYERS = {
 }
 REQUIRED_DIRS = [*LAYERS.values(), "50_Templates", "_Hermes", "_Meta"]
 ROOT_DOCS = ["README.md", "MAPA.md", "PARA.md", "HERMES.md"]
+
+
+def require_supported_python(version_info: tuple[int, int] | None = None) -> None:
+    """Fail before lifecycle work when the documented Python baseline is unmet."""
+    current = version_info or sys.version_info[:2]
+    if current < MINIMUM_PYTHON_VERSION:
+        required = ".".join(map(str, MINIMUM_PYTHON_VERSION))
+        detected = ".".join(map(str, current))
+        raise RuntimeError(
+            f"Python {required}+ is required (detected {detected}). "
+            "Run second-brain-kit with a Python 3.11+ interpreter."
+        )
 
 
 def _safe_relative_parts(relative: Path) -> tuple[str, ...]:

@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any
 import sys
 
+from kitlib import require_supported_python
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 ROOT_ROOT = SCRIPT_DIR.parent
 RUNTIME_MODULE_ROOT = ROOT_ROOT / "runtime"
@@ -198,6 +200,7 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
+        require_supported_python()
         config_path = _as_json_path(args.config)
         if args.check:
             payload = _run_check({"config": str(config_path)})

@@ -6,6 +6,8 @@ import argparse
 import json
 from pathlib import Path
 
+from kitlib import require_supported_python
+
 RUNTIME_ROOT = Path(__file__).resolve().parent.parent
 TEMPLATE_ROOT = RUNTIME_ROOT / "templates" / "service"
 
@@ -181,6 +183,7 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
+        require_supported_python()
         config_path = Path(args.config)
         if not config_path.is_file():
             raise ServiceError("--config must be a file")
