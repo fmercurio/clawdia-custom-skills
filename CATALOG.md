@@ -9,14 +9,14 @@
 ### Por tipo de artefato
 | Tipo de artefato | Quantidade |
 | --- | ---: |
-| skill | 16 |
+| skill | 17 |
 | package | 1 |
 
 ### Por status
 | Status | Quantidade |
 | --- | ---: |
 | approved | 4 |
-| candidate | 13 |
+| candidate | 14 |
 | draft | 0 |
 | profile-overlay | 0 |
 | deprecated | 0 |
@@ -46,6 +46,7 @@
 | productivity | nfse-emissor-nacional | candidate | Safe NFS-e draft preparation in the Brazilian Emissor Nacional portal (nfse.gov.br) using Playwright — taker history import, Select2/Chosen widget handling, draft-only workflow with human review stop. | [nfse-emissor-nacional](skills/productivity/nfse-emissor-nacional/SKILL.md) |
 | productivity | skill-architecture-workflow | candidate | Hermes-native workflow for deciding whether a recurring need deserves a skill, then designing its scope, trigger contract, progressive disclosure, safety gates, validation, provenance, and promotion path through the governed custom-skills library. | [skill-architecture-workflow](skills/productivity/skill-architecture-workflow/SKILL.md) |
 | productivity | topic-channel-soul-routing | candidate | Generic runbook for configuring Telegram topics, Discord channels/threads, or equivalent messaging surfaces as specialist agent souls/profiles while preserving conversation-first behavior and explicit-only Kanban/task intake. | [topic-channel-soul-routing](skills/productivity/topic-channel-soul-routing/SKILL.md) |
+| productivity | whatsapp-receive-only-monitor | candidate | Public, implementation-neutral workflow for a private WhatsApp monitor with an enforceable receive-only collector, exact group allowlists, a private journal, and separately scoped sanitized alerts or digests—without WhatsApp participation, direct-message monitoring, broad collection, or backfill. | [whatsapp-receive-only-monitor](skills/productivity/whatsapp-receive-only-monitor/SKILL.md) |
 | research | llm-wiki | candidate | Build or query a standalone Markdown wiki, or produce governed, source-backed Second Brain staging artifacts and Brain Delta proposals without canonical writes. | [llm-wiki](skills/research/llm-wiki/SKILL.md) |
 
 ## Outras skills governadas

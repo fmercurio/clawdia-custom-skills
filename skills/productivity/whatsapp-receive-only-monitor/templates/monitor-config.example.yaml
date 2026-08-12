@@ -1,0 +1,45 @@
+# Conceptual, vendor-neutral receive-only monitor contract.
+# Replace placeholders only in private runtime configuration.
+monitor:
+  enabled: false
+  mode: receive_only
+  collector_user: <COLLECTOR_USER>
+  journal_root: <JOURNAL_ROOT>
+  private_alert_destination: <ALERT_DESTINATION>
+
+  intake:
+    direct_messages: disabled
+    general_groups: disabled
+    approved_group_jids:
+      - <APPROVED_GROUP_JID>
+    live_event_types:
+      - notify
+    history_backfill: disabled
+    broad_conversation_queries: disabled
+    include_own_messages: false
+
+  boundary:
+    normal_agent_dispatch: disabled
+    outbound_send: disabled
+    outbound_reply: disabled
+    outbound_reaction: disabled
+    read_receipts: disabled
+    presence_updates: disabled
+    failure_action: local_retain_or_drop
+
+  storage:
+    journal_directory_mode: "0700"
+    journal_file_mode: "0600"
+    retention_days: <RETENTION_DAYS>
+    routine_source_label: approved-group-1
+    persist_raw_transcript: false
+
+  lifecycle:
+    require_authenticated_open: true
+    require_fresh_allowlisted_event_for_health: true
+    max_transient_rebuilds: 1
+    retry_authentication_failures: false
+    unexpected_output_action: disable_and_require_human_approval
+
+# This template is not an adapter implementation. Verify that the chosen
+# collector enforces every boundary structurally before pairing or activation.
