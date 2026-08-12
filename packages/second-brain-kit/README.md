@@ -8,6 +8,8 @@ Hermes-native candidate package for creating a new Second Brain or connecting an
 - SQLite with FTS5
 - A writable explicit `HERMES_HOME` and vault path
 
+All package lifecycle entry points verify this minimum before operating. State-changing commands therefore refuse unsupported interpreters before they create, modify, remove, export, register, render, plan, or serve anything.
+
 OKF, embeddings, Obsidian, Git remote, cron, and read-only MCP are optional.
 
 ## Quick clean-room flow

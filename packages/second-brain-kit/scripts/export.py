@@ -7,6 +7,8 @@ import hashlib
 import zipfile
 from pathlib import Path
 
+from kitlib import require_supported_python
+
 
 EXCLUDED = {"MANIFEST.sha256"}
 EXCLUDE_DIR_PARTS = {
@@ -70,6 +72,11 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
+    try:
+        require_supported_python()
+    except RuntimeError as exc:
+        print(f"error: {exc}")
+        return 2
 
     root = Path(__file__).resolve().parent.parent
     output = Path(args.output).expanduser().resolve()

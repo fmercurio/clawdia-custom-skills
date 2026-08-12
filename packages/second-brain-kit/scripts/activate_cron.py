@@ -10,7 +10,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from kitlib import config_path, hermes_home, inventory_path, load_config, profile_name
+from kitlib import config_path, hermes_home, inventory_path, load_config, profile_name, require_supported_python
 
 
 def _validate_inventory_profile_chain(home: Path, profile: str) -> None:
@@ -48,6 +48,11 @@ def main() -> int:
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--hermes-cli", default="hermes")
     args = parser.parse_args()
+    try:
+        require_supported_python()
+    except RuntimeError as exc:
+        print(json.dumps({"ok": False, "error": str(exc)}))
+        return 2
 
     if not args.apply:
         print(json.dumps({"ok": False, "error": "--apply is required for cron activation"}))

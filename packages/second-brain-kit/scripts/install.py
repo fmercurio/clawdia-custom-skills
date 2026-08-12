@@ -22,6 +22,7 @@ from kitlib import (
     load_config,
     private_directory,
     profile_name,
+    require_supported_python,
     sha256,
 )
 
@@ -201,6 +202,11 @@ def main() -> int:
     parser.add_argument("--enable-cron", action="store_true")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
+    try:
+        require_supported_python()
+    except RuntimeError as exc:
+        print(json.dumps({"ok": False, "error": str(exc)}))
+        return 2
 
     home = hermes_home(args.hermes_home)
     cfg_path = config_path(home, args.profile)

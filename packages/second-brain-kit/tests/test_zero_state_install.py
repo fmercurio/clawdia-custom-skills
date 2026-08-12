@@ -63,6 +63,48 @@ class TestKitE2E(unittest.TestCase):
         report = json.loads(run("doctor.py", "--hermes-home", str(self.home), "--profile", self.profile, "--smoke", "--json").stdout)
         self.assertTrue(report["ok"], report)
 
+    def test_python_version_preflight_matches_the_documented_minimum_before_writes(self):
+        result = run(
+            "bootstrap.py",
+            "--hermes-home",
+            str(self.home),
+            "--profile",
+            self.profile,
+            "--vault",
+            str(self.vault),
+            "--owner",
+            "Version Test",
+            "--apply",
+            "--json",
+            check=False,
+        )
+        report = json.loads(result.stdout)
+        if sys.version_info >= (3, 11):
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertTrue(report["created"])
+        else:
+            self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+            self.assertFalse(report["ok"])
+            self.assertIn("Python 3.11+ is required", report["error"])
+            self.assertFalse(self.home.exists())
+            self.assertFalse(self.vault.exists())
+
+    def test_python_preflight_is_shared_by_all_state_changing_entrypoints(self):
+        expected = (
+            "bootstrap.py",
+            "install.py",
+            "doctor.py",
+            "activate_cron.py",
+            "uninstall.py",
+            "brain_ops.py",
+            "okf_render.py",
+            "export.py",
+            "run_mcp.py",
+            "service_plan.py",
+        )
+        for script in expected:
+            self.assertIn("require_supported_python", (SCRIPTS / script).read_text(encoding="utf-8"), script)
+
     def test_existing_vault_dry_run_is_read_only(self):
         self.vault.mkdir()
         note = self.vault / "legacy.md"
