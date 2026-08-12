@@ -1190,3 +1190,80 @@ skills:
           language and `${HERMES_HOME}` placeholders where runtime/path context is referenced.
           Added a package-local regression scan for forbidden private identifiers and macOS home
           leaks in `tests/test_validate_staging.py`.
+
+  - name: whatsapp-receive-only-monitor
+    status: candidate
+    version: 1.0.0
+    category: productivity
+    description: >
+      Public, implementation-neutral workflow for a private WhatsApp monitor with
+      an enforceable receive-only collector, exact group allowlists, a private
+      journal, and separately scoped sanitized alerts or digests—without WhatsApp
+      participation, direct-message monitoring, broad collection, or backfill.
+    source:
+      type: internal-class-level-synthesis
+      origin: "Generalized from a private, governed receive-only monitoring capability"
+      author: "Skills Lab"
+      created: "2026-08-12"
+      approved: null
+      approved_by: null
+      repository_url: null
+      no_repository_reason: "Internal operational pattern generalized into a public, company-agnostic candidate without importing runtime configuration or credentials"
+    installation:
+      runtime_path: null
+      repo_path: "skills/productivity/whatsapp-receive-only-monitor/"
+      installed_date: null
+      installed_by: null
+      note: "Candidate only; no runtime installation, pairing, gateway change, credential access, or service activation is authorized."
+    audit:
+      security_review: "2026-08-12"
+      security_status: "passed"
+      findings:
+        - "No scripts, executable automation, network calls, credentials, QR material, or runtime configuration are included."
+        - "Receive-only is specified as a technical capability boundary, not as a prompt-only silence rule."
+        - "Exact group-JID allowlist, disabled DMs/general groups, and no normal-agent fallback are required."
+        - "Private journal permissions, sanitization, retention, untrusted-content handling, and neutral source labels are documented."
+        - "Silent validation requires a harmless third-party event and evidence of zero WhatsApp output."
+        - "Bounded recovery and disable-first containment require explicit human approval for reactivation."
+        - "Package scan found no private organization/person references, real identifiers, local runtime paths, QR data, tokens, or secrets."
+      frontmatter_valid: true
+      company_agnostic: true
+      pitfalls_documented: true
+    files:
+      - path: "README.md"
+        size_bytes: 5458
+        status: "new"
+      - path: "SKILL.md"
+        size_bytes: 12156
+        status: "new"
+      - path: "references/incident-containment.md"
+        size_bytes: 1858
+        status: "new"
+      - path: "references/pairing-and-allowlist.md"
+        size_bytes: 2073
+        status: "new"
+      - path: "references/security-and-privacy-boundary.md"
+        size_bytes: 2294
+        status: "new"
+      - path: "references/silent-validation-and-liveness.md"
+        size_bytes: 1945
+        status: "new"
+      - path: "templates/digest-contract.example.md"
+        size_bytes: 1345
+        status: "new"
+      - path: "templates/monitor-config.example.yaml"
+        size_bytes: 1371
+        status: "new"
+      - path: "MANIFEST.sha256"
+        size_bytes: 782
+        status: "new"
+    changelog:
+      - date: "2026-08-12"
+        action: "created public candidate"
+        details: >
+          Added a company-agnostic skill package with a technical receive-only
+          collector boundary, private journal/digest separation, narrow pairing and
+          allowlist controls, silent-validation and liveness evidence, incident
+          containment, README setup gates, templates, and complete manifest. No
+          runtime state, credentials, configuration, services, or private identifiers
+          were copied or changed.
