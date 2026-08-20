@@ -1,8 +1,10 @@
-"""Declarative skill deployment controller (Phase 0/1/2).
+"""Declarative skill deployment controller (Phase 0/1/2/3 sandbox-only).
 
-Provides read-only inventory, deterministic plan generation, and Phase 2 audit/manifest helpers.
+Provides read-only inventory, deterministic plan generation, Phase 2 audit/manifest helpers,
+and Phase 3 sandbox-only apply/verify/rollback helpers under a temp-root sandbox.
 """
 
+from .apply import apply_manifest
 from .audit_gate import AuditReport, audit_paths, audit_paths_json
 from .inventory import build_inventory
 from .manifest import (
@@ -25,8 +27,11 @@ from .policy import (
     load_matrix,
     load_policy,
 )
+from .rollback import rollback_manifest
+from .runtime_verify import verify_applied_state
 
 __all__ = [
+    "apply_manifest",
     "audit_paths",
     "audit_paths_json",
     "AuditReport",
@@ -47,6 +52,8 @@ __all__ = [
     "MatrixProfile",
     "PolicyProfile",
     "RegistrySkill",
+    "rollback_manifest",
+    "verify_applied_state",
     "verify_manifest",
     "write_manifest_json",
     "write_plan_json",

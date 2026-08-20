@@ -163,4 +163,12 @@ At `high`, it fails closed on prompt-injection patterns, secret-like tokens, zer
 
 `tools.skill_deploy.manifest.create_manifest` creates a metadata-only intent manifest for operations already declared by a plan. It records the plan ID, input hashes, source Git SHA, bounded provenance values, operation identity, and SHA-256 tree hashes. It never embeds `SKILL.md` content, credentials, tokens, or backups.
 
-`verify_manifest` rechecks plan identity, declared operations, source hashes, and supplied policy/registry input paths. A source or input hash mutation returns an invalid result and is a hard blocker for any future apply implementation. Phase 2 does not create runtime manifests, staging directories, backups, or apply/rollback commands; those belong to the separately authorized Phase 3.
+`verify_manifest` rechecks plan identity, declared operations, source hashes, and supplied policy/registry input paths. A source or input hash mutation returns an invalid result and is a hard blocker for any apply step.
+
+## Phase 3: sandbox-only apply/verify/rollback helpers
+
+Phase 3 helpers are restricted to a temp-root sandbox (the same `sandbox_root` check used by apply/rollback/verify): no writes are allowed outside that sandbox and sandbox roots under `~/.hermes` are rejected.
+
+- `tools.skill_deploy.apply.apply_manifest` stages and atomically installs only declared `install-copy` operations into `<sandbox_root>/skills`, then writes state at `<sandbox_root>/.skill-deploy/applied/<plan_id>.json`.
+- `tools.skill_deploy.rollback.rollback_manifest` reads that state, rejects unsafe/escaping destinations, supports dry-run listing only, and in real mode removes only recorded destinations plus the plan state file.
+- `tools.skill_deploy.runtime_verify.verify_applied_state` returns deterministic `{valid, drift, checked}` and is valid only when each recorded destination exists under the sandbox and hashes to its recorded `source_sha256`.
