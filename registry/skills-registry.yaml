@@ -1275,3 +1275,71 @@ skills:
           containment, README setup gates, templates, and complete manifest. No
           runtime state, credentials, configuration, services, or private identifiers
           were copied or changed.
+
+  - name: creative-production-orchestration
+    status: approved
+    version: 1.0.0
+    category: creative
+    description: >
+      Provider-neutral orchestration for recurring creative production across brand
+      systems, product visuals, thumbnails/covers, campaign assets and video briefs.
+      Routes only to approved local capabilities and enforces consent, approval,
+      quality and distribution gates.
+    source:
+      type: external-adaptation
+      origin: "https://github.com/higgsfield-ai/skills"
+      author: "Skills Lab; process concepts adapted from Higgsfield AI"
+      created: "2026-08-17"
+      approved: "2026-08-17"
+      approved_by: "Felippe M."
+      repository_url: "https://github.com/higgsfield-ai/skills"
+      revision: "fb18134b4aabe99c4bf7ff01c8f4883400efc80d"
+      license: "MIT"
+    installation:
+      runtime_path: "~/.hermes/skills/creative/creative-production-orchestration/"
+      repo_path: "skills/creative/creative-production-orchestration/"
+      installed_date: "2026-08-17"
+      installed_by: "Hermes Agent"
+      note: "Global canonical library; profile availability is governed by the profile-skill matrix and contextual discovery, never by copied profile packages."
+    audit:
+      security_review: "2026-08-17"
+      security_status: "passed"
+      findings:
+        - "No scripts, executable automation, network calls, credentials, provider configuration or installers are included."
+        - "External-provider upload, identity/likeness, paid generation, external URL ingestion, publication and deploy require explicit confirmation."
+        - "Video without an approved provider is an escalation/pre-production route, not a simulated execution path."
+        - "The adaptation rejects the upstream CLI, OAuth, credit, Cloudflare and auto-publish assumptions."
+      frontmatter_valid: true
+      company_agnostic: true
+      pitfalls_documented: true
+    files:
+      - path: "README.md"
+        size_bytes: 1109
+        status: "new"
+      - path: "SKILL.md"
+        size_bytes: 11050
+        status: "new"
+      - path: "references/provenance.md"
+        size_bytes: 1907
+        status: "new"
+      - path: "references/routing-and-gates.md"
+        size_bytes: 2409
+        status: "new"
+      - path: "templates/creative-brief.md"
+        size_bytes: 921
+        status: "new"
+      - path: "templates/creative-qc.md"
+        size_bytes: 1055
+        status: "new"
+      - path: "MANIFEST.sha256"
+        size_bytes: 544
+        status: "new"
+    changelog:
+      - date: "2026-08-17"
+        action: "created approved provider-neutral adaptation"
+        details: >
+          Adapted only reusable creative-routing, review and quality-gate concepts
+          from the MIT-licensed upstream revision. Removed all foreign-agent
+          installers, provider/OAuth/credit dependencies, automatic uploads,
+          identity training, deploy and publication behavior. Approved by Felippe M.
+          for global canonical installation with matrix-controlled profile use.
