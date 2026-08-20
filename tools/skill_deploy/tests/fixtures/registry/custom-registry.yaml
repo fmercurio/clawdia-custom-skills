@@ -1,0 +1,21 @@
+skills:
+  - name: approved-global
+    status: approved
+    category: productivity
+    installation:
+      repo_path: "skills/productivity/approved-global"
+  - name: overlay-skill
+    status: approved
+    category: productivity
+    installation:
+      repo_path: "skills/productivity/overlay-skill"
+  - name: builtin-collision
+    status: approved
+    category: productivity
+    installation:
+      repo_path: "skills/productivity/builtin-collision"
+  - name: avoid-skill
+    status: approved
+    category: productivity
+    installation:
+      repo_path: "skills/productivity/approved-global"

@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "default_mode": "copy",
+  "profiles": {
+    "skills-lab": {
+      "allow_global_fallback": true,
+      "overlays": [],
+      "apply_enabled": false
+    }
+  },
+  "rules": {
+    "allow_unregistered": false,
+    "allow_builtin_overwrite": false,
+    "allow_runtime_collect": false,
+    "require_audit_gate": "high"
+  }
+}
