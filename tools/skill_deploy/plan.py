@@ -158,6 +158,16 @@ def _canonical_source_type(runtime_entry: RuntimeRegistrySkill | None) -> str:
         return "global-local"
     if canonical_source == "profile-local":
         return "profile-overlay"
+
+    # Skills Lab's legacy runtime registry predates canonical_source/governance_status.
+    # A concrete global ~/.hermes/skills path is sufficient evidence for fallback-only
+    # availability; profile paths remain overlays and are never inferred as global.
+    local_path = _normalize_candidate_name(runtime_entry.local_path)
+    normalized_path = local_path.replace("\\", "/")
+    if "/.hermes/profiles/" in normalized_path:
+        return "profile-overlay"
+    if "/.hermes/skills/" in normalized_path:
+        return "global-local"
     return ""
 
 
