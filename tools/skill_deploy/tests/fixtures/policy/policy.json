@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "default_mode": "copy",
+  "profiles": {
+    "skills-lab": {
+      "allow_global_fallback": true,
+      "overlays": [],
+      "apply_enabled": false
+    }
+  },
+  "rules": {
+    "allow_unregistered": false,
+    "allow_builtin_overwrite": false,
+    "allow_runtime_collect": false,
+    "require_audit_gate": "high"
+  },
+  "inputs": {
+    "hermes_home": "/Users/clawdia/.hermes",
+    "skills_lab_root": "/Users/clawdia/.hermes/skills-lab",
+    "matrix_path": "tools/skill_deploy/tests/fixtures/matrix/matrix-base.yaml",
+    "runtime_registry_path": "tools/skill_deploy/tests/fixtures/registry/runtime-registry.yaml",
+    "canonical_registry_path": "tools/skill_deploy/tests/fixtures/registry/custom-registry.yaml"
+  }
+}

@@ -1,0 +1,12 @@
+version: 1
+profiles:
+  default:
+    core:
+      - approved-global
+    optional: []
+    avoid_by_default: []
+  skills-lab:
+    core:
+      - approved-global
+    optional: []
+    avoid_by_default: []

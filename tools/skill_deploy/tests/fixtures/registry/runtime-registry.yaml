@@ -1,0 +1,67 @@
+skills:
+  - id: approved-global
+    name: approved-global
+    status: implemented
+    implementation_state: implemented
+    category: productivity
+    local_path: tools/skill_deploy/tests/fixtures/workspace/skills/productivity/approved-global/SKILL.md
+    canonical_source: global-local
+    governance_status: canonical-global-local
+    local_copy_action: keep
+    profiles:
+      - skills-lab
+  - id: candidate-skill
+    name: candidate-skill
+    status: implemented
+    implementation_state: candidate
+    category: productivity
+    local_path: tools/skill_deploy/tests/fixtures/workspace/skills/productivity/candidate-skill/SKILL.md
+    canonical_source: global-local
+    governance_status: canonical-global-local
+    local_copy_action: keep
+    profiles:
+      - skills-lab
+  - id: overlay-skill
+    name: overlay-skill
+    status: implemented
+    implementation_state: implemented
+    category: productivity
+    local_path: tools/skill_deploy/tests/fixtures/workspace/skills/productivity/overlay-skill/SKILL.md
+    canonical_source: profile-local
+    governance_status: profile-local
+    local_copy_action: keep
+    profiles:
+      - skills-lab
+  - id: avoid-skill
+    name: avoid-skill
+    status: implemented
+    implementation_state: implemented
+    category: productivity
+    local_path: tools/skill_deploy/tests/fixtures/workspace/skills/productivity/approved-global/SKILL.md
+    canonical_source: global-local
+    governance_status: canonical-global-local
+    local_copy_action: keep
+    profiles:
+      - skills-lab
+  - id: missing-origin-skill
+    name: missing-origin-skill
+    status: implemented
+    implementation_state: implemented
+    category: productivity
+    local_path: tools/skill_deploy/tests/fixtures/workspace/skills/productivity/does-not-exist/SKILL.md
+    canonical_source: profile-local
+    governance_status: profile-local
+    local_copy_action: keep
+    profiles:
+      - skills-lab
+  - id: builtin-collision
+    name: builtin-collision
+    status: implemented
+    implementation_state: implemented
+    category: productivity
+    local_path: tools/skill_deploy/tests/fixtures/workspace/skills/productivity/builtin-collision/SKILL.md
+    canonical_source: builtin
+    governance_status: canonical-builtin
+    local_copy_action: remove-if-unmodified
+    profiles:
+      - skills-lab

@@ -1,0 +1,5 @@
+version: 1
+profiles:
+  skills-lab:
+    core:
+      - missing-origin-skill

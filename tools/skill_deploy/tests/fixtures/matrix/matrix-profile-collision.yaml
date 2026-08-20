@@ -1,0 +1,7 @@
+version: 1
+profiles:
+  skills-lab:
+    core:
+      - approved-global
+    optional:
+      - approved-global

@@ -1,0 +1,10 @@
+version: 1
+profiles:
+  skills-lab:
+    core:
+      - approved-global
+      - candidate-skill
+    optional:
+      - overlay-skill
+    avoid_by_default:
+      - avoid-skill
