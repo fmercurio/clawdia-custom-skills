@@ -194,6 +194,20 @@ def _effective_source_type(
     return "nonexistent"
 
 
+def _matching_global_runtime_and_custom(
+    runtime_entry: RuntimeRegistrySkill | None,
+    custom_entry: RegistrySkill | None,
+) -> bool:
+    """A governed custom source and its installed global runtime copy are not a conflict."""
+    return bool(
+        runtime_entry is not None
+        and custom_entry is not None
+        and _canonical_source_type(runtime_entry) == "global-local"
+        and runtime_entry.category == custom_entry.category
+        and custom_entry.status.lower() in {"approved", "implemented"}
+    )
+
+
 def _is_blocked_by_status(entry: RuntimeRegistrySkill | None) -> bool:
     if entry is None:
         return False
@@ -347,7 +361,9 @@ def _classify_operation(
         )
 
     if runtime_entry is not None and custom_entry is not None:
-        if source_type in {"builtin", "global_custom", "profile_overlay"}:
+        if source_type in {"builtin", "global_custom", "profile_overlay"} and not _matching_global_runtime_and_custom(
+            runtime_entry, custom_entry
+        ):
             return PlanOperation(
                 action="manual-review",
                 skill=entry.name,
