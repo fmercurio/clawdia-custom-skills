@@ -1,4 +1,4 @@
-# Skill Deployment Contract (Phase 0/1)
+# Skill Deployment Contract (Phases 0–2)
 
 Controller input contract is now the real Skills Lab policy and registry format.
 All decisions are read-only by design; no runtime writes are performed.
@@ -152,3 +152,15 @@ Optional:
 - `--hermes-home`
 
 Plan output is optional JSON via `--out` (all outputs are non-destructive; avoid writing to runtime paths).
+
+## Phase 2: audit gate
+
+`tools.skill_deploy.audit_gate.audit_paths(paths, gate="high")` accepts only explicit local regular-file paths. It never executes input, expands globs, resolves URLs, downloads content, or writes runtime state. Output is normalized and deterministic JSON through `audit_paths_json`.
+
+At `high`, it fails closed on prompt-injection patterns, secret-like tokens, zero-width/invisible Unicode, destructive shell patterns, invalid UTF-8, symlinks, missing/non-regular files, and configured size bounds. A clean report is an analysis result only; it is not authorization to apply a plan.
+
+## Phase 2: intent manifests
+
+`tools.skill_deploy.manifest.create_manifest` creates a metadata-only intent manifest for operations already declared by a plan. It records the plan ID, input hashes, source Git SHA, bounded provenance values, operation identity, and SHA-256 tree hashes. It never embeds `SKILL.md` content, credentials, tokens, or backups.
+
+`verify_manifest` rechecks plan identity, declared operations, source hashes, and supplied policy/registry input paths. A source or input hash mutation returns an invalid result and is a hard blocker for any future apply implementation. Phase 2 does not create runtime manifests, staging directories, backups, or apply/rollback commands; those belong to the separately authorized Phase 3.
