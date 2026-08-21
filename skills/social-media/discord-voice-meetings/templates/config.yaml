@@ -15,14 +15,13 @@ discord:
   # Gateway intents requested by the bot. Enable only what the bot needs.
   # - guilds: required to discover servers/channels and receive guild events.
   # - voice_states: required to join/track voice channels and participant state.
-  # - messages: required if commands are typed in text channels.
-  # - message_content: required for prefix/text commands in many Discord bots;
-  #   must also be enabled in the Discord Developer Portal.
+  # Commands use Discord slash interactions; message and message-content
+  # intents are intentionally not requested.
   intents:
     guilds: true
     voice_states: true
-    messages: true
-    message_content: true
+    messages: false
+    message_content: false
     members: false
     reactions: false
 
@@ -150,6 +149,17 @@ voice_capture:
   # Discord sends stereo (2 channels). Each channel is decoded independently
   # by Opus. The mono downmix happens in pcm_to_wav() via ffmpeg.
   channels: 2
+
+  # Resource limits for accepted STT output and later LLM summarization. A
+  # segment or meeting exceeding these limits is dropped and logged; retained
+  # transcript lines are never silently truncated.
+  max_transcript_entry_chars: 4000
+  max_meeting_transcript_chars: 120000
+  max_meeting_entries: 2000
+  # Each accepted request may process at most one bounded utterance. Later
+  # utterances are rejected before ffmpeg conversion or the STT provider call.
+  max_meeting_stt_requests: 600
+  max_llm_input_chars: 60000
 
 # -----------------------------------------------------------------------------
 # Meeting output settings

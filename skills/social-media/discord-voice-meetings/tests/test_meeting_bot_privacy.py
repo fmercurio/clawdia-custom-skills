@@ -17,9 +17,12 @@ def load_meeting_bot(monkeypatch, yaml_payload=None):
 
     class FakeClient:
         def __init__(self, *args, **kwargs):
-            pass
+            self.intents = kwargs["intents"]
 
     class FakeIntents:
+        def __init__(self):
+            self.message_content = False
+
         @classmethod
         def default(cls):
             return cls()
@@ -123,6 +126,39 @@ def test_config_loads_stt_provider_and_api_key_env(monkeypatch, tmp_path):
 
     assert cfg.stt_provider == "groq"
     assert cfg.groq_api_key == "right"
+
+
+def test_config_loads_positive_transcript_limits(monkeypatch, tmp_path):
+    module = load_meeting_bot(monkeypatch, {
+        "voice_capture": {
+            "max_transcript_entry_chars": 12,
+            "max_meeting_transcript_chars": 34,
+            "max_meeting_entries": 5,
+            "max_meeting_stt_requests": 7,
+            "max_llm_input_chars": 21,
+        }
+    })
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text("voice_capture: {}\n", encoding="utf-8")
+
+    cfg = module.MeetingConfig.load(str(cfg_path))
+
+    assert cfg.max_transcript_entry_chars == 12
+    assert cfg.max_meeting_transcript_chars == 34
+    assert cfg.max_meeting_entries == 5
+    assert cfg.max_meeting_stt_requests == 7
+    assert cfg.max_llm_input_chars == 21
+
+
+def test_config_rejects_invalid_transcript_limit(monkeypatch, tmp_path):
+    module = load_meeting_bot(monkeypatch, {
+        "voice_capture": {"max_llm_input_chars": 0},
+    })
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text("voice_capture: {}\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="max_llm_input_chars"):
+        module.MeetingConfig.load(str(cfg_path))
 
 
 def test_config_rejects_unknown_stt_provider(monkeypatch, tmp_path):
@@ -319,6 +355,90 @@ def test_meeting_bot_does_not_log_transcript_text():
     assert "Voice input from user %d: %s" not in source
     assert "chars=%d" in source
     assert "transcript=..." not in troubleshooting
+
+
+def test_meeting_bot_does_not_request_message_content_intent(monkeypatch):
+    module = load_meeting_bot(monkeypatch)
+
+    bot = module.MeetingBot(module.MeetingConfig())
+
+    assert bot.intents.message_content is False
+
+
+def test_meeting_bot_drops_entries_after_transcript_budget(monkeypatch):
+    module = load_meeting_bot(monkeypatch)
+    config = module.MeetingConfig(
+        max_transcript_entry_chars=4,
+        max_meeting_transcript_chars=6,
+        max_meeting_entries=1,
+    )
+    bot = module.MeetingBot(config)
+    bot.get_guild = lambda guild_id: None
+    meeting = module.MeetingSession("Teste", 1, module.datetime.now(module.timezone.utc))
+
+    bot._record_transcript(meeting, 10, "fala")
+    bot._record_transcript(meeting, 10, "outra")
+
+    assert [entry["text"] for entry in meeting.entries] == ["fala"]
+    assert meeting.transcript_chars == 4
+    assert meeting.dropped_transcript_entries == 1
+
+
+def test_meeting_bot_drops_stt_before_conversion_after_request_budget(monkeypatch):
+    module = load_meeting_bot(monkeypatch)
+    config = module.MeetingConfig(max_meeting_stt_requests=1)
+    bot = module.MeetingBot(config)
+    bot.get_guild = lambda guild_id: None
+    meeting = module.MeetingSession("Teste", 1, module.datetime.now(module.timezone.utc))
+    meeting.stt_requests = 1
+    bot._meetings[1] = meeting
+    calls = []
+    monkeypatch.setattr(module.VoiceReceiver, "pcm_to_wav", lambda *args: calls.append("wav"))
+    monkeypatch.setattr(module, "transcribe_audio", lambda *args: calls.append("stt"))
+
+    module.asyncio.run(bot._process_voice_input(1, 10, b"audio"))
+
+    assert calls == []
+    assert meeting.dropped_stt_requests == 1
+
+
+def test_llm_transcript_budget_omits_whole_later_entries(monkeypatch):
+    module = load_meeting_bot(monkeypatch)
+    entries = [
+        {"ts": "one", "user_name": "Ana", "text": "primeira"},
+        {"ts": "two", "user_name": "Bia", "text": "segunda"},
+    ]
+
+    transcript, truncated = module._bounded_llm_transcript(entries, 30)
+
+    assert transcript == "[one] Ana: primeira"
+    assert truncated is True
+
+
+def test_llm_transcript_budget_is_never_exceeded_by_omission_marker(monkeypatch):
+    module = load_meeting_bot(monkeypatch)
+
+    transcript, truncated = module._bounded_llm_transcript(
+        [{"ts": "one", "user_name": "Ana", "text": "primeira"}], 1
+    )
+
+    assert transcript == ""
+    assert truncated is True
+
+
+def test_voice_receiver_discards_pcm_when_session_budgets_are_reached(monkeypatch):
+    module = load_meeting_bot(monkeypatch)
+    receiver = module.VoiceReceiver(None, module.MeetingConfig())
+    receiver.MAX_PCM_BUFFER_BYTES_PER_SSRC = 4
+    receiver.MAX_TOTAL_PCM_BUFFER_BYTES = 6
+    receiver.MAX_ACTIVE_SSRC = 1
+
+    assert receiver._append_pcm(1, b"abcd") is True
+    assert receiver._append_pcm(1, b"e") is False
+    assert receiver._append_pcm(2, b"xy") is False
+    assert bytes(receiver._buffers[1]) == b"abcd"
+    assert receiver._dropped_pcm_packets == 2
+    assert receiver._dropped_pcm_bytes == 3
 
 
 def test_config_template_documents_deny_all_until_allowlist_configured():

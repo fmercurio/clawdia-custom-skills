@@ -97,6 +97,19 @@ def _normalize_env_name(raw_name: Any, label: str) -> str:
     return name
 
 
+def _positive_int_config(value: Any, label: str) -> int:
+    """Return a positive integer config value without accepting booleans."""
+    if isinstance(value, bool):
+        raise ValueError(f"{label} must be a positive integer")
+    try:
+        result = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{label} must be a positive integer") from exc
+    if result <= 0:
+        raise ValueError(f"{label} must be a positive integer")
+    return result
+
+
 def _is_local_llm_host(hostname: str) -> bool:
     return (hostname or "").lower() in LOCAL_LLM_HOSTS
 
@@ -177,6 +190,11 @@ class MeetingConfig:
     min_speech_duration: float = 0.3  # minimum seconds to process
     sample_rate: int = 48000          # Discord native rate
     channels: int = 2                 # Discord sends stereo
+    max_transcript_entry_chars: int = 4_000
+    max_meeting_transcript_chars: int = 120_000
+    max_meeting_entries: int = 2_000
+    max_meeting_stt_requests: int = 600
+    max_llm_input_chars: int = 60_000
 
     # Meeting output
     output_dir: str = "./meetings"
@@ -255,6 +273,26 @@ class MeetingConfig:
         voice_cfg = yaml_data.get("voice_capture", {})
         cfg.silence_threshold = voice_cfg.get("silence_threshold", cfg.silence_threshold)
         cfg.min_speech_duration = voice_cfg.get("min_speech_duration", cfg.min_speech_duration)
+        cfg.max_transcript_entry_chars = _positive_int_config(
+            voice_cfg.get("max_transcript_entry_chars", cfg.max_transcript_entry_chars),
+            "voice_capture.max_transcript_entry_chars",
+        )
+        cfg.max_meeting_transcript_chars = _positive_int_config(
+            voice_cfg.get("max_meeting_transcript_chars", cfg.max_meeting_transcript_chars),
+            "voice_capture.max_meeting_transcript_chars",
+        )
+        cfg.max_meeting_entries = _positive_int_config(
+            voice_cfg.get("max_meeting_entries", cfg.max_meeting_entries),
+            "voice_capture.max_meeting_entries",
+        )
+        cfg.max_meeting_stt_requests = _positive_int_config(
+            voice_cfg.get("max_meeting_stt_requests", cfg.max_meeting_stt_requests),
+            "voice_capture.max_meeting_stt_requests",
+        )
+        cfg.max_llm_input_chars = _positive_int_config(
+            voice_cfg.get("max_llm_input_chars", cfg.max_llm_input_chars),
+            "voice_capture.max_llm_input_chars",
+        )
 
         # Meeting output
         meeting_cfg = yaml_data.get("meeting", {})
@@ -330,6 +368,10 @@ class VoiceReceiver:
     MIN_SPEECH_DURATION: float = 0.3  # minimum seconds to process (skip noise)
     SAMPLE_RATE: int = 48000          # Discord native rate
     CHANNELS: int = 2                 # Discord sends stereo
+    PCM_BYTES_PER_SECOND: int = SAMPLE_RATE * CHANNELS * 2
+    MAX_PCM_BUFFER_BYTES_PER_SSRC: int = 30 * PCM_BYTES_PER_SECOND
+    MAX_TOTAL_PCM_BUFFER_BYTES: int = 16 * 1024 * 1024
+    MAX_ACTIVE_SSRC: int = 16
 
     def __init__(
         self,
@@ -364,6 +406,8 @@ class VoiceReceiver:
 
         # Debug counter
         self._packet_debug_count = 0
+        self._dropped_pcm_packets = 0
+        self._dropped_pcm_bytes = 0
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -417,8 +461,16 @@ class VoiceReceiver:
             self._last_packet_time.clear()
             self._decoders.clear()
             self._ssrc_to_user.clear()
+            dropped_packets = self._dropped_pcm_packets
+            dropped_bytes = self._dropped_pcm_bytes
         if completed:
             logger.info("Flushed %d pending utterance(s) on stop", len(completed))
+        if dropped_packets:
+            logger.warning(
+                "Dropped %d PCM packet(s), %d byte(s), after audio buffer budgets were reached",
+                dropped_packets,
+                dropped_bytes,
+            )
         return completed
 
     # ------------------------------------------------------------------
@@ -574,16 +626,49 @@ class VoiceReceiver:
 
         # Opus decode → PCM
         try:
-            if ssrc not in self._decoders:
-                self._decoders[ssrc] = discord.opus.Decoder()
-            pcm = self._decoders[ssrc].decode(decrypted)
             with self._lock:
-                self._buffers[ssrc].extend(pcm)
-                self._last_packet_time[ssrc] = time.monotonic()
+                if ssrc not in self._decoders and len(self._decoders) >= self.MAX_ACTIVE_SSRC:
+                    self._dropped_pcm_packets += 1
+                    return
+                if ssrc not in self._decoders:
+                    self._decoders[ssrc] = discord.opus.Decoder()
+                decoder = self._decoders[ssrc]
+            pcm = decoder.decode(decrypted)
+            self._append_pcm(ssrc, pcm)
         except Exception as e:
             with self._lock:
                 self._decoders.pop(ssrc, None)
             logger.debug("Opus decode error for SSRC %s: %s", ssrc, e)
+
+    def _append_pcm(self, ssrc: int, pcm: bytes) -> bool:
+        """Append one decoded frame only when bounded session budgets allow it.
+
+        Overflow is deliberately discarded instead of flushing from the socket
+        thread, which keeps listener latency predictable and avoids processing
+        an attacker-controlled stream more often under pressure.
+        """
+        with self._lock:
+            buffer = self._buffers.get(ssrc)
+            if buffer is None:
+                if len(self._buffers) >= self.MAX_ACTIVE_SSRC:
+                    self._dropped_pcm_packets += 1
+                    self._dropped_pcm_bytes += len(pcm)
+                    return False
+                buffer = bytearray()
+                self._buffers[ssrc] = buffer
+
+            total_buffered = sum(len(item) for item in self._buffers.values())
+            if (
+                len(buffer) + len(pcm) > self.MAX_PCM_BUFFER_BYTES_PER_SSRC
+                or total_buffered + len(pcm) > self.MAX_TOTAL_PCM_BUFFER_BYTES
+            ):
+                self._dropped_pcm_packets += 1
+                self._dropped_pcm_bytes += len(pcm)
+                return False
+
+            buffer.extend(pcm)
+            self._last_packet_time[ssrc] = time.monotonic()
+            return True
 
     # ------------------------------------------------------------------
     # Silence detection
@@ -615,11 +700,13 @@ class VoiceReceiver:
                         user_id = self._infer_user_for_ssrc(ssrc)
                     if user_id:
                         completed.append((user_id, bytes(buf)))
-                    self._buffers[ssrc] = bytearray()
+                    self._buffers.pop(ssrc, None)
                     self._last_packet_time.pop(ssrc, None)
+                    self._decoders.pop(ssrc, None)
                 elif silence_duration >= self.SILENCE_THRESHOLD * 2:
                     self._buffers.pop(ssrc, None)
                     self._last_packet_time.pop(ssrc, None)
+                    self._decoders.pop(ssrc, None)
 
         return completed
 
@@ -764,6 +851,26 @@ TRANSCRIÇÃO:
 {transcript}"""
 
 
+def _bounded_llm_transcript(entries: List[dict], max_chars: int) -> Tuple[str, bool]:
+    """Return complete transcript lines that fit the configured LLM input budget."""
+    lines: List[str] = []
+    used_chars = 0
+    for entry in entries:
+        line = (
+            f"[{entry.get('ts', '')}] "
+            f"{entry.get('user_name', 'Participante')}: {entry.get('text', '')}"
+        )
+        separator_chars = 1 if lines else 0
+        if used_chars + separator_chars + len(line) > max_chars:
+            marker = "[Transcrição adicional omitida do resumo por limite de tamanho.]"
+            if used_chars + separator_chars + len(marker) <= max_chars:
+                lines.append(marker)
+            return "\n".join(lines), True
+        lines.append(line)
+        used_chars += separator_chars + len(line)
+    return "\n".join(lines), False
+
+
 async def generate_llm_summary(
     meeting: dict,
     config: MeetingConfig,
@@ -777,10 +884,14 @@ async def generate_llm_summary(
     if not entries:
         return {"summary": "Sem falas transcritas.", "decisions": [], "tasks": []}
 
-    transcript_text = "\n".join(
-        f"[{e.get('ts', '')}] {e.get('user_name', 'Participante')}: {e.get('text', '')}"
-        for e in entries
+    transcript_text, transcript_truncated = _bounded_llm_transcript(
+        entries, config.max_llm_input_chars
     )
+    if transcript_truncated:
+        logger.warning(
+            "LLM summary input capped at %d characters; later transcript entries were omitted",
+            config.max_llm_input_chars,
+        )
     participants = sorted({e.get("user_name") or e.get("user_id") or "Participante" for e in entries})
     title = meeting.get("title", "Reunião")
 
@@ -929,6 +1040,10 @@ class MeetingSession:
     started_at: datetime
     voice_channel_name: str = ""
     entries: List[dict] = field(default_factory=list)
+    transcript_chars: int = 0
+    dropped_transcript_entries: int = 0
+    stt_requests: int = 0
+    dropped_stt_requests: int = 0
     _stopping: bool = False
 
 
@@ -944,7 +1059,6 @@ class MeetingBot(discord.Client):
         intents.voice_states = True
         intents.guilds = True
         intents.members = True  # Required for speaker identification
-        intents.message_content = True
         super().__init__(intents=intents)
 
         self._config = config
@@ -1159,6 +1273,9 @@ class MeetingBot(discord.Client):
             flushed = receiver.flush()
             logger.info("Meeting stop flush: returned %d utterance(s)", len(flushed))
             for user_id, pcm_data in flushed:
+                if not self._reserve_stt_request(meeting):
+                    continue
+                wav_path: Optional[str] = None
                 try:
                     tmp_f = tempfile.NamedTemporaryFile(suffix=".wav", prefix="vc_flush_", delete=False)
                     wav_path = tmp_f.name
@@ -1172,10 +1289,11 @@ class MeetingBot(discord.Client):
                 except Exception as exc:
                     logger.warning("Flush transcription failed for user %d: %s", user_id, exc)
                 finally:
-                    try:
-                        os.unlink(wav_path)
-                    except OSError:
-                        pass
+                    if wav_path:
+                        try:
+                            os.unlink(wav_path)
+                        except OSError:
+                            pass
 
         # Wait for in-flight transcriptions (poll up to 120s)
         pre_wait_count = len(meeting.entries)
@@ -1271,6 +1389,10 @@ class MeetingBot(discord.Client):
         logger.info("Voice input processing START for guild=%d user=%d, pcm=%d bytes",
                      guild_id, user_id, len(pcm_data))
 
+        meeting = self._meetings.get(guild_id)
+        if not meeting or meeting._stopping or not self._reserve_stt_request(meeting):
+            return
+
         tmp_f = tempfile.NamedTemporaryFile(suffix=".wav", prefix="vc_listen_", delete=False)
         wav_path = tmp_f.name
         tmp_f.close()
@@ -1291,8 +1413,7 @@ class MeetingBot(discord.Client):
 
             logger.info("Voice input from user %d transcribed (chars=%d)", user_id, len(transcript))
 
-            meeting = self._meetings.get(guild_id)
-            if meeting and not meeting._stopping:
+            if self._meetings.get(guild_id) is meeting and not meeting._stopping:
                 self._record_transcript(meeting, user_id, transcript)
         except Exception as e:
             logger.warning("Voice input processing failed: %s", e, exc_info=True)
@@ -1302,8 +1423,48 @@ class MeetingBot(discord.Client):
             except OSError:
                 pass
 
+    def _reserve_stt_request(self, meeting: MeetingSession) -> bool:
+        """Reserve bounded STT work before creating a temporary WAV or calling a provider."""
+        if (
+            meeting.stt_requests >= self._config.max_meeting_stt_requests
+            or len(meeting.entries) >= self._config.max_meeting_entries
+            or meeting.transcript_chars >= self._config.max_meeting_transcript_chars
+        ):
+            meeting.dropped_stt_requests += 1
+            logger.warning(
+                "STT request dropped: meeting budget reached "
+                "(requests=%d/%d entries=%d/%d chars=%d/%d)",
+                meeting.stt_requests, self._config.max_meeting_stt_requests,
+                len(meeting.entries), self._config.max_meeting_entries,
+                meeting.transcript_chars, self._config.max_meeting_transcript_chars,
+            )
+            return False
+        meeting.stt_requests += 1
+        return True
+
     def _record_transcript(self, meeting: MeetingSession, user_id: int, transcript: str) -> None:
-        """Append a transcript entry to the meeting."""
+        """Append a transcript entry if it fits the configured session budgets."""
+        text = transcript.strip()
+        if len(text) > self._config.max_transcript_entry_chars:
+            meeting.dropped_transcript_entries += 1
+            logger.warning(
+                "Transcript entry dropped: %d chars exceeds per-entry limit %d",
+                len(text), self._config.max_transcript_entry_chars,
+            )
+            return
+        if (
+            len(meeting.entries) >= self._config.max_meeting_entries
+            or meeting.transcript_chars + len(text) > self._config.max_meeting_transcript_chars
+        ):
+            meeting.dropped_transcript_entries += 1
+            logger.warning(
+                "Transcript entry dropped: meeting transcript budget reached "
+                "(entries=%d/%d chars=%d/%d)",
+                len(meeting.entries), self._config.max_meeting_entries,
+                meeting.transcript_chars, self._config.max_meeting_transcript_chars,
+            )
+            return
+
         user_name = str(user_id)
         try:
             guild = self.get_guild(meeting.guild_id)
@@ -1318,8 +1479,9 @@ class MeetingBot(discord.Client):
             "ts": datetime.now(timezone.utc).isoformat(timespec="seconds") + "Z",
             "user_id": str(user_id),
             "user_name": user_name,
-            "text": transcript.strip(),
+            "text": text,
         })
+        meeting.transcript_chars += len(text)
 
 
 # ============================================================================
