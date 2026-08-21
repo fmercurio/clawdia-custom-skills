@@ -8,6 +8,7 @@ from typing import Mapping
 
 from .manifest import DeploymentManifest, ManifestError, _hash_path, verify_manifest
 from .plan import DeploymentPlan
+from tools.security_boundaries import BoundaryError, ensure_directory_beneath, safe_rename_directory_beneath, safe_write_bytes_beneath
 
 
 def _is_within(path: Path, root: Path) -> bool:
@@ -30,8 +31,24 @@ def _resolve_sandbox_root(sandbox_root: str | Path) -> Path:
 
 
 def _cleanup_staging(staging_root: Path) -> None:
+    if staging_root.is_symlink():
+        raise ManifestError("staging_root_must_not_be_symlink")
     if staging_root.exists():
         shutil.rmtree(staging_root)
+
+
+def _validate_skill_name(skill: str) -> str:
+    """Return one portable directory-name component for a skill operation."""
+    if (
+        not isinstance(skill, str)
+        or not skill
+        or skill in {".", ".."}
+        or "/" in skill
+        or "\\" in skill
+        or Path(skill).is_absolute()
+    ):
+        raise ManifestError(f"invalid_skill_name:{skill}")
+    return skill
 
 
 def apply_manifest(
@@ -48,15 +65,26 @@ def apply_manifest(
     for operation in manifest.operations:
         if operation.action != "install-copy":
             raise ManifestError(f"unsupported_manifest_operation:{operation.skill}:{operation.action}")
+        _validate_skill_name(operation.skill)
 
     sandbox = _resolve_sandbox_root(sandbox_root)
+    sandbox.mkdir(parents=True, exist_ok=True)
+    if sandbox.is_symlink() or not sandbox.is_dir():
+        raise ManifestError("sandbox_root_must_be_directory")
     skills_root = sandbox / "skills"
     staging_root = sandbox / ".skill-deploy" / "staging" / manifest.plan_id
     applied_state_path = sandbox / ".skill-deploy" / "applied" / f"{manifest.plan_id}.json"
 
-    skills_root.mkdir(parents=True, exist_ok=True)
+    try:
+        ensure_directory_beneath(sandbox, Path("skills"))
+        ensure_directory_beneath(sandbox, Path(".skill-deploy") / "staging")
+    except (BoundaryError, OSError) as exc:
+        raise ManifestError(f"unsafe_sandbox_path:{exc}") from exc
     _cleanup_staging(staging_root)
-    staging_root.mkdir(parents=True, exist_ok=True)
+    try:
+        ensure_directory_beneath(sandbox, Path(".skill-deploy") / "staging" / manifest.plan_id)
+    except (BoundaryError, OSError) as exc:
+        raise ManifestError(f"unsafe_staging_path:{exc}") from exc
 
     staged: list[tuple[str, str, Path, Path]] = []
     applied_operations: list[dict[str, str]] = []
@@ -76,14 +104,21 @@ def apply_manifest(
             staged.append((operation.skill, operation.source_sha256, staged_path, destination_path))
 
         for skill, _source_sha256, _staged_path, destination_path in staged:
-            if destination_path.exists():
+            if destination_path.exists() or destination_path.is_symlink():
                 raise ManifestError(f"destination_exists:{skill}")
 
         if fail_after_staging:
             raise ManifestError("injected_failure_after_staging")
 
-        for _skill, source_sha256, staged_path, destination_path in staged:
-            staged_path.rename(destination_path)
+        for skill, source_sha256, _staged_path, destination_path in staged:
+            try:
+                safe_rename_directory_beneath(
+                    sandbox,
+                    Path(".skill-deploy") / "staging" / manifest.plan_id / skill,
+                    Path("skills") / skill,
+                )
+            except (BoundaryError, OSError) as exc:
+                raise ManifestError(f"unsafe_destination_path:{skill}:{exc}") from exc
             applied_operations.append(
                 {
                     "destination": destination_path.relative_to(sandbox).as_posix(),
@@ -94,9 +129,13 @@ def apply_manifest(
         _cleanup_staging(staging_root)
 
     applied_state = {"operations": applied_operations}
-    applied_state_path.parent.mkdir(parents=True, exist_ok=True)
-    applied_state_path.write_text(
-        json.dumps(applied_state, separators=(",", ":"), sort_keys=True),
-        encoding="utf-8",
-    )
+    try:
+        safe_write_bytes_beneath(
+            sandbox,
+            Path(".skill-deploy") / "applied" / f"{manifest.plan_id}.json",
+            json.dumps(applied_state, separators=(",", ":"), sort_keys=True).encode("utf-8"),
+            mode=0o600,
+        )
+    except (BoundaryError, OSError) as exc:
+        raise ManifestError(f"unsafe_applied_state_path:{exc}") from exc
     return applied_state
