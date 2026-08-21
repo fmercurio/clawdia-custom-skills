@@ -7,7 +7,7 @@ import base64
 import hashlib
 import json
 import re
-import shutil
+import secrets
 import stat
 from pathlib import Path
 from typing import Any
@@ -24,6 +24,8 @@ from kitlib import (
     profile_name,
     require_supported_python,
     sha256,
+    validate_path_beneath,
+    write_bytes_beneath,
 )
 
 
@@ -54,6 +56,7 @@ MCP_INSTANCE_ROOT = "instances"
 MCP_INSTANCE_CONFIG_NAME = "runtime-config.json"
 MCP_INSTANCE_POLICY_NAME = "policy.json"
 MCP_INSTANCE_MANIFEST_NAME = "projection-manifest.json"
+MCP_INSTANCE_ACCESS_TOKEN_NAME = "access-token"
 MCP_LISTENER_HOST = "127.0.0.1"
 MCP_LISTENER_PORT = 8765
 MCP_LISTENER_PATH = "/mcp"
@@ -83,9 +86,10 @@ def _instance_runtime_config(
     instance_name: str,
     policy_path: Path,
     projection_manifest_path: Path,
+    auth_token_path: Path,
     cfg: dict[str, Any],
 ) -> dict[str, Any]:
-    for artifact in (policy_path, projection_manifest_path):
+    for artifact in (policy_path, projection_manifest_path, auth_token_path):
         if artifact.is_absolute() or any(part == ".." for part in artifact.parts):
             raise ValueError("artifact references must be instance-relative")
     return {
@@ -103,8 +107,22 @@ def _instance_runtime_config(
         "owner": cfg.get("owner"),
         "policy_path": str(policy_path),
         "projection_manifest_path": str(projection_manifest_path),
-        "artifacts": [MCP_INSTANCE_CONFIG_NAME, MCP_INSTANCE_POLICY_NAME, MCP_INSTANCE_MANIFEST_NAME],
+        "auth_token_path": str(auth_token_path),
+        "artifacts": [MCP_INSTANCE_CONFIG_NAME, MCP_INSTANCE_POLICY_NAME, MCP_INSTANCE_MANIFEST_NAME, MCP_INSTANCE_ACCESS_TOKEN_NAME],
     }
+
+
+def _load_or_create_access_token(path: Path) -> str:
+    if path.is_symlink():
+        raise ValueError(f"MCP access token path is a symlink: {path}")
+    if not path.exists():
+        return secrets.token_urlsafe(32)
+    if not path.is_file() or stat.S_IMODE(path.stat().st_mode) != 0o600:
+        raise ValueError(f"unsafe MCP access token: {path}")
+    token = path.read_text(encoding="utf-8").strip()
+    if len(token) < 32 or any(char.isspace() for char in token):
+        raise ValueError(f"invalid MCP access token: {path}")
+    return token
 
 
 def _add_entry(
@@ -265,6 +283,8 @@ def main() -> int:
             runtime_cfg_path = instance_root / MCP_INSTANCE_CONFIG_NAME
             policy_path = instance_root / MCP_INSTANCE_POLICY_NAME
             _ = instance_root / MCP_INSTANCE_MANIFEST_NAME
+            access_token_path = instance_root / MCP_INSTANCE_ACCESS_TOKEN_NAME
+            access_token = _load_or_create_access_token(access_token_path)
 
             _add_entry(
                 plan,
@@ -274,12 +294,14 @@ def main() -> int:
                         instance_name,
                         Path(MCP_INSTANCE_POLICY_NAME),
                         Path(MCP_INSTANCE_MANIFEST_NAME),
+                        Path(MCP_INSTANCE_ACCESS_TOKEN_NAME),
                         cfg,
                     )
                 ),
                 mode=0o600,
             )
             _add_entry(plan, src=MCP_POLICY_SOURCE, dst=policy_path, mode=0o600)
+            _add_entry(plan, dst=access_token_path, payload=(access_token + "\n").encode("utf-8"), mode=0o600)
 
             desired_cfg = dict(cfg)
             desired_cfg["mcp_readonly"] = {"enabled": True, "instance_name": instance_name}
@@ -302,11 +324,13 @@ def main() -> int:
 
         conflicts: list[str] = []
         for item in plan:
+            validate_path_beneath(home, item["dst"].relative_to(home))
             if item["dst"].exists() and item["dst"] == cfg_path:
                 continue
             if item["dst"].exists() and _file_state(item["dst"], item["hash"]) == "updated":
                 conflicts.append(str(item["dst"]))
         if wrapper_content is not None and wrapper.exists():
+            validate_path_beneath(home, wrapper.relative_to(home))
             if wrapper.read_text(encoding="utf-8") != wrapper_content:
                 conflicts.append(str(wrapper))
 
@@ -362,33 +386,51 @@ def main() -> int:
     try:
         for item in plan:
             dst = item["dst"]
-            dst.parent.mkdir(parents=True, exist_ok=True)
             if item["kind"] == "source":
                 if not dst.exists() or item["hash"] != sha256(dst):
-                    shutil.copy2(item["src"], dst)
+                    write_bytes_beneath(
+                        home,
+                        dst.relative_to(home),
+                        item["src"].read_bytes(),
+                        file_mode=item["mode"],
+                        overwrite=True,
+                        exact_mode=True,
+                    )
             else:
-                dst.write_bytes(item["payload"])
-            dst.chmod(item["mode"])
+                write_bytes_beneath(
+                    home,
+                    dst.relative_to(home),
+                    item["payload"],
+                    file_mode=item["mode"],
+                    overwrite=True,
+                    exact_mode=True,
+                )
             managed_by_path[str(dst)] = {"path": str(dst), "sha256": item["hash"]}
 
         if wrapper_content is not None:
-            wrapper.parent.mkdir(parents=True, exist_ok=True)
-            wrapper.write_text(wrapper_content, encoding="utf-8")
-            wrapper.chmod(0o755)
+            write_bytes_beneath(
+                home,
+                wrapper.relative_to(home),
+                wrapper_content.encode("utf-8"),
+                file_mode=0o755,
+                overwrite=True,
+                exact_mode=True,
+            )
             managed_by_path[str(wrapper)] = {"path": str(wrapper), "sha256": _bytes_sha256(wrapper_content.encode("utf-8"))}
 
         if args.enable_mcp:
-            instances_root = home / "second-brain-kit" / MCP_INSTANCE_ROOT
-            instances_root.mkdir(parents=True, exist_ok=True)
-            instances_root.chmod(0o700)
-            instance_root = private_directory(instances_root, Path(instance_name))
-            for name in (MCP_INSTANCE_CONFIG_NAME, MCP_INSTANCE_POLICY_NAME):
+            instance_root = private_directory(
+                home,
+                Path("second-brain-kit") / MCP_INSTANCE_ROOT / instance_name,
+            )
+            for name in (MCP_INSTANCE_CONFIG_NAME, MCP_INSTANCE_POLICY_NAME, MCP_INSTANCE_ACCESS_TOKEN_NAME):
                 target = instance_root / name
                 if not target.exists():
                     print(json.dumps({"ok": False, "error": f"failed to create MCP artifact: {target}"}))
                     return 2
-                if stat.S_IMODE(target.stat().st_mode) != 0o600:
-                    target.chmod(0o600)
+                if target.is_symlink() or stat.S_IMODE(target.stat().st_mode) != 0o600:
+                    print(json.dumps({"ok": False, "error": f"unsafe MCP artifact: {target}"}))
+                    return 2
 
         inventory_payload: dict[str, Any] = {
             "kit_version": cfg["kit_version"],
@@ -405,8 +447,14 @@ def main() -> int:
         if ip.is_symlink():
             print(json.dumps({"ok": False, "error": f"install inventory path is a symlink: {ip}"}))
             return 2
-        ip.write_text(json.dumps(inventory_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        ip.chmod(0o600)
+        write_bytes_beneath(
+            home,
+            ip.relative_to(home),
+            (json.dumps(inventory_payload, indent=2, sort_keys=True) + "\n").encode("utf-8"),
+            file_mode=0o600,
+            overwrite=True,
+            exact_mode=True,
+        )
 
     except (OSError, ValueError, TypeError, RuntimeError) as exc:
         print(json.dumps({"ok": False, "error": str(exc)}))

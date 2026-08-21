@@ -5,11 +5,22 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
-import shutil
 import sqlite3
 from pathlib import Path
 
-from archiver_db import DB, VAULT, connect, connect_readonly, ensure_schema, table_columns, table_exists, upsert_link_context
+from archiver_db import (
+    DB,
+    VAULT,
+    connect,
+    connect_readonly,
+    ensure_schema,
+    iter_regular_files_beneath,
+    read_bytes_path,
+    table_columns,
+    table_exists,
+    upsert_link_context,
+    write_bytes_atomic,
+)
 from archiver_extract_context import extract_url_context
 
 SKIP_PREFIXES = {"90-meta", "attachments"}
@@ -87,26 +98,25 @@ def merge_summaries(base: str | None, addition: str | None) -> str:
 
 
 def iter_notes(vault: Path):
-    for md_path in vault.rglob("*.md"):
-        rel_parts = md_path.relative_to(vault).parts
+    for relative_path, raw in iter_regular_files_beneath(vault, ".md"):
+        rel_parts = relative_path.parts
         if rel_parts and rel_parts[0] in SKIP_PREFIXES:
             continue
-        raw = md_path.read_text(encoding="utf-8", errors="ignore")
-        meta, body = parse_frontmatter(raw)
-        rel_path = str(md_path.relative_to(vault))
+        meta, body = parse_frontmatter(raw.decode("utf-8", errors="ignore"))
+        rel_path = str(relative_path)
         source = str(meta.get("source", "") or "")
         links = collect_links_from_text(body or "", source)
         yield rel_path, meta, links
 
 
 def add_backup(path: Path) -> str | None:
-    if not path.exists():
+    try:
+        content = read_bytes_path(path)
+    except FileNotFoundError:
         return None
     stamp = dt.datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
     backup = path.with_name(f"{path.name}.pre-context-{stamp}.bak")
-    backup.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(path, backup)
-    return str(backup)
+    return str(write_bytes_atomic(backup, content))
 
 
 def ensure_item(con, vault: Path, rel_path: str, meta: dict[str, object], created: str) -> tuple[int, bool]:

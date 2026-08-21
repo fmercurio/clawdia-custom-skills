@@ -10,13 +10,14 @@ import sys
 from pathlib import Path
 
 try:
-    from kitlib import private_directory
+    from kitlib import config_path, hermes_home, load_config, private_directory, require_capability
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts"))
-    from kitlib import private_directory
+    from kitlib import config_path, hermes_home, load_config, private_directory, require_capability
 
 SKIP_DIRS = {".git", ".obsidian", ".brain-index", "node_modules", "__pycache__"}
 KNOWN_SENSITIVITY = {"public", "internal", "restricted"}
+RESTRICTED_SEARCH_CAPABILITY = "brain.restricted-search"
 
 
 def parse_yaml_scalar(value: str) -> str:
@@ -97,7 +98,27 @@ def iter_notes(vault: Path):
         yield path
 
 
-def rebuild(vault: Path, include_restricted: bool = False) -> dict:
+def _restricted_search_capabilities(
+    vault: Path,
+    *,
+    requested: bool,
+    hermes_home_value: str | None,
+    profile: str,
+) -> frozenset[str]:
+    """Grant restricted search only from the owner-controlled profile for this vault."""
+    if not requested:
+        return frozenset()
+    cfg = load_config(config_path(hermes_home(hermes_home_value), profile))
+    configured_vault = Path(cfg.get("vault_path", "")).expanduser().resolve()
+    if configured_vault != vault.resolve():
+        raise PermissionError("restricted search profile does not authorize this vault")
+    sensitivity = cfg.get("sensitivity")
+    if not isinstance(sensitivity, dict) or sensitivity.get("restricted_search") is not True:
+        raise PermissionError("restricted search requires owner policy sensitivity.restricted_search: true")
+    return frozenset({RESTRICTED_SEARCH_CAPABILITY})
+
+
+def rebuild(vault: Path, capabilities: frozenset[str] = frozenset()) -> dict:
     con = connect(vault)
     con.execute("DELETE FROM notes")
     con.execute("DELETE FROM notes_fts")
@@ -109,9 +130,12 @@ def rebuild(vault: Path, include_restricted: bool = False) -> dict:
         if sensitivity not in KNOWN_SENSITIVITY:
             skipped_restricted += 1
             continue
-        if sensitivity == "restricted" and not include_restricted:
-            skipped_restricted += 1
-            continue
+        if sensitivity == "restricted":
+            try:
+                require_capability(RESTRICTED_SEARCH_CAPABILITY, capabilities)
+            except PermissionError:
+                skipped_restricted += 1
+                continue
         rel = path.relative_to(vault).as_posix()
         title = meta.get("title") or next((line[2:].strip() for line in body.splitlines() if line.startswith("# ")), path.stem)
         para = meta.get("para", "")
@@ -122,7 +146,7 @@ def rebuild(vault: Path, include_restricted: bool = False) -> dict:
     return {"ok": True, "files_indexed": indexed, "restricted_skipped": skipped_restricted, "db": str(db_path(vault))}
 
 
-def search(vault: Path, query: str, limit: int = 8, include_restricted: bool = False) -> list[dict]:
+def search(vault: Path, query: str, limit: int = 8, capabilities: frozenset[str] = frozenset()) -> list[dict]:
     if not db_path(vault).exists():
         raise FileNotFoundError("search index missing; run --rebuild explicitly")
     con = connect(vault)
@@ -130,6 +154,7 @@ def search(vault: Path, query: str, limit: int = 8, include_restricted: bool = F
     if not terms:
         con.close(); return []
     expression = " OR ".join('"' + term.replace('"', '') + '"' for term in terms)
+    include_restricted = RESTRICTED_SEARCH_CAPABILITY in capabilities
     rows = con.execute("""
       SELECT n.path,n.title,n.para,n.sensitivity,
              snippet(notes_fts,2,'>>>','<<<','…',24) AS snippet, bm25(notes_fts) AS rank
@@ -159,6 +184,8 @@ def main() -> int:
     action.add_argument("--query")
     action.add_argument("--stats", action="store_true")
     parser.add_argument("--include-restricted", action="store_true")
+    parser.add_argument("--hermes-home", help="profile root used to authorize --include-restricted")
+    parser.add_argument("--profile", default="second-brain", help="owner-controlled profile used to authorize --include-restricted")
     parser.add_argument("--vector", action="store_true", help="Request semantic search; RC1 degrades to FTS when embeddings are unavailable")
     parser.add_argument("--limit", type=int, default=8)
     parser.add_argument("--json", action="store_true")
@@ -167,10 +194,16 @@ def main() -> int:
     if not vault.is_dir():
         print(json.dumps({"ok": False, "error": "vault not found"})); return 2
     try:
+        capabilities = _restricted_search_capabilities(
+            vault,
+            requested=args.include_restricted,
+            hermes_home_value=args.hermes_home,
+            profile=args.profile,
+        )
         if args.rebuild:
-            result = rebuild(vault, args.include_restricted)
+            result = rebuild(vault, capabilities)
         elif args.query is not None:
-            results = search(vault, args.query, args.limit, args.include_restricted)
+            results = search(vault, args.query, args.limit, capabilities)
             result = {"ok": True, "query": args.query, "results": results, "semantic": "fts-fallback" if args.vector else "disabled"}
         else:
             result = {"ok": True, **stats(vault)}

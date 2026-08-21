@@ -30,6 +30,29 @@ LOCAL_CAPROVER_HOSTS = {"localhost", "127.0.0.1", "::1"}
 DEFAULT_GITHUB_REPO_HOST = "github.com"
 ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
+
+def _origin(url):
+    parsed = urllib.parse.urlsplit(url)
+    hostname = (parsed.hostname or "").lower()
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    return parsed.scheme.lower(), hostname, port
+
+
+class SameOriginRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Reject redirects that could forward a CapRover authentication header off-origin."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        target = urllib.parse.urljoin(req.full_url, newurl)
+        if _origin(req.full_url) != _origin(target):
+            raise urllib.error.HTTPError(
+                target,
+                code,
+                "cross-origin redirect refused for authenticated CapRover request",
+                headers,
+                fp,
+            )
+        return super().redirect_request(req, fp, code, msg, headers, target)
+
 # ──────────────────────────────────────────────
 #  Utilities
 # ──────────────────────────────────────────────
@@ -49,7 +72,8 @@ class CapRoverAPI:
             headers["x-captain-auth"] = self.token
         req = urllib.request.Request(url, data=data, headers=headers, method=method)
         try:
-            resp = urllib.request.urlopen(req, timeout=30)
+            opener = urllib.request.build_opener(SameOriginRedirectHandler())
+            resp = opener.open(req, timeout=30)
             body = json.loads(resp.read())
             return body
         except urllib.error.HTTPError as e:

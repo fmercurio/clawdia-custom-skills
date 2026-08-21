@@ -38,6 +38,7 @@ import os
 import re
 import stat
 import sys
+import zipfile
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Optional
@@ -49,6 +50,9 @@ MAX_XLSX_BYTES = 25 * 1024 * 1024
 MAX_SHEET_ROWS = 100_000
 MAX_SHEET_COLUMNS = 64
 MAX_CELL_TEXT_BYTES = 64 * 1024
+MAX_XLSX_ARCHIVE_MEMBERS = 1_000
+MAX_XLSX_UNCOMPRESSED_BYTES = 100 * 1024 * 1024
+MAX_XLSX_COMPRESSION_RATIO = 100
 
 
 def load_bundled_agilize_login():
@@ -165,10 +169,34 @@ def get_month(t: dict) -> str:
 
 # ─── Sheet parsing ────────────────────────────────────────────────────────────
 
+def validate_xlsx_archive(source: Path) -> None:
+    """Reject ZIP expansion bombs before handing the file to openpyxl."""
+    try:
+        with zipfile.ZipFile(source) as archive:
+            members = archive.infolist()
+    except zipfile.BadZipFile as exc:
+        raise ValueError("XLSX must be a valid ZIP archive") from exc
+
+    if len(members) > MAX_XLSX_ARCHIVE_MEMBERS:
+        raise ValueError(f"XLSX exceeds the {MAX_XLSX_ARCHIVE_MEMBERS}-member archive limit")
+
+    total_uncompressed = 0
+    for member in members:
+        total_uncompressed += member.file_size
+        if total_uncompressed > MAX_XLSX_UNCOMPRESSED_BYTES:
+            raise ValueError(f"XLSX exceeds the {MAX_XLSX_UNCOMPRESSED_BYTES}-byte expanded limit")
+        if member.file_size and (
+            not member.compress_size
+            or member.file_size / member.compress_size > MAX_XLSX_COMPRESSION_RATIO
+        ):
+            raise ValueError("XLSX archive member exceeds the compression-ratio limit")
+
+
 def parse_sheet(xlsx_path: str, sheet_name: Optional[str] = None) -> list[dict]:
     source = Path(xlsx_path).expanduser()
     if source.stat().st_size > MAX_XLSX_BYTES:
         raise ValueError(f"XLSX exceeds the {MAX_XLSX_BYTES}-byte input limit")
+    validate_xlsx_archive(source)
     wb = openpyxl.load_workbook(xlsx_path, data_only=True, read_only=True)
     # Auto-pick sheet
     if sheet_name and sheet_name in wb.sheetnames:

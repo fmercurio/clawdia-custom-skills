@@ -58,12 +58,18 @@ def test_enable_mcp_renders_inert_external_instance_and_uninstalls_cleanly() -> 
         applied = json.loads(run("install.py", "--hermes-home", str(home), "--profile", profile, "--enable-mcp", "--apply", "--json").stdout)
         assert applied["ok"] is True
         instance = home / "second-brain-kit/instances/second-brain-readonly"
-        runtime_config, policy = instance / "runtime-config.json", instance / "policy.json"
-        assert {item.name for item in instance.iterdir()} == {"runtime-config.json", "policy.json"}
+        runtime_config, policy, access_token = instance / "runtime-config.json", instance / "policy.json", instance / "access-token"
+        assert {item.name for item in instance.iterdir()} == {"runtime-config.json", "policy.json", "access-token"}
         assert stat.S_IMODE(instance.stat().st_mode) == 0o700
-        for artifact in (runtime_config, policy):
+        for artifact in (runtime_config, policy, access_token):
             assert artifact.is_file()
             assert stat.S_IMODE(artifact.stat().st_mode) == 0o600
+        assert len(access_token.read_text(encoding="utf-8").strip()) >= 32
+        assert json.loads(runtime_config.read_text(encoding="utf-8"))["auth_token_path"] == "access-token"
+        token_before_reinstall = access_token.read_text(encoding="utf-8")
+        reinstalled = json.loads(run("install.py", "--hermes-home", str(home), "--profile", profile, "--enable-mcp", "--apply", "--json").stdout)
+        assert reinstalled["ok"] is True
+        assert access_token.read_text(encoding="utf-8") == token_before_reinstall
         assert sorted(path.relative_to(vault).as_posix() for path in vault.rglob("*")) == before_vault
         assert (home / "second-brain-kit/bin/mcp_smoke.py").is_file()
         assert (home / "second-brain-kit/bin/brain_policy_check.py").is_file()

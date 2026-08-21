@@ -13,12 +13,13 @@ import os
 import sqlite3
 import subprocess
 import sys
-import tempfile
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 from urllib.parse import urlsplit, urlunsplit
+
+from archiver_db import ArchiverPathError, connect_readonly, read_bytes_path, write_bytes_atomic
 
 SCHEMA_VERSION = "archive-weekly-review.v1"
 INDEX_SCHEMA_VERSION = "archive-weekly-review.v1-index"
@@ -129,14 +130,10 @@ def stable_json(payload: Dict[str, Any]) -> str:
 
 
 def write_file_atomic(path: Path, data: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile("wb", dir=path.parent, delete=False) as tmp:
-        tmp.write(data)
-        tmp.flush()
-        os.fsync(tmp.fileno())
-        tmp_name = tmp.name
-    os.chmod(tmp_name, 0o600)
-    Path(tmp_name).replace(path)
+    try:
+        write_bytes_atomic(path, data)
+    except OSError as exc:
+        raise ArchiverPathError(f"unsafe output path: {path}") from exc
 
 
 def has_table(conn: sqlite3.Connection, table: str) -> bool:
@@ -944,27 +941,27 @@ def _validate_index_payload(payload: Dict[str, Any]) -> None:
 
 
 def load_index(path: Path, *, recover: bool = False) -> Dict[str, Any]:
-    if not path.exists():
-        return {
-            "schema": INDEX_SCHEMA_VERSION,
-            "generated_at": "",
-            "latest_date": "",
-            "reviews": {},
-        }
+    empty_index = {
+        "schema": INDEX_SCHEMA_VERSION,
+        "generated_at": "",
+        "latest_date": "",
+        "reviews": {},
+    }
+    try:
+        raw = read_bytes_path(path)
+    except FileNotFoundError:
+        return empty_index
+    except (ArchiverPathError, NotADirectoryError, OSError) as exc:
+        raise RuntimeError(f"Unsafe index path at {path}: {exc}") from exc
 
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(raw.decode("utf-8"))
     except Exception as exc:
         if recover:
             backup_path = path.with_suffix(path.suffix + INDEX_BACKUP_SUFFIX)
-            path.replace(backup_path)
-            os.chmod(backup_path, 0o600)
-            return {
-                "schema": INDEX_SCHEMA_VERSION,
-                "generated_at": "",
-                "latest_date": "",
-                "reviews": {},
-            }
+            write_bytes_atomic(backup_path, raw)
+            write_bytes_atomic(path, stable_json(empty_index).encode("utf-8"))
+            return empty_index
         raise RuntimeError(f"Malformed index JSON at {path}: {exc}") from exc
 
     try:
@@ -972,14 +969,9 @@ def load_index(path: Path, *, recover: bool = False) -> Dict[str, Any]:
     except ValueError as exc:
         if recover:
             backup_path = path.with_suffix(path.suffix + INDEX_BACKUP_SUFFIX)
-            path.replace(backup_path)
-            os.chmod(backup_path, 0o600)
-            return {
-                "schema": INDEX_SCHEMA_VERSION,
-                "generated_at": "",
-                "latest_date": "",
-                "reviews": {},
-            }
+            write_bytes_atomic(backup_path, raw)
+            write_bytes_atomic(path, stable_json(empty_index).encode("utf-8"))
+            return empty_index
         raise RuntimeError(f"Invalid index schema at {path}: {exc}") from exc
 
     if "reviews" not in data or not isinstance(data["reviews"], dict):
@@ -1023,12 +1015,10 @@ def gather_payload(
 ) -> Dict[str, Any]:
     db_path = db_path.expanduser()
     if not db_path.is_absolute():
-        db_path = (archiver_home / db_path).resolve()
-    if not db_path.exists():
-        raise RuntimeError(f"Archive DB missing at {db_path}")
+        db_path = archiver_home / db_path
 
     try:
-        with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as conn:
+        with connect_readonly(db_path) as conn:
             metrics = collect_metrics(
                 conn,
                 archiver_home=archiver_home,
@@ -1036,7 +1026,7 @@ def gather_payload(
                 kanban_board=kanban_board,
                 days=days,
             )
-    except sqlite3.OperationalError as exc:
+    except (FileNotFoundError, OSError, sqlite3.OperationalError) as exc:
         raise RuntimeError(f"Cannot open archive DB: {exc}")
 
     now = _utcnow()

@@ -42,6 +42,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
+
+from tools.security_boundaries import BoundaryError, safe_read_bytes_beneath, safe_write_bytes_beneath
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -292,12 +298,15 @@ def init_db() -> sqlite3.Connection:
     # Add .brain-index to .gitignore if not already there
     gitignore = VAULT_ROOT / ".gitignore"
     if gitignore.exists():
-        gi = gitignore.read_text()
+        try:
+            gi = safe_read_bytes_beneath(VAULT_ROOT, Path(".gitignore")).decode("utf-8")
+        except (BoundaryError, OSError, UnicodeDecodeError) as exc:
+            raise ValueError(".gitignore must be a regular UTF-8 file inside the vault") from exc
         if ".brain-index" not in gi:
             gi = gi.rstrip() + "\n.brain-index/\n"
-            gitignore.write_text(gi)
+            safe_write_bytes_beneath(VAULT_ROOT, Path(".gitignore"), gi.encode("utf-8"), overwrite=True)
     else:
-        gitignore.write_text(".brain-index/\n")
+        safe_write_bytes_beneath(VAULT_ROOT, Path(".gitignore"), b".brain-index/\n")
 
     con = sqlite3.connect(str(DB_PATH))
     con.execute("PRAGMA journal_mode=WAL")

@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from secrets import compare_digest
 from typing import Any
 
 from .config import CONTRACT_VERSION, contract_error_payload
 
 try:
     from mcp.server import MCPServer
+    from mcp.server.auth.provider import AccessToken
+    from mcp.server.auth.settings import AuthSettings
     from mcp.types import ToolAnnotations
 except Exception as exc:  # pragma: no cover
     raise RuntimeError(
@@ -15,6 +18,16 @@ except Exception as exc:  # pragma: no cover
     ) from exc
 
 from .core import COMPAT_TOOL_NAMES, CompatibilityCore, V02Core
+
+
+class _InstanceTokenVerifier:
+    def __init__(self, access_token: str):
+        self._access_token = access_token
+
+    async def verify_token(self, token: str) -> AccessToken | None:
+        if not compare_digest(token, self._access_token):
+            return None
+        return AccessToken(token=token, client_id="local-instance", scopes=["brain.read"])
 
 
 def _safe_payload(generator: Callable[[], dict[str, Any]], core: CompatibilityCore) -> dict[str, Any]:
@@ -32,13 +45,26 @@ def _safe_payload(generator: Callable[[], dict[str, Any]], core: CompatibilityCo
         )
 
 
-def create_server(core: CompatibilityCore | None = None) -> MCPServer:
+def create_server(core: CompatibilityCore | None = None, access_token: str | None = None) -> MCPServer:
     """Create an MCP server exposing only the compatibility tool surface."""
 
     if core is None:
         core = CompatibilityCore()
 
-    mcp = MCPServer("second-brain-kit")
+    if access_token is not None and (len(access_token) < 32 or any(char.isspace() for char in access_token)):
+        raise ValueError("access token must contain at least 32 non-whitespace characters")
+
+    server_options: dict[str, Any] = {}
+    if access_token is not None:
+        server_options = {
+            "auth": AuthSettings(
+                issuer_url="http://127.0.0.1",
+                resource_server_url="http://127.0.0.1/mcp",
+                required_scopes=["brain.read"],
+            ),
+            "token_verifier": _InstanceTokenVerifier(access_token),
+        }
+    mcp = MCPServer("second-brain-kit", **server_options)
 
     if getattr(core, "contract_version", None) == CONTRACT_VERSION and isinstance(core, V02Core):
         @mcp.tool(name=COMPAT_TOOL_NAMES[0], annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))

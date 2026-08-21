@@ -12,10 +12,29 @@ import json
 import re
 from pathlib import Path
 
-from archiver_db import DB, VAULT, connect, collect_urls_and_context, ensure_schema, upsert_link_context
+from archiver_db import (
+    DB,
+    VAULT,
+    connect,
+    collect_urls_and_context,
+    create_text_beneath,
+    ensure_schema,
+    upsert_link_context,
+)
 from archiver_extract_context import extract_url_context
 
-INBOX = VAULT / "00-inbox"
+def _create_archive_item(title: str, content: str) -> Path:
+    """Atomically create a regular archive item without following inbox links."""
+    stem = f"{dt.date.today().isoformat()}-{slugify(title)}"
+    counter = 1
+    while True:
+        suffix = "" if counter == 1 else f"-{counter}"
+        filename = f"{stem}{suffix}.md"
+        try:
+            return create_text_beneath(VAULT, Path("00-inbox") / filename, content)
+        except FileExistsError:
+            counter += 1
+
 
 def slugify(text: str) -> str:
     text = text.lower().strip()
@@ -66,16 +85,6 @@ def main() -> int:
     if not tags:
         tags = ["inbox"]
 
-    INBOX.mkdir(parents=True, exist_ok=True)
-    DB.parent.mkdir(parents=True, exist_ok=True)
-
-    stem = f"{dt.date.today().isoformat()}-{slugify(args.title)}"
-    path = INBOX / f"{stem}.md"
-    counter = 2
-    while path.exists():
-        path = INBOX / f"{stem}-{counter}.md"
-        counter += 1
-
     body = args.body.strip() or "_Sem corpo ainda._"
     content = f"""---
 title: {json.dumps(args.title, ensure_ascii=False)}
@@ -93,7 +102,7 @@ status: {json.dumps(args.status)}
 ## Fonte
 {args.source or '_Sem fonte informada._'}
 """
-    path.write_text(content, encoding="utf-8")
+    path = _create_archive_item(args.title, content)
 
     con = connect(DB)
     ensure_schema(con)

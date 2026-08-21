@@ -6,6 +6,8 @@ validates the record schema into fully-typed runtime payloads.
 from __future__ import annotations
 
 import json
+import os
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -13,6 +15,13 @@ from typing import Any, Mapping, Sequence
 from .ids import validate_note_id, validate_section_ref
 
 MANIFEST_SCHEMA_VERSION = "v0.2"
+MAX_MANIFEST_BYTES = 1 * 1024 * 1024
+MAX_MANIFEST_RECORDS = 1_000
+MAX_PROJECTION_CONTENT_BYTES = 64 * 1024
+MAX_PROJECTION_TITLE_BYTES = 4 * 1024
+MAX_PROJECTION_SECTIONS = 64
+MAX_PROJECTION_SECTION_BYTES = 16 * 1024
+MAX_SCALAR_VALUE_BYTES = 4 * 1024
 
 MANIFEST_FIELDS = {
     "manifest_version",
@@ -69,6 +78,12 @@ def _as_str(value: Any, field: str) -> str:
     return normalized
 
 
+def _require_text_budget(value: str, field: str, limit: int) -> str:
+    if len(value.encode("utf-8")) > limit:
+        raise ValueError(f"{field} exceeds the {limit}-byte limit")
+    return value
+
+
 def _validate_no_path_shape(value: str, field: str) -> None:
     if value.startswith(("/", "\\")):
         raise ValueError(f"{field} must not be absolute")
@@ -103,6 +118,7 @@ def _ensure_scalar_mapping(field_name: str, value: Any, allowed_fields: frozense
         if isinstance(val, (Mapping, Sequence)) and not isinstance(val, (str, bytes)):
             raise ValueError(f"{field_name}.{normalized} must be scalar")
         if isinstance(val, str):
+            _require_text_budget(val, f"{field_name}.{normalized}", MAX_SCALAR_VALUE_BYTES)
             _validate_no_path_shape(val.strip(), f"{field_name}.{normalized}")
     return payload
 
@@ -123,25 +139,36 @@ def _ensure_projection_payload(value: Any) -> tuple[str, dict[str, str], str | N
         normalized = candidate_value.strip()
         if not normalized:
             raise ValueError("mcp_projection content must not be empty")
-        content = normalized
+        content = _require_text_budget(normalized, "mcp_projection content", MAX_PROJECTION_CONTENT_BYTES)
         break
     if content is None:
         raise ValueError("mcp_projection requires one of content, body, or text")
 
     title = None
     if "title" in projection:
-        title = _as_str(projection["title"], "mcp_projection.title")
+        title = _require_text_budget(
+            _as_str(projection["title"], "mcp_projection.title"),
+            "mcp_projection.title",
+            MAX_PROJECTION_TITLE_BYTES,
+        )
 
     sections: dict[str, str] = {}
     if "sections" in projection:
-        for key, value in _as_mapping(projection["sections"], "mcp_projection.sections").items():
+        raw_sections = _as_mapping(projection["sections"], "mcp_projection.sections")
+        if len(raw_sections) > MAX_PROJECTION_SECTIONS:
+            raise ValueError(f"mcp_projection.sections exceeds the {MAX_PROJECTION_SECTIONS}-section limit")
+        for key, value in raw_sections.items():
             normalized_key = validate_section_ref(key)
             if not isinstance(value, str):
                 raise ValueError("mcp_projection.sections values must be strings")
             normalized_value = value.strip()
             if not normalized_value:
                 raise ValueError("mcp_projection.section value must not be empty")
-            sections[normalized_key] = normalized_value
+            sections[normalized_key] = _require_text_budget(
+                normalized_value,
+                "mcp_projection.section value",
+                MAX_PROJECTION_SECTION_BYTES,
+            )
 
     return content, sections, title
 
@@ -193,6 +220,8 @@ def parse_projection_manifest_payload(payload: Mapping[str, Any]) -> ProjectionM
         raise ValueError("records must be a list")
     if not records_payload:
         raise ValueError("records must contain at least one record")
+    if len(records_payload) > MAX_MANIFEST_RECORDS:
+        raise ValueError(f"records exceeds the {MAX_MANIFEST_RECORDS}-record limit")
 
     records: list[ProjectionRecord] = []
     seen_ids: set[str] = set()
@@ -255,8 +284,27 @@ def parse_projection_manifest(path: str | Path) -> ProjectionManifest:
     manifest_path = Path(path)
     if manifest_path.is_symlink():
         raise ValueError(f"manifest path must not be a symlink: {manifest_path}")
-    payload = manifest_path.read_text(encoding="utf-8")
-    return parse_projection_manifest_payload(json.loads(payload))
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    fd = os.open(manifest_path, flags)
+    try:
+        metadata = os.fstat(fd)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ValueError(f"manifest path must be a regular file: {manifest_path}")
+        if metadata.st_size > MAX_MANIFEST_BYTES:
+            raise ValueError(f"manifest exceeds the {MAX_MANIFEST_BYTES}-byte input limit")
+        raw_payload = bytearray()
+        while len(raw_payload) <= MAX_MANIFEST_BYTES:
+            chunk = os.read(fd, min(64 * 1024, MAX_MANIFEST_BYTES + 1 - len(raw_payload)))
+            if not chunk:
+                break
+            raw_payload.extend(chunk)
+        if len(raw_payload) > MAX_MANIFEST_BYTES:
+            raise ValueError(f"manifest exceeds the {MAX_MANIFEST_BYTES}-byte input limit")
+    finally:
+        os.close(fd)
+    return parse_projection_manifest_payload(json.loads(bytes(raw_payload).decode("utf-8")))
 
 
 def manifest_records_to_core_payload(manifest: ProjectionManifest) -> tuple[dict[str, Any], ...]:

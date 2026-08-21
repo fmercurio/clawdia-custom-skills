@@ -6,8 +6,14 @@ import datetime as dt
 import json
 import os
 import re
+import secrets
 import sqlite3
+import stat
 from pathlib import Path
+
+
+class ArchiverPathError(ValueError):
+    """Raised when an Archiver filesystem path crosses a symlink boundary."""
 
 def _env_path(name: str, default: Path) -> Path:
     return Path(os.environ.get(name, str(default))).expanduser()
@@ -30,6 +36,183 @@ VAULT = _default_vault()
 DB = _default_db()
 
 
+def _require_secure_filesystem() -> None:
+    if (
+        os.open not in os.supports_dir_fd
+        or os.mkdir not in os.supports_dir_fd
+        or not hasattr(os, "O_NOFOLLOW")
+    ):
+        raise OSError("Archiver requires directory-relative no-follow filesystem support")
+
+
+def _absolute_path(path: Path | str) -> Path:
+    expanded = Path(path).expanduser()
+    return Path(os.path.abspath(os.fspath(expanded)))
+
+
+def _directory_flags() -> int:
+    _require_secure_filesystem()
+    return os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | os.O_NOFOLLOW
+
+
+def _open_absolute_directory(path: Path | str, *, create: bool) -> tuple[Path, int]:
+    target = _absolute_path(path)
+    flags = _directory_flags()
+    fd = os.open(os.sep, flags)
+    try:
+        for part in target.parts[1:]:
+            try:
+                next_fd = os.open(part, flags, dir_fd=fd)
+            except FileNotFoundError:
+                if not create:
+                    raise
+                os.mkdir(part, mode=0o700, dir_fd=fd)
+                next_fd = os.open(part, flags, dir_fd=fd)
+            os.close(fd)
+            fd = next_fd
+    except Exception:
+        os.close(fd)
+        raise
+    return target, fd
+
+
+def _relative_parts(relative: Path | str) -> tuple[str, ...]:
+    value = Path(relative)
+    if value.is_absolute() or not value.parts or any(part in {"", ".", ".."} for part in value.parts):
+        raise ArchiverPathError("path must be a non-empty relative path without traversal")
+    return value.parts
+
+
+def _open_directory_beneath(root: Path | str, parts: tuple[str, ...], *, create: bool) -> tuple[Path, int]:
+    root_path, fd = _open_absolute_directory(root, create=create)
+    flags = _directory_flags()
+    try:
+        for part in parts:
+            try:
+                next_fd = os.open(part, flags, dir_fd=fd)
+            except FileNotFoundError:
+                if not create:
+                    raise
+                os.mkdir(part, mode=0o700, dir_fd=fd)
+                next_fd = os.open(part, flags, dir_fd=fd)
+            os.close(fd)
+            fd = next_fd
+    except Exception:
+        os.close(fd)
+        raise
+    return root_path, fd
+
+
+def read_bytes_beneath(root: Path | str, relative: Path | str) -> bytes:
+    """Read a regular file below a no-follow root and parent chain."""
+    parts = _relative_parts(relative)
+    _root, directory_fd = _open_directory_beneath(root, parts[:-1], create=False)
+    try:
+        file_fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory_fd)
+        try:
+            if not stat.S_ISREG(os.fstat(file_fd).st_mode):
+                raise ArchiverPathError("source is not a regular file")
+            with os.fdopen(file_fd, "rb", closefd=False) as stream:
+                return stream.read()
+        finally:
+            os.close(file_fd)
+    finally:
+        os.close(directory_fd)
+
+
+def iter_regular_files_beneath(root: Path | str, suffix: str):
+    """Yield safe relative paths and bytes, skipping races and unsafe entries."""
+    root_path, root_fd = _open_absolute_directory(root, create=False)
+    os.close(root_fd)
+    for candidate in root_path.rglob(f"*{suffix}"):
+        try:
+            relative = candidate.relative_to(root_path)
+            yield relative, read_bytes_beneath(root_path, relative)
+        except (ArchiverPathError, FileNotFoundError, NotADirectoryError, OSError):
+            continue
+
+
+def create_text_beneath(root: Path | str, relative: Path | str, content: str) -> Path:
+    """Create a new private text file without following any path component."""
+    parts = _relative_parts(relative)
+    root_path, directory_fd = _open_directory_beneath(root, parts[:-1], create=True)
+    try:
+        file_fd = os.open(
+            parts[-1],
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            0o600,
+            dir_fd=directory_fd,
+        )
+        try:
+            with os.fdopen(file_fd, "w", encoding="utf-8", closefd=False) as stream:
+                stream.write(content)
+                stream.flush()
+                os.fsync(file_fd)
+        finally:
+            os.close(file_fd)
+    finally:
+        os.close(directory_fd)
+    return Path(root).expanduser().joinpath(*parts)
+
+
+def write_bytes_atomic(path: Path | str, content: bytes) -> Path:
+    """Replace one file atomically without following its parent chain or leaf."""
+    target = _absolute_path(path)
+    if target.parent == target:
+        raise ArchiverPathError("destination must name a file")
+    _parent, directory_fd = _open_absolute_directory(target.parent, create=True)
+    temp_name = f".archiver-{secrets.token_hex(16)}.tmp"
+    try:
+        file_fd = os.open(
+            temp_name,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            0o600,
+            dir_fd=directory_fd,
+        )
+        try:
+            with os.fdopen(file_fd, "wb", closefd=False) as stream:
+                stream.write(content)
+                stream.flush()
+                os.fsync(file_fd)
+        finally:
+            os.close(file_fd)
+        os.replace(temp_name, target.name, src_dir_fd=directory_fd, dst_dir_fd=directory_fd)
+    except Exception:
+        try:
+            os.unlink(temp_name, dir_fd=directory_fd)
+        except FileNotFoundError:
+            pass
+        raise
+    finally:
+        os.close(directory_fd)
+    return target
+
+
+def read_bytes_path(path: Path | str) -> bytes:
+    target = _absolute_path(path)
+    return read_bytes_beneath(target.parent, target.name)
+
+
+def _secure_database_path(db_path: Path | str, *, create: bool) -> Path:
+    target = _absolute_path(db_path)
+    _parent, directory_fd = _open_absolute_directory(target.parent, create=create)
+    try:
+        flags = os.O_RDWR if create else os.O_RDONLY
+        if create:
+            flags |= os.O_CREAT
+        file_fd = os.open(target.name, flags | os.O_NOFOLLOW, 0o600, dir_fd=directory_fd)
+        try:
+            if not stat.S_ISREG(os.fstat(file_fd).st_mode):
+                raise ArchiverPathError("database is not a regular file")
+            if create:
+                os.fchmod(file_fd, 0o600)
+        finally:
+            os.close(file_fd)
+    finally:
+        os.close(directory_fd)
+    return target
+
+
 def table_exists(con: sqlite3.Connection, table: str) -> bool:
     row = con.execute(
         "SELECT 1 FROM sqlite_master WHERE type IN ('table', 'view') AND name=?",
@@ -44,13 +227,12 @@ def table_columns(con: sqlite3.Connection, table: str) -> list[str]:
 
 def connect(db_path: Path | str | None = None) -> sqlite3.Connection:
     db = Path(db_path) if db_path is not None else DB
-    db.parent.mkdir(parents=True, exist_ok=True)
-    return sqlite3.connect(str(db))
+    return sqlite3.connect(str(_secure_database_path(db, create=True)))
 
 
 def connect_readonly(db_path: Path | str | None = None) -> sqlite3.Connection:
     db = Path(db_path) if db_path is not None else DB
-    db_uri = db.expanduser().resolve().as_uri()
+    db_uri = _secure_database_path(db, create=False).as_uri()
     return sqlite3.connect(f"{db_uri}?mode=ro", uri=True)
 
 

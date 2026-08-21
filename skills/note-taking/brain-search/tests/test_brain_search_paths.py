@@ -159,6 +159,18 @@ def test_init_db_rejects_symlinked_index_directory(monkeypatch, tmp_path):
     assert not (outside / "brain_search.sqlite").exists()
 
 
+def test_init_db_refuses_symlinked_gitignore_without_touching_its_target(monkeypatch, tmp_path):
+    vault = use_temp_vault(monkeypatch, tmp_path)
+    outside = tmp_path / "outside-gitignore"
+    outside.write_text("sentinel\n", encoding="utf-8")
+    (vault / ".gitignore").symlink_to(outside)
+
+    with pytest.raises(ValueError, match=".gitignore must be a regular"):
+        brain_search.init_db()
+
+    assert outside.read_text(encoding="utf-8") == "sentinel\n"
+
+
 def test_init_db_rejects_symlinked_index_database(monkeypatch, tmp_path):
     vault = use_temp_vault(monkeypatch, tmp_path)
     brain_search.DB_DIR.mkdir()

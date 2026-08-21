@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
+import brain_mcp.projection as projection
 from brain_mcp.projection import (
     ProjectionManifest,
     manifest_records_to_core_payload,
@@ -135,3 +138,25 @@ def test_parse_projection_manifest_rejects_symlink(tmp_path) -> None:
     link.symlink_to(target)
     with pytest.raises(ValueError, match="must not be a symlink"):
         parse_projection_manifest(link)
+
+
+def test_projection_manifest_applies_input_and_record_budgets(monkeypatch, tmp_path) -> None:
+    path = tmp_path / "manifest.json"
+    path.write_bytes(b"x" * 8)
+    monkeypatch.setattr(projection, "MAX_MANIFEST_BYTES", 4)
+    with pytest.raises(ValueError, match="input limit"):
+        parse_projection_manifest(path)
+
+    payload = valid_manifest_payload()
+    payload["records"].append(payload["records"][0].copy())
+    monkeypatch.setattr(projection, "MAX_MANIFEST_RECORDS", 1)
+    with pytest.raises(ValueError, match="record limit"):
+        parse_projection_manifest_payload(payload)
+
+
+def test_projection_manifest_applies_projection_text_budgets(monkeypatch) -> None:
+    payload = valid_manifest_payload()
+    payload["records"][0]["mcp_projection"]["content"] = "x" * 5
+    monkeypatch.setattr(projection, "MAX_PROJECTION_CONTENT_BYTES", 4)
+    with pytest.raises(ValueError, match="content exceeds"):
+        parse_projection_manifest_payload(payload)

@@ -20,6 +20,8 @@ import pytest
 SCRIPT_PATH = Path(__file__).resolve().parent.parent / "scripts" / "archive_weekly_review.py"
 CRON_PATH = Path(__file__).resolve().parent.parent / "scripts" / "archive_weekly_review_cron.py"
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent / "scripts"
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
 ARCHIVE_ITEM_PATH = SCRIPTS_DIR / "archive_item.py"
 ARCHIVER_RECALL_PATH = SCRIPTS_DIR / "archiver_recall.py"
 BACKFILL_PATH = SCRIPTS_DIR / "backfill_link_contexts.py"
@@ -1122,6 +1124,107 @@ def test_archive_item_recall_and_backfill_use_temporary_archiver_home(tmp_path):
     backfill_result = json.loads(backfill_payload.stdout)
     assert backfill_result["added_items"] >= 1
     assert backfill_result["added_links"] >= 1
+
+
+def test_archive_item_does_not_follow_a_broken_inbox_symlink(tmp_path):
+    home = tmp_path / "temp-home"
+    inbox = home / "archive-vault" / "00-inbox"
+    inbox.mkdir(parents=True)
+    outside = tmp_path / "outside.md"
+    title = "Symlink-safe archive item"
+    filename = f"{datetime.now().date().isoformat()}-symlink-safe-archive-item.md"
+    (inbox / filename).symlink_to(outside)
+
+    result = run_script(
+        ARCHIVE_ITEM_PATH,
+        ["--title", title, "--body", "safe body", "--no-extract", "--json"],
+        env={"ARCHIVER_HOME": str(home)},
+    )
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert not outside.exists()
+    assert payload["path"].endswith("-symlink-safe-archive-item-2.md")
+
+
+def test_archive_item_rejects_a_symlinked_vault_root(tmp_path):
+    home = tmp_path / "temp-home"
+    outside = tmp_path / "outside-vault"
+    outside.mkdir()
+    home.mkdir()
+    (home / "archive-vault").symlink_to(outside, target_is_directory=True)
+
+    result = run_script(
+        ARCHIVE_ITEM_PATH,
+        ["--title", "Unsafe root", "--body", "safe body", "--no-extract", "--json"],
+        env={"ARCHIVER_HOME": str(home)},
+    )
+
+    assert result.returncode != 0
+    assert not (outside / "00-inbox").exists()
+    assert not (outside / "90-meta").exists()
+
+
+def test_archive_item_rejects_a_symlinked_metadata_directory(tmp_path):
+    home = tmp_path / "temp-home"
+    vault = home / "archive-vault"
+    vault.mkdir(parents=True)
+    outside = tmp_path / "outside-metadata"
+    outside.mkdir()
+    (vault / "90-meta").symlink_to(outside, target_is_directory=True)
+
+    result = run_script(
+        ARCHIVE_ITEM_PATH,
+        ["--title", "Unsafe metadata", "--body", "safe body", "--no-extract", "--json"],
+        env={"ARCHIVER_HOME": str(home)},
+    )
+
+    assert result.returncode != 0
+    assert not (outside / "archiver.sqlite3").exists()
+
+
+def test_recall_and_backfill_skip_a_symlinked_markdown_note(tmp_path):
+    home = tmp_path / "temp-home"
+    vault = home / "archive-vault"
+    notes = vault / "notes"
+    notes.mkdir(parents=True)
+    (notes / "inside.md").write_text("# Inside\nnormal archive note\n", encoding="utf-8")
+    outside = tmp_path / "outside.md"
+    outside.write_text("# Outside\noutside-only-secret\nhttps://outside.example/path\n", encoding="utf-8")
+    (notes / "escape.md").symlink_to(outside)
+    env = {"ARCHIVER_HOME": str(home)}
+
+    recall_payload = run_script(
+        ARCHIVER_RECALL_PATH,
+        ["--json", "--query", "outside-only-secret", "--limit", "5"],
+        env=env,
+    )
+    assert recall_payload.returncode == 0
+    assert json.loads(recall_payload.stdout)["count"] == 0
+
+    backfill_payload = run_script(BACKFILL_PATH, ["--json"], env=env)
+    assert backfill_payload.returncode == 0
+    assert json.loads(backfill_payload.stdout)["added_items"] == 1
+
+
+def test_weekly_review_rejects_a_symlinked_output_parent(module_archive_review, tmp_path, monkeypatch):
+    freeze_time(monkeypatch, module_archive_review)
+    home = tmp_path / "archiver"
+    create_db(home).close()
+    outside = tmp_path / "outside-reports"
+    outside.mkdir()
+    reports = home / "reports"
+    reports.mkdir(parents=True)
+    (reports / "archive-reviews").symlink_to(outside, target_is_directory=True)
+
+    code, _out, err = run_main_error(
+        module_archive_review,
+        ["--archiver-home", str(home), "--output-dir", str(reports / "archive-reviews"), "--json"],
+    )
+
+    assert code == 2
+    assert "Unsafe index path" in err
+    assert not list(outside.iterdir())
 
 
 def test_archiver_db_legacy_link_contexts_migration_is_idempotent_and_upserts_without_duplicates(module_archiver_db, tmp_path):
