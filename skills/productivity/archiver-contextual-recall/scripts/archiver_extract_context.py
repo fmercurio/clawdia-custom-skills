@@ -2,10 +2,19 @@
 """Pure URL content extraction helpers for Archiver link contexts."""
 from __future__ import annotations
 
+import http.client
+import ipaddress
+import json
+import os
 import re
+import socket
+import ssl
+import subprocess
+import sys
+import time
 from importlib import import_module
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from pathlib import Path
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
 HTML_TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 HTML_META_DESCRIPTION_RE = re.compile(
@@ -15,6 +24,135 @@ HTML_META_DESCRIPTION_RE = re.compile(
 HTML_TAG_RE = re.compile(r"<[^>]+>")
 PDF_PAGE_LIMIT = 12
 PDF_TEXT_LIMIT = 20000
+PDF_MAX_BYTES = 8_000_000
+PDF_WORKER_TIMEOUT_SECONDS = 5
+PDF_WORKER_CPU_SECONDS = 4
+PDF_WORKER_MAX_MEMORY_BYTES = 256 * 1024 * 1024
+PDF_WORKER_MAX_RESULT_BYTES = 128 * 1024
+PDF_WORKER_POLL_SECONDS = 0.05
+MAX_REDIRECTS = 5
+
+
+class UnsafeUrlError(ValueError):
+    """Raised when an extraction URL crosses a forbidden network boundary."""
+
+
+class _PinnedHTTPConnection(http.client.HTTPConnection):
+    def __init__(self, host: str, port: int, address: str, timeout: int):
+        super().__init__(host, port, timeout=timeout)
+        self._address = address
+
+    def connect(self) -> None:
+        self.sock = socket.create_connection((self._address, self.port), self.timeout)
+
+
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    def __init__(self, host: str, port: int, address: str, timeout: int):
+        super().__init__(host, port, timeout=timeout, context=ssl.create_default_context())
+        self._address = address
+
+    def connect(self) -> None:
+        sock = socket.create_connection((self._address, self.port), self.timeout)
+        self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
+
+
+def _resolve_public_address(host: str, port: int) -> str:
+    try:
+        records = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    except socket.gaierror as exc:
+        raise UnsafeUrlError("resolution_failed") from exc
+
+    addresses: list[str] = []
+    for record in records:
+        address = record[4][0]
+        try:
+            parsed = ipaddress.ip_address(address.split("%", 1)[0])
+        except ValueError as exc:
+            raise UnsafeUrlError("invalid_resolved_address") from exc
+        if not parsed.is_global:
+            raise UnsafeUrlError("non_public_address")
+        if address not in addresses:
+            addresses.append(address)
+
+    if not addresses:
+        raise UnsafeUrlError("resolution_failed")
+    return addresses[0]
+
+
+def _parse_public_url(url: str) -> tuple[str, str, int, str]:
+    try:
+        parsed = urlsplit(url)
+        port = parsed.port
+    except ValueError as exc:
+        raise UnsafeUrlError("invalid_url") from exc
+
+    scheme = parsed.scheme.lower()
+    if scheme not in {"http", "https"}:
+        raise UnsafeUrlError("unsupported_scheme")
+    if parsed.username is not None or parsed.password is not None:
+        raise UnsafeUrlError("credentials_not_allowed")
+    if not parsed.hostname:
+        raise UnsafeUrlError("missing_host")
+
+    target_path = parsed.path or "/"
+    if not target_path.startswith("/"):
+        target_path = f"/{target_path}"
+    target = urlunsplit(("", "", target_path, parsed.query, ""))
+    return scheme, parsed.hostname, port or (443 if scheme == "https" else 80), target
+
+
+def _make_connection(
+    scheme: str,
+    host: str,
+    port: int,
+    address: str,
+    timeout: int,
+) -> http.client.HTTPConnection:
+    if scheme == "https":
+        return _PinnedHTTPSConnection(host, port, address, timeout)
+    return _PinnedHTTPConnection(host, port, address, timeout)
+
+
+def _fetch_public_url(
+    url: str,
+    timeout: int,
+    max_bytes: int,
+    pdf_max_bytes: int,
+) -> tuple[str, str, bytes]:
+    current_url = url
+    for _ in range(MAX_REDIRECTS + 1):
+        scheme, host, port, target = _parse_public_url(current_url)
+        address = _resolve_public_address(host, port)
+        connection = _make_connection(scheme, host, port, address, timeout)
+        try:
+            connection.request("GET", target, headers={"User-Agent": "ArchiverContextBot/1.0"})
+            response = connection.getresponse()
+            if 300 <= response.status < 400:
+                location = response.headers.get("Location")
+                if not location:
+                    raise UnsafeUrlError("redirect_without_location")
+                current_url = urljoin(current_url, location)
+                continue
+            if response.status >= 400:
+                raise ValueError(f"http_status_{response.status}")
+            content_type = (response.headers.get("Content-Type") or "").lower()
+            media_type = content_type.split(";", 1)[0].strip()
+            limit = pdf_max_bytes if media_type == "application/pdf" or _is_pdf_url(current_url) else max_bytes
+            declared_length = response.headers.get("Content-Length")
+            if declared_length is not None:
+                try:
+                    exceeds_limit = int(declared_length) > limit
+                except ValueError:
+                    exceeds_limit = False
+                if exceeds_limit:
+                    raise ValueError(f"response exceeds the {limit}-byte input limit")
+            raw_bytes = response.read(limit + 1)
+            if len(raw_bytes) > limit:
+                raise ValueError(f"response exceeds the {limit}-byte input limit")
+            return current_url, content_type, raw_bytes
+        finally:
+            connection.close()
+    raise UnsafeUrlError("redirect_limit")
 
 
 def _strip_html(text: str) -> str:
@@ -102,7 +240,7 @@ def _clean_pdf_text(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def _extract_pdf_context(url: str, raw_bytes: bytes) -> dict[str, object]:
+def _extract_pdf_context_in_process(url: str, raw_bytes: bytes) -> dict[str, object]:
     try:
         fitz = import_module("fitz")
     except ImportError:
@@ -166,29 +304,139 @@ def _extract_pdf_context(url: str, raw_bytes: bytes) -> dict[str, object]:
     }
 
 
+def _limit_pdf_worker() -> None:
+    """Install limits in the short-lived parser process before it handles input."""
+    import resource
+
+    resource.setrlimit(resource.RLIMIT_CPU, (PDF_WORKER_CPU_SECONDS, PDF_WORKER_CPU_SECONDS))
+
+
+def _worker_rss_bytes(pid: int) -> int | None:
+    """Return a worker RSS sample without inspecting the parsed document."""
+    if sys.platform == "darwin":
+        try:
+            result = subprocess.run(
+                ["/bin/ps", "-o", "rss=", "-p", str(pid)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                timeout=1,
+            )
+            text = result.stdout.decode("ascii").strip()
+            return int(text) * 1024 if result.returncode == 0 and text.isdecimal() else None
+        except (OSError, subprocess.SubprocessError, UnicodeDecodeError, ValueError):
+            return None
+
+    try:
+        for line in Path(f"/proc/{pid}/status").read_text(encoding="utf-8").splitlines():
+            if line.startswith("VmRSS:"):
+                fields = line.split()
+                return int(fields[1]) * 1024
+    except (OSError, ValueError, IndexError):
+        return None
+    return None
+
+
+def _run_pdf_worker(raw_bytes: bytes) -> tuple[str, bytes]:
+    if os.name != "posix":
+        return "limits_unavailable", b""
+    try:
+        process = subprocess.Popen(
+            [sys.executable, str(Path(__file__).resolve()), "--pdf-worker"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            preexec_fn=_limit_pdf_worker,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return "limits_unavailable", b""
+
+    try:
+        assert process.stdin is not None
+        process.stdin.write(raw_bytes)
+        process.stdin.close()
+        deadline = time.monotonic() + PDF_WORKER_TIMEOUT_SECONDS
+        while process.poll() is None:
+            if time.monotonic() >= deadline:
+                process.kill()
+                process.wait()
+                return "timeout", b""
+            rss_bytes = _worker_rss_bytes(process.pid)
+            if rss_bytes is None:
+                process.kill()
+                process.wait()
+                return "limits_unavailable", b""
+            if rss_bytes > PDF_WORKER_MAX_MEMORY_BYTES:
+                process.kill()
+                process.wait()
+                return "memory_limit", b""
+            time.sleep(PDF_WORKER_POLL_SECONDS)
+        assert process.stdout is not None
+        output = process.stdout.read(PDF_WORKER_MAX_RESULT_BYTES + 1)
+    except (OSError, subprocess.SubprocessError):
+        if process.poll() is None:
+            try:
+                process.kill()
+                process.wait()
+            except (OSError, subprocess.SubprocessError):
+                pass
+        return "limits_unavailable", b""
+
+    if process.returncode != 0 or len(output) > PDF_WORKER_MAX_RESULT_BYTES:
+        return "failed", b""
+    return "ok", output
+
+
+def _pdf_worker_main() -> int:
+    raw_bytes = sys.stdin.buffer.read(PDF_MAX_BYTES + 1)
+    if len(raw_bytes) > PDF_MAX_BYTES:
+        result = _error_payload("", "failed", f"pdf exceeds the {PDF_MAX_BYTES}-byte input limit", "pymupdf")
+    else:
+        result = _extract_pdf_context_in_process("", raw_bytes)
+    sys.stdout.write(json.dumps(result, ensure_ascii=False))
+    return 0
+
+
+def _extract_pdf_context(url: str, raw_bytes: bytes, max_bytes: int = PDF_MAX_BYTES) -> dict[str, object]:
+    if len(raw_bytes) > max_bytes:
+        return _error_payload(url, "failed", f"pdf exceeds the {max_bytes}-byte input limit", "pymupdf")
+    status, output = _run_pdf_worker(raw_bytes)
+    if status == "timeout":
+        return _error_payload(url, "failed", "pdf_worker_timeout", "pymupdf")
+    if status == "memory_limit":
+        return _error_payload(url, "failed", "pdf_worker_memory_limit", "pymupdf")
+    if status != "ok":
+        return _error_payload(url, "failed", "pdf_worker_limits_unavailable", "pymupdf")
+
+    try:
+        result = json.loads(output.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return _error_payload(url, "failed", "pdf_worker_failed", "pymupdf")
+    if not isinstance(result, dict):
+        return _error_payload(url, "failed", "pdf_worker_failed", "pymupdf")
+    result["url"] = url
+    return result
+
+
 def extract_url_context(
     url: str,
     timeout: int = 5,
     max_bytes: int = 512000,
-    pdf_max_bytes: int = 8_000_000,
+    pdf_max_bytes: int = PDF_MAX_BYTES,
 ) -> dict[str, object]:
-    if not url.startswith(("http://", "https://")):
-        return _error_payload(url, "unsupported_content_type", "URL sem suporte para extração")
-
-    request = Request(url, headers={"User-Agent": "ArchiverContextBot/1.0"})
     try:
-        with urlopen(request, timeout=timeout) as response:
-            content_type = (response.headers.get("Content-Type") or "").lower()
-            media_type = content_type.split(";", 1)[0].strip()
-            is_pdf = media_type == "application/pdf" or _is_pdf_url(url)
-            if media_type not in {"text/html", "text/plain"} and not is_pdf:
-                return _error_payload(url, "unsupported_content_type", "Tipo de conteúdo sem suporte")
-            raw_bytes = response.read(pdf_max_bytes if is_pdf else max_bytes)
-    except (URLError, HTTPError, TimeoutError, OSError, ValueError) as exc:
+        final_url, content_type, raw_bytes = _fetch_public_url(url, timeout, max_bytes, pdf_max_bytes)
+    except UnsafeUrlError as exc:
+        return _error_payload(url, "failed", f"unsafe_url:{exc}")
+    except (TimeoutError, OSError, ValueError, http.client.HTTPException, ssl.SSLError) as exc:
         return _error_payload(url, "failed", str(exc))
 
+    media_type = content_type.split(";", 1)[0].strip()
+    is_pdf = media_type == "application/pdf" or _is_pdf_url(final_url)
+    if media_type not in {"text/html", "text/plain"} and not is_pdf:
+        return _error_payload(url, "unsupported_content_type", "Tipo de conteúdo sem suporte")
     if is_pdf:
-        return _extract_pdf_context(url, raw_bytes)
+        return _extract_pdf_context(final_url, raw_bytes, pdf_max_bytes)
 
     try:
         charset_match = re.search(r"charset=([^;\s]+)", content_type or "")
@@ -222,3 +470,7 @@ def extract_url_context(
         "extractor": "urllib.request",
         "error": None,
     }
+
+
+if __name__ == "__main__" and sys.argv[1:] == ["--pdf-worker"]:
+    raise SystemExit(_pdf_worker_main())

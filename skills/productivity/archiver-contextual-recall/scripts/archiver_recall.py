@@ -10,7 +10,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from archiver_db import DB, VAULT, connect_readonly, table_columns, table_exists
+from archiver_db import DB, VAULT, connect_readonly, iter_regular_files_beneath, table_columns, table_exists
 
 SKIP_PREFIXES = {"90-meta", "attachments"}
 URL_PREFIX_RE = re.compile(r"\bhttps?://[^\s<>'\"`\]\[(){}]+")
@@ -81,7 +81,7 @@ def parse_iso_datetime(value: str | None) -> dt.datetime | None:
     return parsed
 
 
-def parse_frontmatter(path: Path) -> dict[str, Any]:
+def parse_frontmatter_text(path: Path, text: str) -> dict[str, Any]:
     data: dict[str, Any] = {
         "title": path.stem,
         "source": "",
@@ -89,7 +89,6 @@ def parse_frontmatter(path: Path) -> dict[str, Any]:
         "tags": [],
         "created": "",
     }
-    text = path.read_text(encoding="utf-8", errors="ignore")
     if not text.startswith("---\n"):
         return data
     lines = text.splitlines()
@@ -414,77 +413,79 @@ def collect_db_results(query: str, limit: int, status: str | None) -> list[dict[
 
 
 def collect_note_results(query: str, limit: int, status: str | None) -> list[dict[str, Any]]:
-    if not VAULT.exists():
-        return []
     out = []
     query_l = query.lower()
     query_tokens = _tokenize(query_l)
-    for md_path in VAULT.rglob("*.md"):
-        rel_parts = md_path.relative_to(VAULT).parts
-        if rel_parts and rel_parts[0] in SKIP_PREFIXES:
-            continue
-        text = md_path.read_text(encoding="utf-8", errors="ignore")
-        meta = parse_frontmatter(md_path)
-        if status and _normalize_status(meta.get("status", "")) != _normalize_status(status):
-            continue
-        source = meta.get("source", "")
-        title = meta.get("title", md_path.stem)
-        tags = meta.get("tags", [])
-        if not isinstance(tags, list):
-            tags = []
+    try:
+        notes = iter_regular_files_beneath(VAULT, ".md")
+        for relative_path, raw in notes:
+            rel_parts = relative_path.parts
+            if rel_parts and rel_parts[0] in SKIP_PREFIXES:
+                continue
+            text = raw.decode("utf-8", errors="ignore")
+            meta = parse_frontmatter_text(relative_path, text)
+            if status and _normalize_status(meta.get("status", "")) != _normalize_status(status):
+                continue
+            source = meta.get("source", "")
+            title = meta.get("title", relative_path.stem)
+            tags = meta.get("tags", [])
+            if not isinstance(tags, list):
+                tags = []
 
-        lower_text = text.lower()
-        lower_title = str(title).lower()
-        lower_source = str(source).lower()
-        lower_tags = " ".join(str(x).lower() for x in tags)
-        lower_path = str(md_path.relative_to(VAULT)).lower()
+            lower_text = text.lower()
+            lower_title = str(title).lower()
+            lower_source = str(source).lower()
+            lower_tags = " ".join(str(x).lower() for x in tags)
+            lower_path = str(relative_path).lower()
 
-        if query:
-            haystack = "\n".join([lower_title, lower_source, lower_tags, lower_path, lower_text])
-            if query_l not in haystack:
-                note_tokens = set(_tokenize(haystack))
-                if not any(token in note_tokens for token in query_tokens):
-                    continue
+            if query:
+                haystack = "\n".join([lower_title, lower_source, lower_tags, lower_path, lower_text])
+                if query_l not in haystack:
+                    note_tokens = set(_tokenize(haystack))
+                    if not any(token in note_tokens for token in query_tokens):
+                        continue
 
-        created = parse_iso_datetime(meta.get("created", ""))
-        why = ""
-        if query:
-            if query_l in lower_title:
-                why = "correspondência no título da nota"
-            elif query_l in lower_source:
-                why = "correspondência na fonte"
-            elif query_l in lower_tags:
-                why = "correspondência nas etiquetas da nota"
-            elif query_l in lower_path:
-                why = "correspondência no caminho da nota"
-            elif query_l in lower_text:
-                why = "correspondência no conteúdo da nota"
-            else:
-                field_tokens = {
-                    "título da nota": _to_token_set(lower_title),
-                    "fonte da nota": _to_token_set(lower_source),
-                    "etiquetas da nota": _to_token_set(lower_tags),
-                    "caminho da nota": _to_token_set(lower_path),
-                    "conteúdo da nota": _to_token_set(lower_text),
-                }
-                for label, values in field_tokens.items():
-                    if any(token in values for token in query_tokens):
-                        why = f"correspondência por token em {label}"
-                        break
-                if not why:
-                    why = "correspondência no item"
+            created = parse_iso_datetime(meta.get("created", ""))
+            why = ""
+            if query:
+                if query_l in lower_title:
+                    why = "correspondência no título da nota"
+                elif query_l in lower_source:
+                    why = "correspondência na fonte"
+                elif query_l in lower_tags:
+                    why = "correspondência nas etiquetas da nota"
+                elif query_l in lower_path:
+                    why = "correspondência no caminho da nota"
+                elif query_l in lower_text:
+                    why = "correspondência no conteúdo da nota"
+                else:
+                    field_tokens = {
+                        "título da nota": _to_token_set(lower_title),
+                        "fonte da nota": _to_token_set(lower_source),
+                        "etiquetas da nota": _to_token_set(lower_tags),
+                        "caminho da nota": _to_token_set(lower_path),
+                        "conteúdo da nota": _to_token_set(lower_text),
+                    }
+                    for label, values in field_tokens.items():
+                        if any(token in values for token in query_tokens):
+                            why = f"correspondência por token em {label}"
+                            break
+                    if not why:
+                        why = "correspondência no item"
 
-        out.append({
-            "source": source,
-            "title": title,
-            "url": source,
-            "tags": [str(x) for x in tags if str(x).strip()],
-            "status": meta.get("status", ""),
-            "path": str(md_path.relative_to(VAULT)),
-            "created_at": created.isoformat() if created else "",
-            "path_type": "markdown",
-            "why": why,
-        })
+            out.append({
+                "source": source,
+                "title": title,
+                "url": source,
+                "tags": [str(x) for x in tags if str(x).strip()],
+                "status": meta.get("status", ""),
+                "path": str(relative_path),
+                "created_at": created.isoformat() if created else "",
+                "path_type": "markdown",
+                "why": why,
+            })
+    except (FileNotFoundError, NotADirectoryError, OSError):
+        return []
     out.sort(key=lambda item: item["created_at"], reverse=True)
     return out[:limit]
 
