@@ -18,6 +18,7 @@ from pathlib import Path
 from playwright.sync_api import Error as PlaywrightError, sync_playwright
 
 EXPECTED_ONEDRIVE_DOWNLOAD_HOST = "my.microsoftpersonalcontent.com"
+APPROVED_ONEDRIVE_SHARE_HOSTS = {"1drv.ms", "onedrive.live.com"}
 MAX_XML_FILES = 100
 MAX_XML_BYTES = 10 * 1024 * 1024
 MAX_TOTAL_XML_BYTES = 100 * 1024 * 1024
@@ -79,6 +80,23 @@ def is_expected_onedrive_download_url(url: str) -> bool:
     )
 
 
+def is_approved_onedrive_share_url(url: str) -> bool:
+    """Allow browser navigation only to known public OneDrive share origins."""
+    parsed = urllib.parse.urlsplit(url)
+    host = (parsed.hostname or "").lower()
+    try:
+        port = parsed.port
+    except ValueError:
+        return False
+    return (
+        parsed.scheme == "https"
+        and not parsed.username
+        and not parsed.password
+        and (port is None or port == 443)
+        and (host in APPROVED_ONEDRIVE_SHARE_HOSTS or host.endswith(".sharepoint.com"))
+    )
+
+
 def extract_valid_xml_body(responses, *, max_bytes: int | None = None) -> bytes | None:
     max_bytes = MAX_XML_BYTES if max_bytes is None else max_bytes
     for resp in reversed(responses):
@@ -118,6 +136,9 @@ def main() -> int:
     ap.add_argument("--out", required=True, help="Output directory")
     ap.add_argument("--timeout-ms", type=int, default=60000)
     args = ap.parse_args()
+
+    if not is_approved_onedrive_share_url(args.url):
+        raise SystemExit("OneDrive shared folder URL must use an approved HTTPS OneDrive origin")
 
     out = Path(args.out).expanduser()
     out = ensure_private_dir(out)

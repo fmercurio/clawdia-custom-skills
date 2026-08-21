@@ -2,6 +2,7 @@ import importlib.util
 import stat
 import sys
 import types
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -144,9 +145,26 @@ def test_match_spreadsheet_rejects_oversized_sheet(monkeypatch, tmp_path):
             return Sheet()
 
     monkeypatch.setattr(module.openpyxl, "load_workbook", lambda *args, **kwargs: Workbook())
+    monkeypatch.setattr(module, "validate_xlsx_archive", lambda _source: None)
     monkeypatch.setattr(module, "MAX_SHEET_ROWS", 2)
 
     with pytest.raises(ValueError, match="row limit"):
+        module.parse_sheet(str(source))
+
+
+def test_match_spreadsheet_rejects_expanding_zip_before_loading(monkeypatch, tmp_path):
+    module = load_match_script(monkeypatch)
+    source = tmp_path / "sheet.xlsx"
+    with zipfile.ZipFile(source, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("xl/sharedStrings.xml", b"a" * 128)
+    monkeypatch.setattr(module, "MAX_XLSX_UNCOMPRESSED_BYTES", 64)
+    monkeypatch.setattr(
+        module.openpyxl,
+        "load_workbook",
+        lambda *_args, **_kwargs: pytest.fail("workbook must not load"),
+    )
+
+    with pytest.raises(ValueError, match="expanded limit"):
         module.parse_sheet(str(source))
 
 
@@ -222,6 +240,17 @@ def test_onedrive_downloader_accepts_only_expected_download_origin(monkeypatch):
     assert not module.is_expected_onedrive_download_url(
         "http://my.microsoftpersonalcontent.com/_layouts/15/download.aspx?UniqueId=abc"
     )
+
+
+def test_onedrive_downloader_accepts_only_approved_initial_share_origins(monkeypatch):
+    module = load_download_script(monkeypatch)
+
+    assert module.is_approved_onedrive_share_url("https://1drv.ms/f/s!example")
+    assert module.is_approved_onedrive_share_url("https://onedrive.live.com/?id=example")
+    assert module.is_approved_onedrive_share_url("https://tenant-my.sharepoint.com/:f:/g/personal/example")
+    assert not module.is_approved_onedrive_share_url("https://attacker.example/share")
+    assert not module.is_approved_onedrive_share_url("http://1drv.ms/f/s!example")
+    assert not module.is_approved_onedrive_share_url("https://user:pass@1drv.ms/f/s!example")
 
 
 def test_onedrive_downloader_does_not_reuse_stale_responses(monkeypatch):
