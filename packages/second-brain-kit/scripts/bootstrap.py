@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from kitlib import REQUIRED_DIRS, ROOT_DOCS, config_path, default_config, hermes_home, load_config, require_supported_python, save_config, write_if_missing
+from kitlib import REQUIRED_DIRS, ROOT_DOCS, config_path, default_config, hermes_home, load_config, private_directory, require_supported_python, save_config, write_if_missing
 
 
 def audit(vault: Path) -> dict:
@@ -20,12 +20,15 @@ def audit(vault: Path) -> dict:
 
 def create_vault(vault: Path, owner: str, organization: str | None) -> list[str]:
     created: list[str] = []
-    vault.mkdir(parents=True, exist_ok=True)
+    vault.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if not vault.is_dir():
+        raise ValueError(f"vault is not a directory: {vault}")
+    vault.chmod(0o700)
     for name in REQUIRED_DIRS:
         path = vault / name
         if not path.exists():
-            path.mkdir(parents=True)
             created.append(str(path))
+        private_directory(vault, Path(name))
     org_line = f"\nOrganization: {organization}." if organization else ""
     docs = {
         "README.md": f"# Second Brain\n\nOwner: {owner}.{org_line}\n\nA private-by-default Markdown knowledge vault managed by second-brain-kit.\n",
@@ -85,11 +88,21 @@ def main() -> int:
             print(json.dumps(report, ensure_ascii=False, indent=2))
             return 2
     if args.apply:
-        if not args.existing:
-            report["created"] = create_vault(vault, args.owner, args.organization)
-        cfg = default_config(args.owner, vault, args.profile, args.organization, args.mode, "existing" if args.existing else "new")
-        save_config(cfg_path, cfg)
-        report["config"] = str(cfg_path)
+        try:
+            home.mkdir(mode=0o700, parents=True, exist_ok=True)
+            if not home.is_dir():
+                raise ValueError(f"Hermes home is not a directory: {home}")
+            home.chmod(0o700)
+            private_directory(home, Path("second-brain-kit") / "profiles" / args.profile)
+            if not args.existing:
+                report["created"] = create_vault(vault, args.owner, args.organization)
+            cfg = default_config(args.owner, vault, args.profile, args.organization, args.mode, "existing" if args.existing else "new")
+            save_config(cfg_path, cfg)
+            report["config"] = str(cfg_path)
+        except (OSError, ValueError) as exc:
+            report["error"] = str(exc)
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+            return 2
     report["after"] = audit(vault)
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0

@@ -51,6 +51,13 @@ class TestKitE2E(unittest.TestCase):
     def install(self, *extra):
         return run("install.py", "--hermes-home", str(self.home), "--profile", self.profile, "--apply", "--json", *extra)
 
+    def enable_restricted_search(self):
+        config = self.home / "second-brain-kit" / "profiles" / self.profile / "config.yaml"
+        payload = json.loads(config.read_text(encoding="utf-8"))
+        payload["sensitivity"]["restricted_search"] = True
+        config.write_text(json.dumps(payload), encoding="utf-8")
+        config.chmod(0o600)
+
     def test_zero_state_install_is_idempotent_and_doctor_passes(self):
         first = json.loads(self.bootstrap().stdout)
         second = json.loads(self.bootstrap().stdout)
@@ -62,6 +69,32 @@ class TestKitE2E(unittest.TestCase):
             self.assertTrue((skill_root / name / "SKILL.md").is_file())
         report = json.loads(run("doctor.py", "--hermes-home", str(self.home), "--profile", self.profile, "--smoke", "--json").stdout)
         self.assertTrue(report["ok"], report)
+
+    def test_new_vault_and_profile_are_owner_private_regardless_of_umask(self):
+        old_umask = os.umask(0)
+        try:
+            self.bootstrap()
+        finally:
+            os.umask(old_umask)
+
+        self.assertEqual(stat.S_IMODE(self.vault.stat().st_mode), 0o700)
+        for name in ("00_Inbox", "10_Projects", "20_Areas", "30_Resources", "40_Archives", "50_Templates", "_Hermes", "_Meta"):
+            self.assertEqual(stat.S_IMODE((self.vault / name).stat().st_mode), 0o700)
+        for name in ("README.md", "MAPA.md", "PARA.md", "HERMES.md", ".gitignore"):
+            self.assertEqual(stat.S_IMODE((self.vault / name).stat().st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE((self.vault / "50_Templates" / "canonical-note.md").stat().st_mode), 0o600)
+        config = self.home / "second-brain-kit" / "profiles" / self.profile / "config.yaml"
+        self.assertEqual(stat.S_IMODE(config.stat().st_mode), 0o600)
+
+        self.vault.chmod(0o755)
+        (self.vault / "30_Resources").chmod(0o755)
+        (self.vault / "README.md").chmod(0o644)
+        config.chmod(0o644)
+        self.bootstrap()
+        self.assertEqual(stat.S_IMODE(self.vault.stat().st_mode), 0o700)
+        self.assertEqual(stat.S_IMODE((self.vault / "30_Resources").stat().st_mode), 0o700)
+        self.assertEqual(stat.S_IMODE((self.vault / "README.md").stat().st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE(config.stat().st_mode), 0o600)
 
     def test_python_version_preflight_matches_the_documented_minimum_before_writes(self):
         result = run(
@@ -140,6 +173,39 @@ class TestKitE2E(unittest.TestCase):
         self.assertIn("symlinked package source", result.stdout)
         self.assertFalse((hermes_home / "profiles" / self.profile / "skills" / "note-taking" / "brain-search" / "SKILL.md").exists())
 
+    def test_install_refuses_symlinked_destination_directory(self):
+        self.bootstrap()
+        destination = self.home / "profiles" / self.profile / "skills"
+        outside = self.root / "outside-runtime"
+        outside.mkdir()
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.symlink_to(outside, target_is_directory=True)
+
+        result = run(
+            "install.py", "--hermes-home", str(self.home), "--profile", self.profile,
+            "--apply", "--json", check=False,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(any(outside.rglob("*")))
+
+    def test_forced_install_refuses_symlinked_destination_file(self):
+        self.bootstrap()
+        self.install()
+        managed = self.home / "second-brain-kit" / "bin" / "doctor.py"
+        outside = self.root / "outside-doctor.py"
+        outside.write_text("sentinel", encoding="utf-8")
+        managed.unlink()
+        managed.symlink_to(outside)
+
+        result = run(
+            "install.py", "--hermes-home", str(self.home), "--profile", self.profile,
+            "--apply", "--force", "--json", check=False,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(outside.read_text(encoding="utf-8"), "sentinel")
+
     def test_nonempty_vault_cannot_be_bootstrapped_as_new(self):
         self.vault.mkdir()
         (self.vault / "legacy.md").write_text("# Existing\n", encoding="utf-8")
@@ -182,10 +248,19 @@ class TestKitE2E(unittest.TestCase):
         self.assertEqual(json.loads(result.stdout)["results"], [])
         stats = subprocess.run([PYTHON, str(search), "--vault", str(self.vault), "--stats", "--json"], check=True, capture_output=True, text=True)
         self.assertEqual(json.loads(stats.stdout)["restricted_indexed"], 0)
-        subprocess.run([PYTHON, str(search), "--vault", str(self.vault), "--rebuild", "--include-restricted", "--json"], check=True, capture_output=True, text=True)
+        denied = subprocess.run(
+            [PYTHON, str(search), "--vault", str(self.vault), "--rebuild", "--include-restricted", "--hermes-home", str(self.home), "--profile", self.profile, "--json"],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(denied.returncode, 2)
+        self.assertIn("restricted search requires owner policy", denied.stdout)
+        self.enable_restricted_search()
+        restricted_args = ["--include-restricted", "--hermes-home", str(self.home), "--profile", self.profile]
+        subprocess.run([PYTHON, str(search), "--vault", str(self.vault), "--rebuild", *restricted_args, "--json"], check=True, capture_output=True, text=True)
         result = subprocess.run([PYTHON, str(search), "--vault", str(self.vault), "--query", "ultrasecret", "--json"], check=True, capture_output=True, text=True)
         self.assertEqual(json.loads(result.stdout)["results"], [])
-        result = subprocess.run([PYTHON, str(search), "--vault", str(self.vault), "--query", "ultrasecret", "--include-restricted", "--json"], check=True, capture_output=True, text=True)
+        result = subprocess.run([PYTHON, str(search), "--vault", str(self.vault), "--query", "ultrasecret", *restricted_args, "--json"], check=True, capture_output=True, text=True)
         self.assertEqual(len(json.loads(result.stdout)["results"]), 1)
 
     def test_restricted_yaml_comment_fails_closed_for_search_and_render(self):
@@ -234,7 +309,7 @@ class TestKitE2E(unittest.TestCase):
         restricted_path = Path(json.loads(restricted.stdout)["path"])
         internal_path = Path(json.loads(internal.stdout)["path"])
         self.assertEqual(stat.S_IMODE(restricted_path.stat().st_mode), 0o600)
-        self.assertEqual(stat.S_IMODE(internal_path.stat().st_mode), 0o644)
+        self.assertEqual(stat.S_IMODE(internal_path.stat().st_mode), 0o600)
 
     def test_retrieval_skills_mark_vault_content_as_untrusted_data(self):
         expected = "untrusted reference data"
@@ -277,13 +352,14 @@ class TestKitE2E(unittest.TestCase):
 
     def test_search_index_enforces_owner_only_permissions(self):
         self.bootstrap()
+        self.enable_restricted_search()
         restricted = self.vault / "30_Resources" / "restricted-mode.md"
         restricted.write_text("---\nsensitivity: restricted\n---\n# Private\nsecret\n", encoding="utf-8")
         search = PACKAGE / "skills" / "brain-search" / "scripts" / "brain_search.py"
         old_umask = os.umask(0o022)
         try:
             result = subprocess.run(
-                [PYTHON, str(search), "--vault", str(self.vault), "--rebuild", "--include-restricted", "--json"],
+                [PYTHON, str(search), "--vault", str(self.vault), "--rebuild", "--include-restricted", "--hermes-home", str(self.home), "--profile", self.profile, "--json"],
                 capture_output=True, text=True,
             )
         finally:

@@ -35,6 +35,7 @@ python3 scripts/install.py --hermes-home "$HERMES_HOME" --profile second-brain -
 This creates deterministic, owner-only artifact files outside the vault at:
 - `second-brain-kit/instances/<instance>/runtime-config.json`
 - `second-brain-kit/instances/<instance>/policy.json`
+- `second-brain-kit/instances/<instance>/access-token` (generated local bearer token)
 - `second-brain-kit/instances/<instance>/projection-manifest.json` (expected by policy; external manifest path is not created automatically)
 
 It also installs helper scripts under `second-brain-kit/bin`:
@@ -49,6 +50,7 @@ The generated MCP configuration now contains a runtime contract for local valida
 - `transport` (`http`)
 - `listener` with explicit `host`, `port`, and `path` contract
 - `policy_path` and `projection_manifest_path` as instance-relative artifact names
+- `auth_token_path` as the instance-relative owner-only bearer-token file
 
 Use the runner with trusted local files:
 

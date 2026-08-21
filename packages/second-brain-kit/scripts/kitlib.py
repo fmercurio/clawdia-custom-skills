@@ -6,6 +6,7 @@ import json
 import os
 import re
 import sqlite3
+import stat
 import sys
 from pathlib import Path
 from typing import Any
@@ -78,15 +79,16 @@ def private_directory(root: Path, relative: Path, *, create: bool = True) -> Pat
     return current
 
 
-def write_text_beneath(
+def write_bytes_beneath(
     root: Path,
     relative: Path,
-    content: str,
+    content: bytes,
     *,
-    encoding: str = "utf-8",
     file_mode: int = 0o666,
+    overwrite: bool = False,
+    exact_mode: bool = False,
 ) -> Path:
-    """Exclusively create a file beneath root without following directory or leaf links."""
+    """Write a regular file beneath root without following directory or leaf links."""
     root = root.expanduser().resolve(strict=True)
     parts = _safe_relative_parts(relative)
     if os.open not in os.supports_dir_fd or os.mkdir not in os.supports_dir_fd:
@@ -98,16 +100,92 @@ def write_text_beneath(
             try:
                 next_fd = os.open(part, directory_flags, dir_fd=current_fd)
             except FileNotFoundError:
-                os.mkdir(part, mode=0o777, dir_fd=current_fd)
+                os.mkdir(part, mode=0o700, dir_fd=current_fd)
                 next_fd = os.open(part, directory_flags, dir_fd=current_fd)
             os.close(current_fd)
             current_fd = next_fd
-        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        flags = os.O_WRONLY | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+        flags |= os.O_TRUNC if overwrite else os.O_EXCL
         file_fd = os.open(parts[-1], flags, file_mode, dir_fd=current_fd)
-        with os.fdopen(file_fd, "w", encoding=encoding) as stream:
-            stream.write(content)
+        try:
+            if not stat.S_ISREG(os.fstat(file_fd).st_mode):
+                raise ValueError("destination is not a regular file")
+            if exact_mode:
+                os.fchmod(file_fd, file_mode)
+            with os.fdopen(file_fd, "wb", closefd=False) as stream:
+                stream.write(content)
+                stream.flush()
+                os.fsync(file_fd)
+        finally:
+            os.close(file_fd)
     finally:
         os.close(current_fd)
+    return root.joinpath(*parts)
+
+
+def write_text_beneath(
+    root: Path,
+    relative: Path,
+    content: str,
+    *,
+    encoding: str = "utf-8",
+    file_mode: int = 0o666,
+    overwrite: bool = False,
+    exact_mode: bool = False,
+) -> Path:
+    return write_bytes_beneath(
+        root,
+        relative,
+        content.encode(encoding),
+        file_mode=file_mode,
+        overwrite=overwrite,
+        exact_mode=exact_mode,
+    )
+
+
+def read_bytes_beneath(root: Path, relative: Path) -> bytes:
+    """Read one regular file beneath root without following directory or leaf links."""
+    root = root.expanduser().resolve(strict=True)
+    parts = _safe_relative_parts(relative)
+    if os.open not in os.supports_dir_fd:
+        raise OSError("secure contained reads require directory-relative filesystem operations")
+    directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    current_fd = os.open(root, directory_flags)
+    try:
+        for part in parts[:-1]:
+            next_fd = os.open(part, directory_flags, dir_fd=current_fd)
+            os.close(current_fd)
+            current_fd = next_fd
+        file_fd = os.open(parts[-1], os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=current_fd)
+        try:
+            if not stat.S_ISREG(os.fstat(file_fd).st_mode):
+                raise ValueError("source is not a regular file")
+            with os.fdopen(file_fd, "rb", closefd=False) as stream:
+                return stream.read()
+        finally:
+            os.close(file_fd)
+    finally:
+        os.close(current_fd)
+
+
+def validate_path_beneath(root: Path, relative: Path, *, leaf_kind: str = "file") -> Path:
+    """Reject existing symlink components before planning or conflict checks."""
+    root = root.expanduser().resolve(strict=True)
+    parts = _safe_relative_parts(relative)
+    current = root
+    for index, part in enumerate(parts):
+        current = current / part
+        if current.is_symlink():
+            raise ValueError(f"symlinked destination is not allowed beneath {root}: {current}")
+        if not current.exists():
+            break
+        is_leaf = index == len(parts) - 1
+        if not is_leaf and not current.is_dir():
+            raise ValueError(f"destination component is not a directory: {current}")
+        if is_leaf and leaf_kind == "file" and not current.is_file():
+            raise ValueError(f"destination is not a regular file: {current}")
+        if not current.resolve(strict=True).is_relative_to(root):
+            raise ValueError(f"destination escapes configured root: {current}")
     return root.joinpath(*parts)
 
 
@@ -119,6 +197,19 @@ def profile_name(value: str) -> str:
     if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,62}", value):
         raise ValueError("profile must be lowercase alphanumeric with optional hyphens")
     return value
+
+
+def service_identifier(value: object) -> str:
+    """Validate the portable identifier used in rendered service labels."""
+    if not isinstance(value, str) or not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,62}", value):
+        raise ValueError("service identifier must be lowercase alphanumeric with optional hyphens")
+    return value
+
+
+def require_capability(capability: str, granted: set[str] | frozenset[str]) -> None:
+    """Require a named capability selected by the local owner policy."""
+    if capability not in granted:
+        raise PermissionError(f"missing required capability: {capability}")
 
 
 def config_path(home: Path, profile: str) -> Path:
@@ -227,9 +318,11 @@ def save_config(path: Path, data: dict[str, Any]) -> None:
     errors = validate_config(data)
     if errors:
         raise ValueError("; ".join(errors))
-    path.parent.mkdir(parents=True, exist_ok=True)
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    path.parent.chmod(0o700)
     # JSON is a strict, deterministic subset of YAML and remains human-readable.
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
+    path.chmod(0o600)
 
 
 def load_config(path: Path) -> dict[str, Any]:
@@ -250,9 +343,14 @@ def sha256(path: Path) -> str:
 
 def write_if_missing(path: Path, content: str) -> bool:
     if path.exists():
+        if path.is_symlink() or not path.is_file():
+            raise ValueError(f"unsafe existing vault file: {path}")
+        path.chmod(0o600)
         return False
-    path.parent.mkdir(parents=True, exist_ok=True)
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    path.parent.chmod(0o700)
     path.write_text(content, encoding="utf-8")
+    path.chmod(0o600)
     return True
 
 

@@ -10,7 +10,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from kitlib import config_path, hermes_home, inventory_path, load_config, profile_name, require_supported_python
+from kitlib import config_path, hermes_home, inventory_path, load_config, profile_name, require_supported_python, write_bytes_beneath
 
 
 def _validate_inventory_profile_chain(home: Path, profile: str) -> None:
@@ -33,8 +33,7 @@ def _write_atomic_json(path: Path, payload: dict[str, Any]) -> None:
     payload_text = json.dumps(payload, indent=2, sort_keys=True) + "\n"
     tmp = path.with_name(f".{path.name}.tmp")
     try:
-        tmp.write_text(payload_text, encoding="utf-8")
-        tmp.chmod(0o600)
+        write_bytes_beneath(path.parent, Path(tmp.name), payload_text.encode("utf-8"), file_mode=0o600, exact_mode=True)
         os.replace(tmp, path)
     finally:
         if tmp.exists():

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import stat
 from typing import Any
 import sys
 
@@ -94,6 +95,7 @@ def _validate_runtime_config(payload: dict[str, Any], config_path: Path) -> tupl
         "listener",
         "policy_path",
         "projection_manifest_path",
+        "auth_token_path",
     }
     keys = set(payload.keys())
     if not required.issubset(keys):
@@ -109,14 +111,23 @@ def _validate_runtime_config(payload: dict[str, Any], config_path: Path) -> tupl
     host, port, path = _validate_listener(payload.get("listener"))
     policy_relative = _as_instance_relative(payload.get("policy_path"), "policy_path")
     manifest_relative = _as_instance_relative(payload.get("projection_manifest_path"), "projection_manifest_path")
+    token_relative = _as_instance_relative(payload.get("auth_token_path"), "auth_token_path")
 
     instance_root = config_path.parent
     policy_path = instance_root / policy_relative
     manifest_path = instance_root / manifest_relative
+    token_path = instance_root / token_relative
     if not policy_path.is_file():
         raise ValueError(f"policy file missing: {policy_path}")
     if not manifest_path.is_file():
         raise ValueError(f"projection manifest file missing: {manifest_path}")
+    if token_path.is_symlink() or not token_path.is_file():
+        raise ValueError(f"MCP access token missing or unsafe: {token_path}")
+    if stat.S_IMODE(token_path.stat().st_mode) != 0o600:
+        raise ValueError(f"MCP access token must have mode 0600: {token_path}")
+    access_token = token_path.read_text(encoding="utf-8").strip()
+    if len(access_token) < 32 or any(char.isspace() for char in access_token):
+        raise ValueError("MCP access token is invalid")
 
     policy_payload = _read_json(policy_path)
     policy = RuntimePolicy.parse(policy_payload)
@@ -135,6 +146,8 @@ def _validate_runtime_config(payload: dict[str, Any], config_path: Path) -> tupl
         "listener": payload.get("listener"),
         "policy_path": str(payload.get("policy_path")),
         "projection_manifest_path": str(payload.get("projection_manifest_path")),
+        "auth_token_path": str(payload.get("auth_token_path")),
+        "access_token": access_token,
         "host": host,
         "port": port,
         "path": path,
@@ -156,6 +169,7 @@ def _run_check(payload: dict[str, Any]) -> dict[str, Any]:
         "instance_root": str(instance_root),
         "policy_path": str(policy_path),
         "projection_manifest_path": str(manifest_path),
+        "auth_token_path": str(context["auth_token_path"]),
         "listener": {
             "host": context["host"],
             "port": context["port"],
@@ -172,7 +186,7 @@ def _run_serve(config_path: Path) -> None:
     context, _policy_path, _manifest_path, _instance_root, core = _validate_runtime_config(config, config_path)
     from brain_mcp.server import create_server
 
-    mcp = create_server(core)
+    mcp = create_server(core, access_token=context["access_token"])
     mcp.run(
         transport="streamable-http",
         host=context["host"],

@@ -6,7 +6,7 @@ import argparse
 import json
 from pathlib import Path
 
-from kitlib import require_supported_python
+from kitlib import require_supported_python, service_identifier, write_bytes_beneath
 
 RUNTIME_ROOT = Path(__file__).resolve().parent.parent
 TEMPLATE_ROOT = RUNTIME_ROOT / "templates" / "service"
@@ -74,8 +74,10 @@ def _instance_paths(config_path: Path) -> Path:
 
 def _expected_config_file_fields(config: dict) -> tuple[str, str]:
     instance_name = config.get("instance_name")
-    if not isinstance(instance_name, str) or not instance_name.strip():
-        raise ServiceError("instance_name missing from config")
+    try:
+        instance_name = service_identifier(instance_name)
+    except ValueError as exc:
+        raise ServiceError("instance_name must be a portable service identifier") from exc
     transport = config.get("transport")
     if transport != "http":
         raise ServiceError("config transport must be http")
@@ -153,15 +155,25 @@ def _plan(
 
 
 def _apply(output_dir: Path, rendered: dict[str, str]) -> list[str]:
+    if output_dir.exists() and (output_dir.is_symlink() or not output_dir.is_dir()):
+        raise ServiceError("--output-dir must be a non-symlink directory")
     output_dir.mkdir(parents=True, exist_ok=True)
     rendered_paths = []
     for name in sorted(rendered):
         if name == "metadata":
             continue
         content = rendered[name]
-        target = output_dir / name
-        target.write_text(content, encoding="utf-8")
-        target.chmod(0o600)
+        try:
+            target = write_bytes_beneath(
+                output_dir,
+                Path(name),
+                content.encode("utf-8"),
+                file_mode=0o600,
+                overwrite=True,
+                exact_mode=True,
+            )
+        except (ValueError, OSError) as exc:
+            raise ServiceError(f"unsafe service artifact destination: {name}") from exc
         rendered_paths.append(str(target))
     return rendered_paths
 

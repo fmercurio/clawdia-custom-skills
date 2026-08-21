@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from kitlib import config_path, hermes_home, inventory_path, profile_name, require_supported_python, sha256
+from kitlib import config_path, hermes_home, inventory_path, profile_name, require_supported_python, sha256, write_bytes_beneath
 
 
 def _validate_inventory_profile_chain(home: Path, profile: str) -> None:
@@ -51,8 +51,7 @@ def _bytes_sha256(payload: bytes) -> str:
 def _write_atomic_bytes(path: Path, payload: bytes) -> None:
     tmp = path.with_name(f".{path.name}.tmp")
     try:
-        tmp.write_bytes(payload)
-        tmp.chmod(0o600)
+        write_bytes_beneath(path.parent, Path(tmp.name), payload, file_mode=0o600, exact_mode=True)
         os.replace(tmp, path)
     finally:
         if tmp.exists():
