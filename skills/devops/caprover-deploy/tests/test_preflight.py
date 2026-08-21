@@ -10,6 +10,7 @@ Covers:
 """
 import importlib.util
 import sys
+from email.message import Message
 from types import SimpleNamespace
 from pathlib import Path
 
@@ -188,6 +189,21 @@ class TestUrlSafety:
         out = capsys.readouterr().out
         assert "caprover_config_invalid" in out
         assert "allow-insecure" in out
+
+    def test_authenticated_request_refuses_cross_origin_redirect(self):
+        handler = cd.SameOriginRedirectHandler()
+        request = cd.urllib.request.Request("https://captain.example.com/api/v2/user/system/info/")
+
+        with pytest.raises(cd.urllib.error.HTTPError, match="cross-origin redirect refused"):
+            handler.redirect_request(request, None, 302, "Found", Message(), "https://attacker.example/collect")
+
+    def test_authenticated_request_allows_same_origin_redirect(self):
+        handler = cd.SameOriginRedirectHandler()
+        request = cd.urllib.request.Request("https://captain.example.com/api/v2/user/system/info/")
+
+        redirected = handler.redirect_request(request, None, 302, "Found", Message(), "/api/v2/user/apps/")
+
+        assert redirected.full_url == "https://captain.example.com/api/v2/user/apps/"
 
 
 class TestRepoSafety:
