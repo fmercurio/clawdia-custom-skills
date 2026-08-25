@@ -33,6 +33,7 @@ RUNTIME_SCRIPTS = (
     "bootstrap.py",
     "brain_ops.py",
     "run_mcp.py",
+    "run_mcp.sh",
     "doctor.py",
     "kitlib.py",
     "okf_render.py",

@@ -61,11 +61,15 @@ python3 scripts/run_mcp.py --config second-brain-kit/instances/<instance>/runtim
 `--check` validates local policy and projection manifest and never contacts network services.
 `--serve` starts the official MCP SDK's Streamable HTTP transport only at the configured loopback host/path; it blocks for the server lifetime and requires a separately prepared runtime with `mcp>=2,<3`. Starting it remains explicit HITL work.
 
-Render a deterministic LaunchAgent service plan without installing or starting anything:
+Render a deterministic LaunchAgent service plan without installing or starting anything. When the config is in the managed instance layout, the planner derives the sibling `second-brain-kit/bin` runtime and captures the absolute Python interpreter used to run the planner (including a prepared venv):
 
 ```bash
-python3 scripts/service_plan.py --config second-brain-kit/instances/<instance>/runtime-config.json --output-dir /tmp/second-brain-mcp-service --service launchagent --json
+uv run --offline --project runtime python scripts/service_plan.py \
+  --config "$HERMES_HOME/second-brain-kit/instances/<instance>/runtime-config.json" \
+  --output-dir /tmp/second-brain-mcp-service --service launchagent --json
 ```
+
+To render for a separately prepared runtime, pass **absolute** paths explicitly with `--runtime-root /absolute/path/to/second-brain-kit/bin` and `--runtime-python /absolute/path/to/venv/bin/python`. Do not use `/usr/bin/env python3`: a service template needs one concrete executable path.
 
 Run the production smoke check against an endpoint:
 
