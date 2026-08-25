@@ -6,7 +6,9 @@ validates the record schema into fully-typed runtime payloads.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -37,6 +39,24 @@ REQUIRED_PROJECTION_FIELD = (
     "body",
     "text",
 )
+_RFC3339_UTC_TIMESTAMP = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$"
+)
+
+
+def parse_rfc3339_utc(value: Any, field: str = "timestamp") -> datetime:
+    if not isinstance(value, str):
+        raise ValueError(f"{field} must be an RFC3339 UTC timestamp")
+    normalized = value.strip()
+    if not _RFC3339_UTC_TIMESTAMP.fullmatch(normalized):
+        raise ValueError(f"{field} must be an RFC3339 UTC timestamp")
+    try:
+        parsed = datetime.fromisoformat(normalized[:-1] + "+00:00")
+    except ValueError as exc:
+        raise ValueError(f"{field} must be an RFC3339 UTC timestamp") from exc
+    if parsed.tzinfo != timezone.utc:
+        raise ValueError(f"{field} must be an RFC3339 UTC timestamp")
+    return parsed
 
 
 
@@ -228,6 +248,8 @@ def parse_projection_manifest_payload(payload: Mapping[str, Any]) -> ProjectionM
         projection_content, sections, title = _ensure_projection_payload(record["mcp_projection"])
         provenance = _ensure_scalar_mapping("provenance", record["provenance"], PROVENANCE_FIELDS)
         freshness = _ensure_scalar_mapping("freshness", record["freshness"], FRESHNESS_FIELDS)
+        if "updated_at" in freshness:
+            parse_rfc3339_utc(freshness["updated_at"], "freshness.updated_at")
 
         records.append(
             ProjectionRecord(

@@ -128,6 +128,19 @@ def test_parse_projection_manifest_payload_rejects_path_and_ref_patterns() -> No
         parse_projection_manifest_payload(payload)
 
 
+def test_parse_projection_manifest_payload_rejects_invalid_freshness_timestamp() -> None:
+    for timestamp in (
+        "2026-01-01",
+        "2026-01-01T00:00:00+00:00",
+        "not-a-timestamp",
+        1,
+    ):
+        payload = valid_manifest_payload()
+        payload["records"][0]["freshness"] = {"updated_at": timestamp}
+        with pytest.raises(ValueError, match="RFC3339 UTC timestamp"):
+            parse_projection_manifest_payload(payload)
+
+
 def test_parse_projection_manifest_rejects_symlink(tmp_path) -> None:
     target = tmp_path / "manifest.json"
     target.write_text("{}", encoding="utf-8")

@@ -49,6 +49,7 @@ The generated MCP configuration now contains a runtime contract for local valida
 - `transport` (`http`)
 - `listener` with explicit `host`, `port`, and `path` contract
 - `policy_path` and `projection_manifest_path` as instance-relative artifact names
+- optional policy-owned `max_record_age_days`; when set, a record needs a valid, non-future RFC3339 UTC `freshness.updated_at` timestamp within that age window before it can be materialized
 
 Use the runner with trusted local files:
 
@@ -111,6 +112,8 @@ Copy/paste starter:
 ```text
 Use the second-brain-kit at <ABSOLUTE_PACKAGE_PATH> and follow docs/agent-guided-setup.md. Inspect the package and target environment first, then conduct the setup interview in my language, one blocking question at a time, with a recommended default and reason. After the decision ledger is complete, run dry-runs, request the documented apply gate, deploy, run doctor/smoke checks, and report rollback details.
 ```
+
+For a tenant-local read-only integration and local-only validation, follow [tenant-projection-pilot-handoff.md](docs/tenant-projection-pilot-handoff.md).
 
 ## Existing vault
 

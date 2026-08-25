@@ -32,7 +32,22 @@ def test_strict_parse_and_snapshot_fields() -> None:
     assert parsed.policy_id == "policy-test-001"
     assert parsed.policy_version == "v1"
     assert parsed.allowed_domains == ("engineering", "research", "product")
+    assert parsed.max_record_age_days is None
     assert parsed.snapshot()["policy_id"] == "policy-test-001"
+
+
+def test_parse_accepts_optional_positive_freshness_bound() -> None:
+    payload = policy_payload()
+    payload["max_record_age_days"] = 30
+    parsed = RuntimePolicy.parse(payload)
+    assert parsed.max_record_age_days == 30
+    assert parsed.snapshot()["max_record_age_days"] == 30
+
+    for invalid in (True, False, 1.0, 0, -1, "30"):
+        candidate = policy_payload()
+        candidate["max_record_age_days"] = invalid
+        with pytest.raises(ValueError, match="positive integer"):
+            RuntimePolicy.parse(candidate)
 
 
 def test_parse_rejects_missing_mandatory_fields() -> None:

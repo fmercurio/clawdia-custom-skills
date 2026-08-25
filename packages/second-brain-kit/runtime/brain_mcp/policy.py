@@ -34,6 +34,7 @@ class RuntimePolicy:
     allowed_classifications: tuple[str, ...]
     allowed_sensitivities: tuple[str, ...]
     default_decision: str
+    max_record_age_days: int | None
 
     @classmethod
     def parse(cls, payload: Mapping[str, Any]) -> "RuntimePolicy":
@@ -59,6 +60,10 @@ class RuntimePolicy:
         if default_decision not in ALLOWED_DECISIONS:
             raise ValueError("default_decision must be allow or deny")
 
+        max_record_age_days = None
+        if "max_record_age_days" in payload:
+            max_record_age_days = _as_positive_int(payload["max_record_age_days"], "max_record_age_days")
+
         return cls(
             schema_version=schema_version,
             contract_version=contract_version,
@@ -68,6 +73,7 @@ class RuntimePolicy:
             allowed_classifications=allowed_classifications,
             allowed_sensitivities=allowed_sensitivities,
             default_decision=default_decision,
+            max_record_age_days=max_record_age_days,
         )
 
     def evaluate(self, metadata: Mapping[str, Any]) -> PolicyDecision:
@@ -94,12 +100,21 @@ class RuntimePolicy:
             return PolicyDecision(True, REASON_ALLOWED)
         return PolicyDecision(False, REASON_DEFAULT_DENIED)
 
-    def snapshot(self) -> dict[str, str]:
+    def snapshot(self) -> dict[str, Any]:
         return {
             "policy_id": self.policy_id,
             "policy_version": self.policy_version,
             "contract_version": self.contract_version,
+            "max_record_age_days": self.max_record_age_days,
         }
+
+
+def _as_positive_int(value: Any, key: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"policy field {key} must be a positive integer")
+    if value < 1:
+        raise ValueError(f"policy field {key} must be a positive integer")
+    return value
 
 
 def _as_str(payload: Mapping[str, Any], key: str) -> str:

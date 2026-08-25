@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -24,6 +25,7 @@ from .ids import (
     validate_section_ref,
 )
 from .policy import RuntimePolicy
+from .projection import parse_rfc3339_utc
 
 
 COMPAT_TOOL_NAMES = (
@@ -360,6 +362,31 @@ class V02Core(CompatibilityCore):
             return normalized
         return normalized[:max_chars].rstrip()
 
+    @staticmethod
+    def _utc_now() -> datetime:
+        return datetime.now(timezone.utc)
+
+    def _freshness_policy_check(self, frontmatter: Mapping[str, Any]) -> _PolicyOutcome:
+        max_record_age_days = self.policy.max_record_age_days
+        if max_record_age_days is None:
+            return _PolicyOutcome(denied=False, reason="freshness_not_configured")
+
+        freshness = frontmatter.get("freshness")
+        if not isinstance(freshness, Mapping):
+            return _PolicyOutcome(denied=True, reason="freshness_metadata_invalid")
+
+        try:
+            updated_at = parse_rfc3339_utc(freshness.get("updated_at"), "freshness.updated_at")
+        except ValueError:
+            return _PolicyOutcome(denied=True, reason="freshness_metadata_invalid")
+
+        now = self._utc_now()
+        if updated_at > now:
+            return _PolicyOutcome(denied=True, reason="freshness_future_dated")
+        if now - updated_at > timedelta(days=max_record_age_days):
+            return _PolicyOutcome(denied=True, reason="freshness_expired")
+        return _PolicyOutcome(denied=False, reason="freshness_allowed")
+
     def _evaluate_metadata_and_dlp(
         self,
         frontmatter: Mapping[str, Any],
@@ -368,6 +395,9 @@ class V02Core(CompatibilityCore):
         policy_result = self.materialization_policy_check(frontmatter)
         if policy_result.denied:
             return "denied", policy_result.reason
+        freshness_result = self._freshness_policy_check(frontmatter)
+        if freshness_result.denied:
+            return "denied", freshness_result.reason
         return self._final_dlp_state(content)
 
     def materialization_policy_check(self, frontmatter: Mapping[str, Any]) -> _PolicyOutcome:
@@ -393,6 +423,9 @@ class V02Core(CompatibilityCore):
         policy_result = self.policy.evaluate(frontmatter)
         if not policy_result.allowed:
             return "denied", policy_result.reason
+        freshness_result = self._freshness_policy_check(frontmatter)
+        if freshness_result.denied:
+            return "denied", freshness_result.reason
         dlp_result = assess_content(current_content)
         if dlp_result.decision == DECISION_DENIED:
             return "denied", dlp_result.reason
