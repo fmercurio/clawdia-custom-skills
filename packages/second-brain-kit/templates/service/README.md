@@ -14,7 +14,7 @@ Render these templates with explicit values for:
 
 - `SERVICE_LABEL`: per-instance identity (service label)
 - `INSTANCE_DIR`: absolute external instance directory
-- `LAUNCHER_PATH`: shell entrypoint/launcher path
+- `LAUNCHER_PATH`: absolute executable shell launcher path (normally the installed `run_mcp.sh`)
 - `RUNTIME_PYTHON`: runtime Python executable
 - `RUNTIME_ROOT`: runtime root directory for the launch context
 - `CONFIG_PATH`: external instance config path
@@ -43,6 +43,7 @@ Runtime launch contract:
   - `SECOND_BRAIN_KIT_RUNTIME={RUNTIME_ROOT}`
   - `SECOND_BRAIN_KIT_PYTHON={RUNTIME_PYTHON}`
 - No `--host` or `--port` arguments are injected; binding is controlled by the rendered config and tenant policy.
+- `run_mcp.sh` is the v0.2 compatibility launcher: it accepts only an absolute tenant-owned runtime config and delegates to `run_mcp.py`. It does not install, activate, register, or authorize a service cutover.
 
 ## Operational posture
 

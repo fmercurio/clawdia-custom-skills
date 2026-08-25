@@ -67,6 +67,8 @@ def test_enable_mcp_renders_inert_external_instance_and_uninstalls_cleanly() -> 
         assert sorted(path.relative_to(vault).as_posix() for path in vault.rglob("*")) == before_vault
         assert (home / "second-brain-kit/bin/mcp_smoke.py").is_file()
         assert (home / "second-brain-kit/bin/brain_policy_check.py").is_file()
+        assert (home / "second-brain-kit/bin/run_mcp.sh").is_file()
+        assert stat.S_IMODE((home / "second-brain-kit/bin/run_mcp.sh").stat().st_mode) == 0o755
         doctor = json.loads(run("doctor.py", "--hermes-home", str(home), "--profile", profile, "--check-optional", "--json").stdout)
         assert doctor["ok"] is True
         mcp_check = next(item for item in doctor["checks"] if item["name"] == "mcp_readonly")

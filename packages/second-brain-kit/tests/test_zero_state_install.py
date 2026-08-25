@@ -366,11 +366,10 @@ class TestKitE2E(unittest.TestCase):
         bin_root = self.home / "second-brain-kit" / "bin"
         self.assertFalse((bin_root / "install.py").exists())
         self.assertFalse((bin_root / "export.py").exists())
-        for name in ("bootstrap.py", "brain_ops.py", "doctor.py", "kitlib.py", "okf_render.py", "uninstall.py", "brain_search.py", "brain_health_check.py"):
+        for name in ("bootstrap.py", "brain_ops.py", "doctor.py", "kitlib.py", "okf_render.py", "uninstall.py", "run_mcp.sh", "brain_search.py", "brain_health_check.py"):
             self.assertTrue((bin_root / name).is_file(), name)
         report = subprocess.run([PYTHON, str(bin_root / "doctor.py"), "--hermes-home", str(self.home), "--profile", self.profile, "--json"], capture_output=True, text=True)
         self.assertEqual(report.returncode, 0, report.stdout + report.stderr)
-
     def test_uninstall_modified_file_preserves_inventory_and_runtime(self):
         self.bootstrap()
         self.install()
