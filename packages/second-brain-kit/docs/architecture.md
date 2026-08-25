@@ -50,6 +50,7 @@ Cron health scheduling is explicitly separate from installation:
 - `listener` contract with loopback host/port/path constraints
 - `policy_path` and `projection_manifest_path` as instance-relative artifact names
 - optional policy-owned `max_record_age_days`; when configured, only records with a valid, non-future RFC3339 UTC `freshness.updated_at` inside that age window are materialized
+- optional `proposal_staging_path`, an existing owner-only directory strictly below the instance root; when absent, the server exposes only its four read-only retrieval tools
 
 Artifacts are owner-only (`0o600`) and deterministic.
 `doctor.py --check-optional` validates artifact presence/modes plus local runtime-policy configuration without endpoint traffic. Use `run_mcp.py --check` to parse and materialize the projection manifest locally.

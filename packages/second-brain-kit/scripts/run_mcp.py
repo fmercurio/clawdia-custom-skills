@@ -20,6 +20,7 @@ for runtime_root in (RUNTIME_MODULE_PACKAGE, RUNTIME_MODULE_ROOT):
 
 from brain_mcp.core import V02Core
 from brain_mcp.policy import RuntimePolicy
+from brain_mcp.proposals import ProposalStager
 from brain_mcp.projection import (
     MANIFEST_SCHEMA_VERSION,
     manifest_records_to_core_payload,
@@ -111,6 +112,10 @@ def _validate_runtime_config(payload: dict[str, Any], config_path: Path) -> tupl
     manifest_relative = _as_instance_relative(payload.get("projection_manifest_path"), "projection_manifest_path")
 
     instance_root = config_path.parent
+    proposal_stager = None
+    if "proposal_staging_path" in payload:
+        proposal_stager = ProposalStager.from_instance_root(instance_root, payload["proposal_staging_path"])
+
     policy_path = instance_root / policy_relative
     manifest_path = instance_root / manifest_relative
     if not policy_path.is_file():
@@ -126,7 +131,7 @@ def _validate_runtime_config(payload: dict[str, Any], config_path: Path) -> tupl
         raise ValueError(f"unsupported manifest version: {manifest.manifest_version}")
 
     records = manifest_records_to_core_payload(manifest)
-    core = V02Core(policy, records)
+    core = V02Core(policy, records, proposal_stager=proposal_stager)
 
     return {
         "runtime_schema_version": RUNTIME_SCHEMA_VERSION,
@@ -141,6 +146,7 @@ def _validate_runtime_config(payload: dict[str, Any], config_path: Path) -> tupl
         "manifest_identity": manifest.identity,
         "manifest_generation": manifest.generation,
         "records": len(manifest.records),
+        "proposal_staging_enabled": proposal_stager is not None,
     }, policy_path, manifest_path, instance_root, core
 
 
@@ -164,6 +170,7 @@ def _run_check(payload: dict[str, Any]) -> dict[str, Any]:
         "manifest_identity": context["manifest_identity"],
         "manifest_generation": context["manifest_generation"],
         "records": context["records"],
+        "proposal_staging_enabled": context["proposal_staging_enabled"],
     }
 
 

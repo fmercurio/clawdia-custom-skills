@@ -61,6 +61,14 @@ python3 scripts/run_mcp.py --config second-brain-kit/instances/<instance>/runtim
 `--check` validates local policy and projection manifest and never contacts network services.
 `--serve` starts the official MCP SDK's Streamable HTTP transport only at the configured loopback host/path; it blocks for the server lifetime and requires a separately prepared runtime with `mcp>=2,<3`. Starting it remains explicit HITL work.
 
+### Optional staging-only Brain Delta proposals
+
+The default v0.2 server exposes only four read-only retrieval tools. An operator may opt into the additional `propose_brain_delta` capability by adding an instance-relative `proposal_staging_path` to `runtime-config.json`, pointing to a **pre-existing, owner-only** directory below that instance root. The runtime never creates this directory during `--check` or startup.
+
+The tool accepts only bounded semantic fields (`title`, `summary`, typed `proposed_changes`, and `provenance`), performs DLP validation, generates its own opaque proposal ID, and writes one private JSON artifact in that staging directory. It cannot select a filename or write destination. Clean proposals return a citable `proposal:<id>` reference; secret-shaped or review/PII-shaped values are rejected without an artifact or payload echo.
+
+This is not canonical vault writing: it never modifies Markdown, Git, the remote, policy, manifest, service manager, listener or runtime configuration. A proposal remains subject to validation, human review and `push-brain` before any promotion.
+
 Render a deterministic LaunchAgent service plan without installing or starting anything. When the config is in the managed instance layout, the planner derives the sibling `second-brain-kit/bin` runtime and captures the absolute Python interpreter used to run the planner (including a prepared venv):
 
 ```bash
