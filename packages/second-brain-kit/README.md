@@ -58,14 +58,14 @@ python3 scripts/run_mcp.py --config second-brain-kit/instances/<instance>/runtim
 python3 scripts/run_mcp.py --config second-brain-kit/instances/<instance>/runtime-config.json --serve
 ```
 
-`--check` validates local policy and projection manifest and never contacts network services.
+`--check` validates local policy and projection manifest and never contacts network services. The `--config` value may be relative or use a platform alias (such as macOS `/var`); after rejecting a symlinked config file, the runner resolves it to its canonical absolute path before deriving the private instance root.
 `--serve` starts the official MCP SDK's Streamable HTTP transport only at the configured loopback host/path; it blocks for the server lifetime and requires a separately prepared runtime with `mcp>=2,<3`. Starting it remains explicit HITL work.
 
 ### Optional staging-only Brain Delta proposals
 
 The default v0.2 server exposes only four read-only retrieval tools. An operator may opt into the additional `propose_brain_delta` capability by adding an instance-relative `proposal_staging_path` to `runtime-config.json`, pointing to a **pre-existing, owner-only** directory below that instance root. The runtime never creates this directory during `--check` or startup.
 
-The tool accepts only bounded semantic fields (`title`, `summary`, typed `proposed_changes`, and `provenance`), performs DLP validation, generates its own opaque proposal ID, and writes one private JSON artifact in that staging directory. It cannot select a filename or write destination. Clean proposals return a citable `proposal:<id>` reference; secret-shaped or review/PII-shaped values are rejected without an artifact or payload echo.
+The tool accepts only bounded semantic fields (`title`, `summary`, typed `proposed_changes`, and `provenance`), performs DLP validation, generates its own opaque proposal ID, and writes one private JSON artifact in that staging directory. It cannot select a filename or write destination. Staging is held through descriptor-pinned, no-follow directory traversal and is re-bound by inode identity after publication; a symlink/identity change rejects and cleans the artifact. Clean proposals return a citable `proposal:<id>` reference; secret-shaped or review/PII-shaped values are rejected without an artifact or payload echo.
 
 This is not canonical vault writing: it never modifies Markdown, Git, the remote, policy, manifest, service manager, listener or runtime configuration. A proposal remains subject to validation, human review and `push-brain` before any promotion.
 

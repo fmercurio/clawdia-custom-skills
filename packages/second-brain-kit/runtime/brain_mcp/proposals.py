@@ -76,35 +76,80 @@ def _validate_relative_staging_path(value: Any) -> tuple[str, ...]:
     return parts
 
 
-def _require_private_directory(path: Path) -> None:
-    if not path.is_dir() or path.is_symlink():
+def _directory_flags() -> int:
+    """Return the required POSIX descriptor-traversal flags or fail closed."""
+
+    if not hasattr(os, "O_DIRECTORY") or not hasattr(os, "O_NOFOLLOW"):
+        raise ProposalError("secure proposal staging requires O_DIRECTORY and O_NOFOLLOW")
+    return os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+
+
+def _identity(metadata: os.stat_result) -> tuple[int, int]:
+    return metadata.st_dev, metadata.st_ino
+
+
+def _require_private_directory_fd(descriptor: int) -> tuple[int, int]:
+    metadata = os.fstat(descriptor)
+    if not stat.S_ISDIR(metadata.st_mode):
         raise ProposalError("proposal staging directory must be a regular directory")
-    metadata = path.stat()
     if metadata.st_uid != os.getuid():
         raise ProposalError("proposal staging directory must be owned by the runtime user")
     if stat.S_IMODE(metadata.st_mode) & 0o077:
         raise ProposalError("proposal staging directory must be owner-only")
+    return _identity(metadata)
 
 
-def resolve_proposal_staging_root(instance_root: Path, configured_path: Any) -> Path:
-    """Resolve a pre-existing private directory below the trusted instance root."""
+def _open_absolute_private_directory(path: Path) -> int:
+    """Open every absolute path component without following a symlink."""
 
-    if not instance_root.is_dir() or instance_root.is_symlink():
-        raise ProposalError("instance root must be a regular directory")
-    _require_private_directory(instance_root)
-    parts = _validate_relative_staging_path(configured_path)
-    current = instance_root
-    for part in parts:
-        current = current / part
-        _require_private_directory(current)
-
-    resolved_instance = instance_root.resolve(strict=True)
-    resolved_root = current.resolve(strict=True)
+    candidate = Path(path)
+    if not candidate.is_absolute():
+        raise ProposalError("instance root must be absolute")
+    flags = _directory_flags()
+    descriptor = os.open("/", flags)
     try:
-        resolved_root.relative_to(resolved_instance)
-    except ValueError as exc:
-        raise ProposalError("proposal staging directory escapes instance root") from exc
-    return resolved_root
+        for part in candidate.parts:
+            if part in {candidate.anchor, ""}:
+                continue
+            next_descriptor = os.open(part, flags, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = next_descriptor
+        _require_private_directory_fd(descriptor)
+        return descriptor
+    except OSError as exc:
+        os.close(descriptor)
+        raise ProposalError("proposal staging directory must be a private non-symlink directory") from exc
+    except Exception:
+        os.close(descriptor)
+        raise
+
+
+def _open_private_child(parent_descriptor: int, part: str) -> int:
+    try:
+        descriptor = os.open(part, _directory_flags(), dir_fd=parent_descriptor)
+    except OSError as exc:
+        raise ProposalError("proposal staging directory must be a private non-symlink directory") from exc
+    try:
+        _require_private_directory_fd(descriptor)
+        return descriptor
+    except Exception:
+        os.close(descriptor)
+        raise
+
+
+def _open_staging_descriptor(instance_root: Path, parts: tuple[str, ...]) -> tuple[int, tuple[int, int]]:
+    instance_descriptor = _open_absolute_private_directory(instance_root)
+    instance_identity = _identity(os.fstat(instance_descriptor))
+    current_descriptor = instance_descriptor
+    try:
+        for part in parts:
+            child_descriptor = _open_private_child(current_descriptor, part)
+            os.close(current_descriptor)
+            current_descriptor = child_descriptor
+        return current_descriptor, instance_identity
+    except Exception:
+        os.close(current_descriptor)
+        raise
 
 
 def _validate_target_hint(value: Any) -> str:
@@ -145,15 +190,64 @@ def _validated_provenance(value: Any) -> tuple[list[str], list[str]]:
 
 
 class ProposalStager:
-    """Persist only schema-validated, DLP-clean proposal artifacts in private staging."""
+    """Persist DLP-clean proposal artifacts with descriptor-pinned staging containment."""
 
     def __init__(self, staging_root: Path) -> None:
-        _require_private_directory(staging_root)
-        self._staging_root = staging_root.resolve(strict=True)
+        self._initialize(Path(staging_root), ())
 
     @classmethod
     def from_instance_root(cls, instance_root: Path, configured_path: Any) -> "ProposalStager":
-        return cls(resolve_proposal_staging_root(instance_root, configured_path))
+        stager = cls.__new__(cls)
+        stager._initialize(Path(instance_root), _validate_relative_staging_path(configured_path))
+        return stager
+
+    def _initialize(self, instance_root: Path, parts: tuple[str, ...]) -> None:
+        self._instance_root = Path(instance_root)
+        self._staging_parts = parts
+        staging_descriptor, instance_identity = _open_staging_descriptor(self._instance_root, parts)
+        self._directory_fd = staging_descriptor
+        self._instance_identity = instance_identity
+        self._staging_identity = _require_private_directory_fd(staging_descriptor)
+
+    def close(self) -> None:
+        descriptor = getattr(self, "_directory_fd", None)
+        if isinstance(descriptor, int) and descriptor >= 0:
+            os.close(descriptor)
+            self._directory_fd = -1
+
+    def __enter__(self) -> "ProposalStager":
+        return self
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except OSError:
+            pass
+
+    def _assert_current_binding(self) -> None:
+        """Re-resolve through no-follow descriptors and bind it to the held staging FD."""
+
+        if self._directory_fd < 0:
+            raise ProposalError("proposal stager is closed")
+        if _require_private_directory_fd(self._directory_fd) != self._staging_identity:
+            raise ProposalError("proposal staging directory identity changed")
+
+        instance_descriptor = _open_absolute_private_directory(self._instance_root)
+        current_descriptor = instance_descriptor
+        try:
+            if _identity(os.fstat(instance_descriptor)) != self._instance_identity:
+                raise ProposalError("instance root identity changed")
+            for part in self._staging_parts:
+                child_descriptor = _open_private_child(current_descriptor, part)
+                os.close(current_descriptor)
+                current_descriptor = child_descriptor
+            if _require_private_directory_fd(current_descriptor) != self._staging_identity:
+                raise ProposalError("proposal staging directory identity changed")
+        finally:
+            os.close(current_descriptor)
 
     def stage(
         self,
@@ -185,28 +279,64 @@ class ProposalStager:
         return StagedProposal(proposal_id=proposal_id)
 
     def _atomic_write(self, proposal_id: str, payload: bytes) -> None:
-        _require_private_directory(self._staging_root)
-        temporary = self._staging_root / f".{proposal_id}.{uuid.uuid4().hex}.tmp"
-        destination = self._staging_root / f"{proposal_id}.json"
-        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-        if hasattr(os, "O_NOFOLLOW"):
-            flags |= os.O_NOFOLLOW
+        self._assert_current_binding()
+        temporary_name = f".{proposal_id}.{uuid.uuid4().hex}.tmp"
+        destination_name = f"{proposal_id}.json"
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
         descriptor: int | None = None
+        published = False
         try:
-            descriptor = os.open(temporary, flags, 0o600)
+            descriptor = os.open(temporary_name, flags, 0o600, dir_fd=self._directory_fd)
             with os.fdopen(descriptor, "wb") as handle:
                 descriptor = None
                 handle.write(payload)
                 handle.flush()
                 os.fsync(handle.fileno())
-            os.link(temporary, destination)
-            os.unlink(temporary)
+            os.link(
+                temporary_name,
+                destination_name,
+                src_dir_fd=self._directory_fd,
+                dst_dir_fd=self._directory_fd,
+                follow_symlinks=False,
+            )
+            published = True
+            self._assert_current_binding()
+            os.unlink(temporary_name, dir_fd=self._directory_fd)
+            os.fsync(self._directory_fd)
+            published = False
         except FileExistsError as exc:
             raise ProposalError("proposal identifier collision") from exc
         except OSError as exc:
             raise ProposalError("proposal staging write failed") from exc
         finally:
+            cleanup_errors: list[OSError] = []
+            cleanup_performed = False
             if descriptor is not None:
-                os.close(descriptor)
-            if temporary.exists():
-                temporary.unlink()
+                try:
+                    os.close(descriptor)
+                except OSError as exc:
+                    cleanup_errors.append(exc)
+            if published:
+                try:
+                    os.unlink(destination_name, dir_fd=self._directory_fd)
+                except FileNotFoundError:
+                    pass
+                except OSError as exc:
+                    cleanup_errors.append(exc)
+                else:
+                    cleanup_performed = True
+            try:
+                os.unlink(temporary_name, dir_fd=self._directory_fd)
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                cleanup_errors.append(exc)
+            else:
+                cleanup_performed = True
+            if cleanup_performed:
+                try:
+                    os.fsync(self._directory_fd)
+                except OSError as exc:
+                    cleanup_errors.append(exc)
+            if cleanup_errors:
+                raise ProposalError("proposal staging cleanup failed") from cleanup_errors[0]

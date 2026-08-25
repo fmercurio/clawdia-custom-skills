@@ -269,6 +269,10 @@ class V02Core(CompatibilityCore):
     def proposal_staging_enabled(self) -> bool:
         return self._proposal_stager is not None
 
+    def close(self) -> None:
+        if self._proposal_stager is not None:
+            self._proposal_stager.close()
+
     def propose_brain_delta(
         self,
         *,
