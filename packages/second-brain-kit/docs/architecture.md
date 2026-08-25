@@ -52,7 +52,7 @@ Cron health scheduling is explicitly separate from installation:
 - optional policy-owned `max_record_age_days`; when configured, only records with a valid, non-future RFC3339 UTC `freshness.updated_at` inside that age window are materialized
 
 Artifacts are owner-only (`0o600`) and deterministic.
-`doctor.py --check-optional` validates artifact presence and local policy/manifest contract shape without endpoint traffic.
+`doctor.py --check-optional` validates artifact presence/modes plus local runtime-policy configuration without endpoint traffic. Use `run_mcp.py --check` to parse and materialize the projection manifest locally.
 
 `service_plan.py` renders launchd LaunchAgent, launchd LaunchDaemon, or systemd-user deployment units from instance config and an explicit output directory. LaunchDaemon plans additionally require explicit user and group values; all rendered output remains HITL and separate from service-manager activation.
 It never calls `launchctl` or `systemctl`, and it never starts services.
