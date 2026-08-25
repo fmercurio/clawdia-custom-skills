@@ -24,6 +24,7 @@ from kitlib import (  # noqa: E402
     install_bin_root,
     install_skill_root,
     load_config,
+    real_vault_root,
     require_supported_python,
 )
 RUNTIME_SCHEMA_VERSION = "v0.2"
@@ -280,8 +281,17 @@ def main() -> int:
 
     inventory = {}
     if cfg is not None:
-        vault = Path(cfg["vault_path"])
-        checks.append({"name": "vault", "ok": vault.is_dir(), "detail": str(vault)})
+        try:
+            vault = real_vault_root(Path(cfg["vault_path"]))
+        except ValueError as exc:
+            checks.append({"name": "vault", "ok": False, "detail": str(exc)})
+            report = {"ok": False, "profile": args.profile, "checks": checks}
+            if args.json:
+                print(json.dumps(report, ensure_ascii=False, indent=2))
+            else:
+                print("\n".join(f"[{'OK' if item['ok'] else 'FAIL'}] {item['name']}: {item['detail']}" for item in checks))
+            return 1
+        checks.append({"name": "vault", "ok": True, "detail": str(vault)})
         missing_dirs = [name for name in REQUIRED_DIRS if not (vault / name).is_dir()]
         missing_docs = [name for name in ROOT_DOCS if not (vault / name).is_file()]
         checks.append({"name": "vault_structure", "ok": not missing_dirs and not missing_docs, "detail": {"dirs": missing_dirs, "docs": missing_docs}})

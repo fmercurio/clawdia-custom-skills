@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 import zipfile
 from pathlib import Path
 
@@ -69,6 +70,23 @@ class TestKitE2E(unittest.TestCase):
             self.assertTrue((skill_root / name / "SKILL.md").is_file())
         report = json.loads(run("doctor.py", "--hermes-home", str(self.home), "--profile", self.profile, "--smoke", "--json").stdout)
         self.assertTrue(report["ok"], report)
+
+    def test_doctor_rejects_symlinked_vault_root_from_profile_config(self):
+        self.bootstrap()
+        self.install()
+        linked_vault = self.root / "vault-link"
+        linked_vault.symlink_to(self.vault, target_is_directory=True)
+        config = self.home / "second-brain-kit" / "profiles" / self.profile / "config.yaml"
+        payload = json.loads(config.read_text(encoding="utf-8"))
+        payload["vault_path"] = str(linked_vault)
+        config.write_text(json.dumps(payload), encoding="utf-8")
+        config.chmod(0o600)
+        result = run("doctor.py", "--hermes-home", str(self.home), "--profile", self.profile, "--json", check=False)
+        report = json.loads(result.stdout)
+        self.assertEqual(result.returncode, 1)
+        vault_check = next(item for item in report["checks"] if item["name"] == "vault")
+        self.assertFalse(vault_check["ok"])
+        self.assertIn("symlinked vault root", vault_check["detail"])
 
     def test_new_vault_and_profile_are_owner_private_regardless_of_umask(self):
         old_umask = os.umask(0)
@@ -146,6 +164,34 @@ class TestKitE2E(unittest.TestCase):
         result = run("bootstrap.py", "--hermes-home", str(self.home), "--profile", self.profile, "--vault", str(self.vault), "--owner", "Example Owner", "--existing", "--json")
         self.assertTrue(json.loads(result.stdout)["dry_run"])
         self.assertEqual(before, tree_fingerprint(self.vault))
+        self.assertFalse(self.home.exists())
+
+    def test_bootstrap_refuses_existing_file_as_new_vault_root(self):
+        vault_file = self.root / "vault-file"
+        sentinel = b"not a vault directory"
+        vault_file.write_bytes(sentinel)
+        result = run(
+            "bootstrap.py", "--hermes-home", str(self.home), "--profile", self.profile,
+            "--vault", str(vault_file), "--owner", "Example Owner", "--apply", "--json",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        report = json.loads(result.stdout)
+        self.assertIn("vault root is not a directory", report["error"])
+        self.assertEqual(vault_file.read_bytes(), sentinel)
+        self.assertFalse(self.home.exists())
+
+    def test_bootstrap_refuses_symlinked_vault_root(self):
+        self.vault.mkdir()
+        linked_vault = self.root / "vault-link"
+        linked_vault.symlink_to(self.vault, target_is_directory=True)
+        result = run(
+            "bootstrap.py", "--hermes-home", str(self.home), "--profile", self.profile,
+            "--vault", str(linked_vault), "--owner", "Example Owner", "--existing", "--json",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("symlinked vault root", result.stdout)
         self.assertFalse(self.home.exists())
 
     def test_install_refuses_symlinked_package_source(self):
@@ -282,6 +328,15 @@ class TestKitE2E(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertEqual(result.stdout, "")
 
+    def test_health_check_refuses_symlinked_vault_root(self):
+        self.bootstrap()
+        linked_vault = self.root / "vault-link"
+        linked_vault.symlink_to(self.vault, target_is_directory=True)
+        health = PACKAGE / "skills" / "second-brain-operations" / "scripts" / "brain_health_check.py"
+        result = subprocess.run([PYTHON, str(health), "--vault", str(linked_vault), "--json"], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("symlinked vault root", result.stdout)
+
     def test_pull_push_smoke(self):
         self.bootstrap()
         self.install()
@@ -337,6 +392,24 @@ class TestKitE2E(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse((outside / "escaped-note.md").exists())
 
+    def test_push_refuses_symlinked_vault_root_from_profile_config(self):
+        self.bootstrap()
+        linked_vault = self.root / "vault-link"
+        linked_vault.symlink_to(self.vault, target_is_directory=True)
+        config = self.home / "second-brain-kit" / "profiles" / self.profile / "config.yaml"
+        payload = json.loads(config.read_text(encoding="utf-8"))
+        payload["vault_path"] = str(linked_vault)
+        config.write_text(json.dumps(payload), encoding="utf-8")
+        config.chmod(0o600)
+        result = run(
+            "brain_ops.py", "--hermes-home", str(self.home), "--profile", self.profile,
+            "push", "--title", "Blocked Root", "--body", "sentinel", "--layer", "resource",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("symlinked vault root", result.stdout)
+        self.assertFalse((self.vault / "30_Resources" / "blocked-root.md").exists())
+
     def test_search_rebuild_refuses_symlinked_index_directory(self):
         self.bootstrap()
         outside = self.root / "outside-index"
@@ -349,6 +422,42 @@ class TestKitE2E(unittest.TestCase):
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse((outside / "brain_search.sqlite").exists())
+
+    def test_search_rebuild_refuses_symlinked_vault_root(self):
+        self.bootstrap()
+        linked_vault = self.root / "vault-link"
+        linked_vault.symlink_to(self.vault, target_is_directory=True)
+        search = PACKAGE / "skills" / "brain-search" / "scripts" / "brain_search.py"
+        result = subprocess.run(
+            [PYTHON, str(search), "--vault", str(linked_vault), "--rebuild", "--json"],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("symlinked vault root", result.stdout)
+        self.assertFalse((self.vault / ".brain-index").exists())
+
+    def test_restricted_search_refuses_symlinked_configured_vault_root(self):
+        self.bootstrap()
+        self.enable_restricted_search()
+        linked_vault = self.root / "vault-link"
+        linked_vault.symlink_to(self.vault, target_is_directory=True)
+        config = self.home / "second-brain-kit" / "profiles" / self.profile / "config.yaml"
+        payload = json.loads(config.read_text(encoding="utf-8"))
+        payload["vault_path"] = str(linked_vault)
+        config.write_text(json.dumps(payload), encoding="utf-8")
+        config.chmod(0o600)
+        search = PACKAGE / "skills" / "brain-search" / "scripts" / "brain_search.py"
+        result = subprocess.run(
+            [
+                PYTHON, str(search), "--vault", str(self.vault), "--rebuild",
+                "--include-restricted", "--hermes-home", str(self.home), "--profile", self.profile,
+                "--json",
+            ],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("symlinked vault root", result.stdout)
+        self.assertFalse((self.vault / ".brain-index").exists())
 
     def test_search_index_enforces_owner_only_permissions(self):
         self.bootstrap()
@@ -369,6 +478,57 @@ class TestKitE2E(unittest.TestCase):
         database = index_dir / "brain_search.sqlite"
         self.assertEqual(stat.S_IMODE(index_dir.stat().st_mode), 0o700)
         self.assertEqual(stat.S_IMODE(database.stat().st_mode), 0o600)
+
+    def test_default_rebuild_scrubs_restricted_content_from_active_database(self):
+        self.bootstrap()
+        self.enable_restricted_search()
+        sentinel = "RESTRICTED-SENTINEL-4d73f6be"
+        restricted = self.vault / "30_Resources" / "restricted-mode.md"
+        restricted.write_text(
+            f"---\nsensitivity: restricted\n---\n# Private\n{sentinel}\n",
+            encoding="utf-8",
+        )
+        search = PACKAGE / "skills" / "brain-search" / "scripts" / "brain_search.py"
+        privileged = subprocess.run(
+            [PYTHON, str(search), "--vault", str(self.vault), "--rebuild", "--include-restricted", "--hermes-home", str(self.home), "--profile", self.profile, "--json"],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(privileged.returncode, 0, privileged.stdout + privileged.stderr)
+        database = self.vault / ".brain-index" / "brain_search.sqlite"
+        restricted_inode = database.stat().st_ino
+        self.assertIn(sentinel.encode("utf-8"), database.read_bytes())
+        public = subprocess.run(
+            [PYTHON, str(search), "--vault", str(self.vault), "--rebuild", "--json"],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(public.returncode, 0, public.stdout + public.stderr)
+        self.assertNotEqual(restricted_inode, database.stat().st_ino)
+        self.assertNotIn(sentinel.encode("utf-8"), database.read_bytes())
+        self.assertFalse(database.with_name(database.name + "-wal").exists())
+        self.assertFalse(database.with_name(database.name + "-shm").exists())
+
+    def test_failed_search_rebuild_preserves_existing_database_sidecars(self):
+        self.bootstrap()
+        search = PACKAGE / "skills" / "brain-search" / "scripts" / "brain_search.py"
+        spec = importlib.util.spec_from_file_location("brain_search_under_test", search)
+        if spec is None or spec.loader is None:
+            self.fail("could not load brain search module")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        module.rebuild(self.vault)
+        database = self.vault / ".brain-index" / "brain_search.sqlite"
+        original_inode = database.stat().st_ino
+        wal = database.with_name(database.name + "-wal")
+        sentinel = b"existing index journal"
+        wal.write_bytes(sentinel)
+
+        with mock.patch.object(module.os, "replace", side_effect=OSError("simulated replace failure")):
+            with self.assertRaisesRegex(OSError, "simulated replace failure"):
+                module.rebuild(self.vault)
+
+        self.assertEqual(database.stat().st_ino, original_inode)
+        self.assertEqual(wal.read_bytes(), sentinel)
+        self.assertFalse(list(database.parent.glob(".brain_search.*.sqlite.tmp")))
 
     def test_cron_requires_opt_in_and_wrapper_has_no_false_notification(self):
         self.bootstrap()
@@ -474,6 +634,19 @@ class TestKitE2E(unittest.TestCase):
         self.assertIn("--layout", report["command"])
         self.assertIn("--link", report["command"])
 
+    def test_okf_render_refuses_symlinked_vault_root_from_profile_config(self):
+        self.bootstrap()
+        linked_vault = self.root / "vault-link"
+        linked_vault.symlink_to(self.vault, target_is_directory=True)
+        config = self.home / "second-brain-kit" / "profiles" / self.profile / "config.yaml"
+        payload = json.loads(config.read_text(encoding="utf-8"))
+        payload["vault_path"] = str(linked_vault)
+        config.write_text(json.dumps(payload), encoding="utf-8")
+        config.chmod(0o600)
+        result = run("okf_render.py", "--hermes-home", str(self.home), "--profile", self.profile, check=False)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("symlinked vault root", result.stdout)
+
     def test_export_is_reproducible_and_manifest_valid(self):
         one, two = self.root / "one.zip", self.root / "two.zip"
         run("export.py", "--output", str(one))
@@ -523,6 +696,19 @@ class TestKitE2E(unittest.TestCase):
         cfg = kitlib.default_config("Example Owner", self.vault.resolve(), self.profile)
         cfg["embeddings"]["endpoint"] = "https://example.invalid/v1/embeddings"
         self.assertIn("remote embeddings require embeddings.allow_remote=true", kitlib.validate_config(cfg))
+
+    def test_private_directory_refuses_symlinked_root(self):
+        spec = importlib.util.spec_from_file_location("kitlib_under_test", SCRIPTS / "kitlib.py")
+        assert spec is not None and spec.loader is not None
+        kitlib = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(kitlib)
+        real_root = self.root / "real-root"
+        real_root.mkdir()
+        linked_root = self.root / "linked-root"
+        linked_root.symlink_to(real_root, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, "symlinked directory root"):
+            kitlib.private_directory(linked_root, Path("nested"))
+        self.assertFalse((real_root / "nested").exists())
 
     def test_skills_validate_and_core_has_no_tenant_markers(self):
         for name in ("second-brain-operations", "pull-brain", "push-brain", "brain-search"):

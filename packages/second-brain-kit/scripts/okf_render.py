@@ -3,13 +3,19 @@
 from __future__ import annotations
 import argparse, json, shutil, subprocess
 from pathlib import Path
-from kitlib import config_path, hermes_home, load_config, note_is_restricted, require_supported_python
+from kitlib import config_path, hermes_home, load_config, note_is_restricted, real_vault_root, require_supported_python
 
 def main() -> int:
     p=argparse.ArgumentParser(); p.add_argument("--hermes-home"); p.add_argument("--profile",default="second-brain"); p.add_argument("--output"); p.add_argument("--title"); p.add_argument("--layout"); p.add_argument("--link"); p.add_argument("--include-restricted",action="store_true"); p.add_argument("--apply",action="store_true"); a=p.parse_args()
     try: require_supported_python()
     except RuntimeError as exc: print(json.dumps({"ok":False,"error":str(exc)})); return 2
-    home=hermes_home(a.hermes_home); cfg=load_config(config_path(home,a.profile)); vault=Path(cfg["vault_path"])
+    home=hermes_home(a.hermes_home)
+    cfg=load_config(config_path(home,a.profile))
+    try:
+        vault=real_vault_root(Path(cfg["vault_path"]))
+    except ValueError as exc:
+        print(json.dumps({"ok":False,"error":str(exc)}))
+        return 2
     if cfg.get("okf",{}).get("enabled") not in {True,"auto"}: print(json.dumps({"ok":False,"error":"OKF disabled"})); return 2
     markdown=list(vault.rglob("*.md"))
     symlinks=[str(x.relative_to(vault)) for x in markdown if x.is_symlink()]

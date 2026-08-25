@@ -37,6 +37,39 @@ def require_supported_python(version_info: tuple[int, int] | None = None) -> Non
         )
 
 
+def real_directory_root(
+    value: Path,
+    *,
+    label: str = "directory root",
+    require_exists: bool = True,
+) -> Path:
+    """Return an absolute directory root only when no existing lexical component is a symlink."""
+    root = Path(os.path.abspath(os.fspath(Path(value).expanduser())))
+    current = Path(root.anchor)
+    for part in root.parts[1:]:
+        current = current / part
+        try:
+            metadata = current.lstat()
+        except FileNotFoundError:
+            if require_exists:
+                raise ValueError(f"{label} does not exist: {root}")
+            break
+        if stat.S_ISLNK(metadata.st_mode):
+            raise ValueError(f"symlinked {label} is not allowed: {current}")
+        if current != root and not stat.S_ISDIR(metadata.st_mode):
+            raise ValueError(f"{label} ancestor is not a directory: {current}")
+    if root.exists() and not root.is_dir():
+        raise ValueError(f"{label} is not a directory: {root}")
+    if require_exists and not root.is_dir():
+        raise ValueError(f"{label} is not a directory: {root}")
+    return root
+
+
+def real_vault_root(value: Path, *, require_exists: bool = True) -> Path:
+    """Validate a vault root without resolving symlinks first."""
+    return real_directory_root(value, label="vault root", require_exists=require_exists)
+
+
 def _safe_relative_parts(relative: Path) -> tuple[str, ...]:
     if relative.is_absolute() or not relative.parts or any(part in {"", ".", ".."} for part in relative.parts):
         raise ValueError("path must be a non-empty relative path without traversal")
@@ -44,7 +77,7 @@ def _safe_relative_parts(relative: Path) -> tuple[str, ...]:
 
 
 def _validate_private_directory_chain(root: Path, relative: Path) -> Path:
-    root = root.expanduser().resolve(strict=True)
+    root = real_directory_root(root)
     parts = _safe_relative_parts(relative)
     current = root
     for part in parts:
@@ -60,7 +93,7 @@ def _validate_private_directory_chain(root: Path, relative: Path) -> Path:
 
 def private_directory(root: Path, relative: Path, *, create: bool = True) -> Path:
     """Create or validate an owner-only real directory beneath a trusted root."""
-    root = root.expanduser().resolve(strict=True)
+    root = real_directory_root(root)
     parts = _safe_relative_parts(relative)
     current = root
     for part in parts:
@@ -89,7 +122,7 @@ def write_bytes_beneath(
     exact_mode: bool = False,
 ) -> Path:
     """Write a regular file beneath root without following directory or leaf links."""
-    root = root.expanduser().resolve(strict=True)
+    root = real_directory_root(root)
     parts = _safe_relative_parts(relative)
     if os.open not in os.supports_dir_fd or os.mkdir not in os.supports_dir_fd:
         raise OSError("secure contained writes require directory-relative filesystem operations")
@@ -145,7 +178,7 @@ def write_text_beneath(
 
 def read_bytes_beneath(root: Path, relative: Path) -> bytes:
     """Read one regular file beneath root without following directory or leaf links."""
-    root = root.expanduser().resolve(strict=True)
+    root = real_directory_root(root)
     parts = _safe_relative_parts(relative)
     if os.open not in os.supports_dir_fd:
         raise OSError("secure contained reads require directory-relative filesystem operations")
@@ -170,7 +203,7 @@ def read_bytes_beneath(root: Path, relative: Path) -> bytes:
 
 def validate_path_beneath(root: Path, relative: Path, *, leaf_kind: str = "file") -> Path:
     """Reject existing symlink components before planning or conflict checks."""
-    root = root.expanduser().resolve(strict=True)
+    root = real_directory_root(root)
     parts = _safe_relative_parts(relative)
     current = root
     for index, part in enumerate(parts):

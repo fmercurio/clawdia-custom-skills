@@ -7,13 +7,14 @@ import os
 import re
 import sqlite3
 import sys
+import tempfile
 from pathlib import Path
 
 try:
-    from kitlib import config_path, hermes_home, load_config, private_directory, require_capability
+    from kitlib import config_path, hermes_home, load_config, private_directory, real_vault_root, require_capability
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts"))
-    from kitlib import config_path, hermes_home, load_config, private_directory, require_capability
+    from kitlib import config_path, hermes_home, load_config, private_directory, real_vault_root, require_capability
 
 SKIP_DIRS = {".git", ".obsidian", ".brain-index", "node_modules", "__pycache__"}
 KNOWN_SENSITIVITY = {"public", "internal", "restricted"}
@@ -61,11 +62,15 @@ def db_path(vault: Path) -> Path:
     return vault / ".brain-index" / "brain_search.sqlite"
 
 
-def connect(vault: Path) -> sqlite3.Connection:
-    index_dir = private_directory(vault, Path(".brain-index"))
-    target = index_dir / "brain_search.sqlite"
-    if target.is_symlink():
+def _validate_database_file(path: Path) -> None:
+    if path.is_symlink():
         raise ValueError("symlinked search database is not allowed")
+    if path.exists() and not path.is_file():
+        raise ValueError("search database is not a regular file")
+
+
+def _connect_database(target: Path) -> sqlite3.Connection:
+    _validate_database_file(target)
     old_umask = os.umask(0o077)
     try:
         con = sqlite3.connect(target)
@@ -78,6 +83,45 @@ def connect(vault: Path) -> sqlite3.Connection:
       CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(path UNINDEXED, title, body, tokenize='unicode61');
     """)
     return con
+
+
+def connect(vault: Path) -> sqlite3.Connection:
+    index_dir = private_directory(vault, Path(".brain-index"))
+    return _connect_database(index_dir / "brain_search.sqlite")
+
+
+def _remove_database_sidecars(target: Path) -> None:
+    for suffix in ("-wal", "-shm"):
+        sidecar = target.with_name(target.name + suffix)
+        if not (sidecar.exists() or sidecar.is_symlink()):
+            continue
+        if sidecar.is_symlink() or not sidecar.is_file():
+            raise ValueError("unsafe search database sidecar")
+        sidecar.unlink()
+
+
+def _fsync_file(path: Path) -> None:
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _fsync_directory(directory: Path) -> None:
+    fd = os.open(directory, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _temporary_database(index_dir: Path) -> Path:
+    fd, raw_path = tempfile.mkstemp(prefix=".brain_search.", suffix=".sqlite.tmp", dir=index_dir)
+    os.close(fd)
+    temporary = Path(raw_path)
+    temporary.chmod(0o600)
+    return temporary
 
 
 def harden_index_permissions(vault: Path) -> None:
@@ -109,8 +153,8 @@ def _restricted_search_capabilities(
     if not requested:
         return frozenset()
     cfg = load_config(config_path(hermes_home(hermes_home_value), profile))
-    configured_vault = Path(cfg.get("vault_path", "")).expanduser().resolve()
-    if configured_vault != vault.resolve():
+    configured_vault = real_vault_root(Path(cfg.get("vault_path", "")).expanduser())
+    if configured_vault != vault:
         raise PermissionError("restricted search profile does not authorize this vault")
     sensitivity = cfg.get("sensitivity")
     if not isinstance(sensitivity, dict) or sensitivity.get("restricted_search") is not True:
@@ -119,30 +163,49 @@ def _restricted_search_capabilities(
 
 
 def rebuild(vault: Path, capabilities: frozenset[str] = frozenset()) -> dict:
-    con = connect(vault)
-    con.execute("DELETE FROM notes")
-    con.execute("DELETE FROM notes_fts")
+    index_dir = private_directory(vault, Path(".brain-index"))
+    target = index_dir / "brain_search.sqlite"
+    _validate_database_file(target)
+    temporary = _temporary_database(index_dir)
+    con: sqlite3.Connection | None = None
     indexed = skipped_restricted = 0
-    for path in iter_notes(vault):
-        text = path.read_text(encoding="utf-8", errors="replace")
-        meta, body = parse_frontmatter(text)
-        sensitivity = meta.get("sensitivity", "internal").lower()
-        if sensitivity not in KNOWN_SENSITIVITY:
-            skipped_restricted += 1
-            continue
-        if sensitivity == "restricted":
-            try:
-                require_capability(RESTRICTED_SEARCH_CAPABILITY, capabilities)
-            except PermissionError:
+    try:
+        con = _connect_database(temporary)
+        con.execute("PRAGMA journal_mode=DELETE")
+        for path in iter_notes(vault):
+            text = path.read_text(encoding="utf-8", errors="replace")
+            meta, body = parse_frontmatter(text)
+            sensitivity = meta.get("sensitivity", "internal").lower()
+            if sensitivity not in KNOWN_SENSITIVITY:
                 skipped_restricted += 1
                 continue
-        rel = path.relative_to(vault).as_posix()
-        title = meta.get("title") or next((line[2:].strip() for line in body.splitlines() if line.startswith("# ")), path.stem)
-        para = meta.get("para", "")
-        con.execute("INSERT INTO notes VALUES(?,?,?,?,?)", (rel, title, para, sensitivity, body))
-        con.execute("INSERT INTO notes_fts(path,title,body) VALUES(?,?,?)", (rel, title, body))
-        indexed += 1
-    con.commit(); harden_index_permissions(vault); con.close()
+            if sensitivity == "restricted":
+                try:
+                    require_capability(RESTRICTED_SEARCH_CAPABILITY, capabilities)
+                except PermissionError:
+                    skipped_restricted += 1
+                    continue
+            rel = path.relative_to(vault).as_posix()
+            title = meta.get("title") or next((line[2:].strip() for line in body.splitlines() if line.startswith("# ")), path.stem)
+            para = meta.get("para", "")
+            con.execute("INSERT INTO notes VALUES(?,?,?,?,?)", (rel, title, para, sensitivity, body))
+            con.execute("INSERT INTO notes_fts(path,title,body) VALUES(?,?,?)", (rel, title, body))
+            indexed += 1
+        con.commit()
+        con.close()
+        con = None
+        _remove_database_sidecars(temporary)
+        _fsync_file(temporary)
+        os.replace(temporary, target)
+        temporary = None
+        _remove_database_sidecars(target)
+        _fsync_directory(index_dir)
+    finally:
+        if con is not None:
+            con.close()
+        if temporary is not None and (temporary.exists() or temporary.is_symlink()):
+            temporary.unlink()
+    harden_index_permissions(vault)
     return {"ok": True, "files_indexed": indexed, "restricted_skipped": skipped_restricted, "db": str(db_path(vault))}
 
 
@@ -190,10 +253,8 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=8)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
-    vault = Path(args.vault).expanduser().resolve()
-    if not vault.is_dir():
-        print(json.dumps({"ok": False, "error": "vault not found"})); return 2
     try:
+        vault = real_vault_root(Path(args.vault))
         capabilities = _restricted_search_capabilities(
             vault,
             requested=args.include_restricted,

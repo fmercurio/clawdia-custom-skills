@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from kitlib import REQUIRED_DIRS, ROOT_DOCS, config_path, default_config, hermes_home, load_config, private_directory, require_supported_python, save_config, write_if_missing
+from kitlib import REQUIRED_DIRS, ROOT_DOCS, config_path, default_config, hermes_home, load_config, private_directory, real_vault_root, require_supported_python, save_config, write_if_missing
 
 
 def audit(vault: Path) -> dict:
@@ -67,7 +67,18 @@ def main() -> int:
         return 2
 
     home = hermes_home(args.hermes_home)
-    vault = Path(args.vault).expanduser().resolve()
+    try:
+        vault = real_vault_root(Path(args.vault), require_exists=args.existing)
+    except ValueError as exc:
+        report = {
+            "mode": "existing" if args.existing else "new",
+            "dry_run": not args.apply,
+            "before": {"vault": str(Path(args.vault).expanduser()), "exists": False},
+            "created": [],
+            "error": str(exc),
+        }
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return 2
     cfg_path = config_path(home, args.profile)
     before = audit(vault)
     report = {"mode": "existing" if args.existing else "new", "dry_run": not args.apply, "before": before, "created": []}

@@ -3,7 +3,14 @@
 from __future__ import annotations
 import argparse
 import json
+import sys
 from pathlib import Path
+
+try:
+    from kitlib import real_vault_root
+except ModuleNotFoundError:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts"))
+    from kitlib import real_vault_root
 
 REQUIRED_DIRS = ["00_Inbox", "10_Projects", "20_Areas", "30_Resources", "40_Archives", "50_Templates", "_Hermes", "_Meta"]
 ROOT_DOCS = ["README.md", "MAPA.md", "PARA.md", "HERMES.md"]
@@ -53,8 +60,15 @@ def main() -> int:
     parser.add_argument("--verbose", action="store_true")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
-    vault = Path(args.vault).expanduser().resolve()
-    issues = check(vault, args.mode) if vault.is_dir() else ["vault not found"]
+    try:
+        vault = real_vault_root(Path(args.vault))
+    except ValueError as exc:
+        if args.json:
+            print(json.dumps({"healthy": False, "issues": [str(exc)]}, ensure_ascii=False, indent=2))
+        else:
+            print(f"- {exc}")
+        return 2
+    issues = check(vault, args.mode)
     if args.json:
         print(json.dumps({"healthy": not issues, "issues": issues}, ensure_ascii=False, indent=2))
     elif issues:
