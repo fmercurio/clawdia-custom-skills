@@ -49,6 +49,7 @@ Cron health scheduling is explicitly separate from installation:
 - `transport` (`http`)
 - `listener` contract with loopback host/port/path constraints
 - `policy_path` and `projection_manifest_path` as instance-relative artifact names
+- optional policy-owned `max_record_age_days`; when configured, only records with a valid, non-future RFC3339 UTC `freshness.updated_at` inside that age window are materialized
 
 Artifacts are owner-only (`0o600`) and deterministic.
 `doctor.py --check-optional` validates artifact presence and local policy/manifest contract shape without endpoint traffic.

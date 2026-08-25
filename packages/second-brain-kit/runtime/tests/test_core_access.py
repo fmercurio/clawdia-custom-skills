@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import sys
 
@@ -76,6 +77,63 @@ def synthetic_records() -> list[dict]:
 def make_core() -> tuple[V02Core, list[dict]]:
     records = synthetic_records()
     return V02Core(policy_data(), records), records
+
+
+def _utc_timestamp(value: datetime) -> str:
+    return value.astimezone(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
+
+
+def _freshness_policy(max_record_age_days: int = 30) -> dict:
+    payload = policy_data()
+    payload["max_record_age_days"] = max_record_age_days
+    return payload
+
+
+def _freshness_record(note_id: str, token: str, updated_at: str | None) -> dict:
+    frontmatter: dict[str, object] = {
+        "id": note_id,
+        "title": note_id,
+        "domain": "engineering",
+        "classification": "public",
+        "sensitivity": "low",
+    }
+    if updated_at is not None:
+        frontmatter["freshness"] = {"updated_at": updated_at}
+    return {"frontmatter": frontmatter, "content": token}
+
+
+def test_freshness_policy_hides_stale_records_and_redacts_direct_reads(monkeypatch) -> None:
+    reference = datetime(2026, 8, 25, 12, 0, tzinfo=timezone.utc)
+    records = [
+        _freshness_record("fresh-boundary", "fresh-boundary-token", _utc_timestamp(reference - timedelta(days=30))),
+        _freshness_record("too-old", "too-old-token", _utc_timestamp(reference - timedelta(days=30, microseconds=1))),
+        _freshness_record("missing-freshness", "missing-freshness-token", None),
+        _freshness_record("malformed-freshness", "malformed-freshness-token", "not-a-timestamp"),
+        _freshness_record("future-freshness", "future-freshness-token", _utc_timestamp(reference + timedelta(seconds=1))),
+    ]
+    monkeypatch.setattr(V02Core, "_utc_now", staticmethod(lambda: reference))
+    core = V02Core(_freshness_policy(), records)
+
+    allowed = core.search_brain("fresh-boundary-token")
+    assert allowed["status"] == "ok"
+    assert allowed["results"][0]["note_id"] == "fresh-boundary"
+
+    for note_id, token in (
+        ("too-old", "too-old-token"),
+        ("missing-freshness", "missing-freshness-token"),
+        ("malformed-freshness", "malformed-freshness-token"),
+        ("future-freshness", "future-freshness-token"),
+    ):
+        search = core.search_brain(token)
+        assert search["status"] == "no_evidence"
+        assert search["results"] == []
+        assert search["citations"] == []
+
+        direct_read = core.read_brain_note(note_id)
+        assert direct_read["status"] == "denied"
+        assert direct_read["results"] == []
+        assert direct_read["citations"] == []
+        assert "excerpt" not in direct_read
 
 
 def test_search_returns_ok_and_public_only_result_fields() -> None:

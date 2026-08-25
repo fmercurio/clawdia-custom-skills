@@ -16,5 +16,6 @@
     "low",
     "medium"
   ],
+  "max_record_age_days": 30,
   "default_decision": "allow"
 }
