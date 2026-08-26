@@ -9,7 +9,7 @@ PACKAGE = RUNTIME_ROOT.parent
 PACKAGE_ROOT = PACKAGE / "templates" / "service"
 
 SERVICE_TEMPLATES = {
-    "launchagent": (PACKAGE_ROOT / "launchd-second-brain-mcp.plist.tmpl", ("SERVICE_LABEL", "INSTANCE_DIR", "LAUNCHER_PATH", "RUNTIME_PYTHON", "RUNTIME_ROOT", "CONFIG_PATH", "STDOUT_LOG_PATH", "STDERR_LOG_PATH")),
+    "launchagent": (PACKAGE_ROOT / "launchd-second-brain-mcp.plist.tmpl", ("SERVICE_LABEL", "INSTANCE_DIR", "LAUNCHER_PATH", "RUNTIME_PYTHON", "RUNTIME_ROOT", "CONFIG_PATH", "STDOUT_LOG_PATH", "STDERR_LOG_PATH", "HOME_DIR", "MINIMAL_PATH")),
     "launchdaemon": (PACKAGE_ROOT / "launchdaemon-second-brain-mcp.plist.tmpl", ("SERVICE_LABEL", "INSTANCE_DIR", "LAUNCHER_PATH", "RUNTIME_PYTHON", "RUNTIME_ROOT", "CONFIG_PATH", "STDOUT_LOG_PATH", "STDERR_LOG_PATH", "USER_NAME", "GROUP_NAME")),
     "systemd": (PACKAGE_ROOT / "systemd-user-second-brain-mcp.service.tmpl", ("SERVICE_LABEL", "INSTANCE_DIR", "LAUNCHER_PATH", "RUNTIME_PYTHON", "RUNTIME_ROOT", "CONFIG_PATH", "STDOUT_LOG_PATH", "STDERR_LOG_PATH")),
 }
@@ -23,6 +23,8 @@ REQUIRED_PLACEHOLDERS = {
     "CONFIG_PATH",
     "STDOUT_LOG_PATH",
     "STDERR_LOG_PATH",
+    "HOME_DIR",
+    "MINIMAL_PATH",
 }
 
 FORBIDDEN_PATH_PATTERNS = (r"/Users/", r"/home/", r"[A-Za-z]:\\\\")
@@ -41,6 +43,8 @@ STATE = {
     "CONFIG_PATH": "/absolute/path/to/instances/second-brain-readonly/runtime-config.json",
     "STDOUT_LOG_PATH": "/absolute/path/to/instances/second-brain-readonly/logs/mcp-stdout.log",
     "STDERR_LOG_PATH": "/absolute/path/to/instances/second-brain-readonly/logs/mcp-stderr.log",
+    "HOME_DIR": "/absolute/path/to/runtime-owner-home",
+    "MINIMAL_PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
     "USER_NAME": "svc-user",
     "GROUP_NAME": "svc-group",
 }
@@ -69,6 +73,19 @@ def _parse_launchd_array(xml_root: ElementTree.Element, key: str) -> list[str]:
             assert value_node is not None and value_node.tag == "array", f"missing launchd array key {key}"
             return [entry.text or "" for entry in value_node.findall("string")]
     raise AssertionError(f"missing launchd array key {key}")
+
+
+def _parse_launchd_dict(xml_root: ElementTree.Element, key: str) -> dict[str, str]:
+    dict_node = xml_root.find("dict")
+    assert dict_node is not None, "missing launchd dict"
+    child_pairs = list(dict_node)
+    for index, node in enumerate(child_pairs):
+        if node.tag == "key" and node.text == key:
+            value_node = child_pairs[index + 1] if index + 1 < len(child_pairs) else None
+            assert value_node is not None and value_node.tag == "dict", f"missing launchd dict key {key}"
+            value_pairs = list(value_node)
+            return {value_pairs[position].text or "": value_pairs[position + 1].text or "" for position in range(0, len(value_pairs), 2)}
+    raise AssertionError(f"missing launchd dict key {key}")
 
 
 def test_service_templates_are_renderable_with_explicit_state() -> None:
@@ -114,6 +131,9 @@ def test_launchd_and_systemd_are_instance_bound_and_do_not_auto_activate() -> No
         "--config",
         STATE["CONFIG_PATH"],
     ]
+    environment = _parse_launchd_dict(launchd_xml, "EnvironmentVariables")
+    assert environment["HOME"] == STATE["HOME_DIR"]
+    assert environment["PATH"] == STATE["MINIMAL_PATH"]
 
     daemon_rendered = _parse_launchd_array(ElementTree.fromstring(_render(daemon, STATE)), "ProgramArguments")
     assert daemon_rendered == launchd_args
