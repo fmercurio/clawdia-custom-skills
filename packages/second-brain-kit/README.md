@@ -79,10 +79,18 @@ uv run --offline --project runtime python scripts/service_plan.py \
 
 To render for a separately prepared runtime, pass **absolute** paths explicitly with `--runtime-root /absolute/path/to/second-brain-kit/bin` and `--runtime-python /absolute/path/to/venv/bin/python`. Do not use `/usr/bin/env python3`: a service template needs one concrete executable path.
 
-Run the production smoke check against an endpoint:
+Run the production smoke check against an endpoint. With no extra flag it requires exactly the four read-only retrieval tools:
 
 ```bash
 uv run --offline --project runtime python scripts/mcp_smoke.py --url https://example.invalid/mcp
+```
+
+For an instance deliberately configured with `proposal_staging_path`, opt in explicitly to its separate contract. This requires exactly the four retrieval tools plus the staging-only `propose_brain_delta` tool, validates its non-read-only annotation, and does **not** grant canonical vault write permission:
+
+```bash
+uv run --offline --project runtime python scripts/mcp_smoke.py \
+  --url https://example.invalid/mcp \
+  --expect-proposal-staging
 ```
 
 The helper uses the official MCP Python SDK transport; it does not handcraft protocol HTTP requests.
