@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import plistlib
+import pwd
 import stat
 import subprocess
 import sys
@@ -92,3 +94,49 @@ def test_service_plan_derives_managed_bin_and_captures_prepared_interpreter() ->
         bad_python = subprocess.run([sys.executable, str(SCRIPTS / "service_plan.py"), "--config", str(config), "--output-dir", str(root / "rendered"), "--service", "launchagent", "--runtime-python", "/usr/bin/env python3", "--json"], capture_output=True, text=True)
         assert bad_python.returncode == 2
         assert "absolute executable path" in bad_python.stdout
+
+
+def test_launchagent_plan_declares_environment_without_preparing_logs_in_dry_run() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        config = root / "runtime-config.json"
+        config.write_text(json.dumps({"instance_name": "test-readonly", "runtime_schema_version": "v0.2", "mode": "readonly", "transport": "http", "listener": {"host": "127.0.0.1", "port": 6283, "path": "/mcp"}, "policy_path": "policy.json", "projection_manifest_path": "projection-manifest.json"}), encoding="utf-8")
+        command = [sys.executable, str(SCRIPTS / "service_plan.py"), "--config", str(config), "--output-dir", str(root / "rendered"), "--runtime-root", str(SCRIPTS), "--service", "launchagent", "--json"]
+        rendered = subprocess.run(command, capture_output=True, text=True, env={**os.environ, "HOME": str(root / "untrusted-home")})
+        assert rendered.returncode == 0, rendered.stdout + rendered.stderr
+        report = json.loads(rendered.stdout)
+        assert report["required_directories"] == [str(root / "logs")]
+        assert not (root / "logs").exists()
+        plist = plistlib.loads(report["rendered"]["second-brain-mcp-launchagent.plist"].encode("utf-8"))
+        assert plist["EnvironmentVariables"]["HOME"] == str(Path(pwd.getpwuid(os.getuid()).pw_dir).resolve())
+        assert plist["EnvironmentVariables"]["PATH"] == "/usr/bin:/bin:/usr/sbin:/sbin"
+        assert plist["RunAtLoad"] is False
+        assert plist["KeepAlive"] is False
+
+
+def test_launchagent_plan_apply_prepares_private_logs_and_rejects_log_symlink() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        config = root / "runtime-config.json"
+        config.write_text(json.dumps({"instance_name": "test-readonly", "runtime_schema_version": "v0.2", "mode": "readonly", "transport": "http", "listener": {"host": "127.0.0.1", "port": 6283, "path": "/mcp"}, "policy_path": "policy.json", "projection_manifest_path": "projection-manifest.json"}), encoding="utf-8")
+        command = [sys.executable, str(SCRIPTS / "service_plan.py"), "--config", str(config), "--output-dir", str(root / "rendered"), "--runtime-root", str(SCRIPTS), "--service", "launchagent", "--apply", "--json"]
+        applied = subprocess.run(command, capture_output=True, text=True)
+        assert applied.returncode == 0, applied.stdout + applied.stderr
+        report = json.loads(applied.stdout)
+        logs = root / "logs"
+        assert report["prepared_directories"] == [str(logs.resolve())]
+        assert stat.S_IMODE(logs.stat().st_mode) == 0o700
+        rendered = root / "rendered" / "second-brain-mcp-launchagent.plist"
+        assert stat.S_IMODE(rendered.stat().st_mode) == 0o600
+
+        symlink_root = root / "symlink-instance"
+        symlink_root.mkdir()
+        symlink_config = symlink_root / "runtime-config.json"
+        symlink_config.write_text(config.read_text(encoding="utf-8"), encoding="utf-8")
+        outside = root / "outside-logs"
+        outside.mkdir()
+        (symlink_root / "logs").symlink_to(outside, target_is_directory=True)
+        rejected = subprocess.run([sys.executable, str(SCRIPTS / "service_plan.py"), "--config", str(symlink_config), "--output-dir", str(root / "rejected-rendered"), "--runtime-root", str(SCRIPTS), "--service", "launchagent", "--apply", "--json"], capture_output=True, text=True)
+        assert rejected.returncode == 2
+        assert "symlinked directory" in rejected.stdout
+        assert not (root / "rejected-rendered").exists()

@@ -5,10 +5,11 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import pwd
 import sys
 from pathlib import Path
 
-from kitlib import require_supported_python
+from kitlib import private_directory, require_supported_python
 
 RUNTIME_ROOT = Path(__file__).resolve().parent.parent
 TEMPLATE_ROOT = RUNTIME_ROOT / "templates" / "service"
@@ -29,7 +30,11 @@ PLACEHOLDERS = (
     "CONFIG_PATH",
     "STDOUT_LOG_PATH",
     "STDERR_LOG_PATH",
+    "HOME_DIR",
+    "MINIMAL_PATH",
 )
+
+MINIMAL_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
 
 DAEMON_PLACEHOLDERS = (
     "USER_NAME",
@@ -72,6 +77,27 @@ def _instance_paths(config_path: Path) -> Path:
     if config_path.is_symlink():
         raise ServiceError("instance config must not be a symlink")
     return config_path.parent
+
+
+def _planner_home() -> Path:
+    """Return the resolved home used by the LaunchAgent owner at render time."""
+
+    home = Path(pwd.getpwuid(os.getuid()).pw_dir)
+    if not home.is_absolute():
+        raise ServiceError("planner home must be absolute")
+    if home.is_symlink() or not home.is_dir():
+        raise ServiceError("planner home must be an existing non-symlink directory")
+    return home.resolve(strict=True)
+
+
+def _log_directory(instance_root: Path) -> Path:
+    return instance_root / "logs"
+
+
+def _prepare_log_directory(instance_root: Path) -> Path:
+    """Create the service log directory only for an explicit render apply."""
+
+    return private_directory(instance_root, Path("logs"))
 
 
 def _validate_shell_launcher(path: Path) -> Path:
@@ -166,6 +192,8 @@ def _plan(
         "CONFIG_PATH": str(config_path),
         "STDOUT_LOG_PATH": str(instance_root / "logs" / "mcp-stdout.log"),
         "STDERR_LOG_PATH": str(instance_root / "logs" / "mcp-stderr.log"),
+        "HOME_DIR": str(_planner_home()),
+        "MINIMAL_PATH": MINIMAL_PATH,
     }
     output: dict[str, str] = {}
     for name, template_name, rendered_name in TEMPLATES:
@@ -276,18 +304,27 @@ def main() -> int:
             raise ServiceError("--output-dir must not be a symlink")
 
         if args.apply:
+            instance_root = _instance_paths(config_path)
+            prepared_directories = [str(_prepare_log_directory(instance_root))]
             paths = _apply(output_dir, selected)
             plan = {
                 "ok": True,
                 "applied": True,
                 "output_dir": str(output_dir),
                 "rendered": paths,
+                "prepared_directories": prepared_directories,
             }
             if "second-brain-mcp-launchdaemon.plist" in selected:
                 plan["service_plan"] = {"applied": True, "required_owner_ack": True, "required_domain_ack": True}
             result = plan
         else:
-            result = {"ok": True, "applied": False, "output_dir": str(output_dir), "rendered": {name: text for name, text in selected.items() if name != "metadata"}}
+            result = {
+                "ok": True,
+                "applied": False,
+                "output_dir": str(output_dir),
+                "rendered": {name: text for name, text in selected.items() if name != "metadata"},
+                "required_directories": [str(_log_directory(_instance_paths(config_path)))],
+            }
 
         print(json.dumps(result, ensure_ascii=False, indent=2 if args.json else None))
         return 0

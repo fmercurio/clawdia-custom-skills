@@ -20,6 +20,8 @@ Render these templates with explicit values for:
 - `CONFIG_PATH`: external instance config path
 - `STDOUT_LOG_PATH`: stdout destination path
 - `STDERR_LOG_PATH`: stderr destination path
+- `HOME_DIR`: absolute home of the LaunchAgent owner
+- `MINIMAL_PATH`: deterministic system command path for the Bash launcher
 
 Recommended synthetic render map:
 
@@ -32,6 +34,8 @@ RUNTIME_ROOT=/absolute/path/to/runtime
 CONFIG_PATH=/absolute/path/to/second-brain-kit/instances/second-brain-readonly/runtime-config.json
 STDOUT_LOG_PATH=/absolute/path/to/second-brain-kit/instances/second-brain-readonly/logs/mcp-stdout.log
 STDERR_LOG_PATH=/absolute/path/to/second-brain-kit/instances/second-brain-readonly/logs/mcp-stderr.log
+HOME_DIR=/absolute/path/to/runtime-owner-home
+MINIMAL_PATH=/usr/bin:/bin:/usr/sbin:/sbin
 ```
 
 Runtime launch contract:
@@ -42,6 +46,8 @@ Runtime launch contract:
 - Both templates inject:
   - `SECOND_BRAIN_KIT_RUNTIME={RUNTIME_ROOT}`
   - `SECOND_BRAIN_KIT_PYTHON={RUNTIME_PYTHON}`
+- The LaunchAgent also injects `HOME={HOME_DIR}` and `PATH={MINIMAL_PATH}` explicitly.
+- `service_plan.py --apply` prepares `{INSTANCE_DIR}/logs` as an owner-only directory before writing a rendered service plan; dry-runs report that directory without creating it.
 - No `--host` or `--port` arguments are injected; binding is controlled by the rendered config and tenant policy.
 - `run_mcp.sh` is the v0.2 compatibility launcher: it accepts only an absolute tenant-owned runtime config and delegates to `run_mcp.py`. It does not install, activate, register, or authorize a service cutover.
 
