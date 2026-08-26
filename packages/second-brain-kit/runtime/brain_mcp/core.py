@@ -16,6 +16,7 @@ from .config import (
     contract_payload,
 )
 from .dlp import DECISION_DENIED, DECISION_REVIEW, assess_content
+from .proposals import ProposalRejected, ProposalStager
 from .ids import (
     IdError,
     content_hash,
@@ -34,6 +35,12 @@ COMPAT_TOOL_NAMES = (
     "read_brain_note",
     "pull_brain_context",
 )
+
+PROPOSAL_STAGING_POLICY_METADATA = {
+    "domain": "engineering",
+    "classification": "internal",
+    "sensitivity": "low",
+}
 
 FORBIDDEN_PATH_SEGMENTS = {
     ".git",
@@ -195,6 +202,7 @@ class V02Core(CompatibilityCore):
         records: Sequence[Mapping[str, Any]] | Mapping[str, Mapping[str, Any]] | None = None,
         *,
         config: RuntimeConfig | None = None,
+        proposal_stager: ProposalStager | None = None,
     ) -> None:
         selected_records: tuple[Mapping[str, Any], ...]
         if isinstance(records, Mapping):
@@ -208,6 +216,7 @@ class V02Core(CompatibilityCore):
             records=selected_records,
         )
         self.policy = self.config.policy
+        self._proposal_stager = proposal_stager
         # `_records` is the searchable index. Blocked records live separately so
         # policy/DLP are enforced before index admission.
         self._records: dict[str, _IndexedRecord] = {}
@@ -258,7 +267,112 @@ class V02Core(CompatibilityCore):
         return classification or None
 
     def list_tools(self) -> tuple[str, ...]:
+        if self._proposal_stager is not None:
+            return (*self.tool_names, "propose_brain_delta")
         return self.tool_names
+
+    @property
+    def proposal_staging_enabled(self) -> bool:
+        return self._proposal_stager is not None
+
+    def close(self) -> None:
+        if self._proposal_stager is not None:
+            self._proposal_stager.close()
+
+    def propose_brain_delta(
+        self,
+        *,
+        title: str,
+        summary: str,
+        proposed_changes: list[dict[str, str]],
+        provenance: list[str],
+    ) -> dict[str, Any]:
+        """Stage a DLP-clean semantic proposal without touching canonical knowledge."""
+
+        if self._proposal_stager is None:
+            return contract_payload(
+                status="denied",
+                resolved_intent="propose_brain_delta",
+                results=(),
+                citations=(),
+                classification=None,
+                state="denied",
+                confidence=EVIDENCE_CONFIDENCE_UNKNOWN,
+                selected_because="proposal_staging_not_configured",
+                limits={},
+                warnings=["proposal_staging_not_configured"],
+                policy=self.policy,
+                retrieval_mode=self.retrieval_mode,
+            )
+
+        policy_decision = self.policy.evaluate(PROPOSAL_STAGING_POLICY_METADATA)
+        if not policy_decision.allowed:
+            return contract_payload(
+                status="denied",
+                resolved_intent="propose_brain_delta",
+                results=(),
+                citations=(),
+                classification=None,
+                state="denied",
+                confidence=EVIDENCE_CONFIDENCE_UNKNOWN,
+                selected_because="proposal_policy_denied",
+                limits={},
+                warnings=[self._denied_warning_reason()],
+                policy=self.policy,
+                retrieval_mode=self.retrieval_mode,
+            )
+
+        try:
+            proposal = self._proposal_stager.stage(
+                title=title,
+                summary=summary,
+                proposed_changes=proposed_changes,
+                provenance=provenance,
+            )
+        except ProposalRejected as exc:
+            return contract_payload(
+                status="denied",
+                resolved_intent="propose_brain_delta",
+                results=(),
+                citations=(),
+                classification=None,
+                state="denied",
+                confidence=EVIDENCE_CONFIDENCE_UNKNOWN,
+                selected_because="proposal_rejected",
+                limits={},
+                warnings=[exc.code],
+                policy=self.policy,
+                retrieval_mode=self.retrieval_mode,
+            )
+
+        result = {
+            "proposal_id": proposal.proposal_id,
+            "canonical_ref": proposal.citation,
+            "classification": "internal",
+            "state": "staged",
+            "confidence": EVIDENCE_CONFIDENCE_EXPLICIT,
+            "selected_because": "proposal_staged",
+        }
+        citation = {
+            "canonical_ref": proposal.citation,
+            "classification": "internal",
+            "state": "staged",
+            "confidence": EVIDENCE_CONFIDENCE_EXPLICIT,
+        }
+        return contract_payload(
+            status="ok",
+            resolved_intent="propose_brain_delta",
+            results=[result],
+            citations=[citation],
+            classification="internal",
+            state="staged",
+            confidence=EVIDENCE_CONFIDENCE_EXPLICIT,
+            selected_because="proposal_staged",
+            limits={},
+            warnings=["canonical_promotion_requires_push_brain"],
+            policy=self.policy,
+            retrieval_mode=self.retrieval_mode,
+        )
 
     def _coerce_int(self, value: Any, name: str, min_value: int, max_value: int) -> int:
         if not isinstance(value, int) or isinstance(value, bool):

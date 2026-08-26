@@ -20,6 +20,7 @@ for runtime_root in (RUNTIME_MODULE_PACKAGE, RUNTIME_MODULE_ROOT):
 
 from brain_mcp.core import V02Core
 from brain_mcp.policy import RuntimePolicy
+from brain_mcp.proposals import ProposalStager
 from brain_mcp.projection import (
     MANIFEST_SCHEMA_VERSION,
     manifest_records_to_core_payload,
@@ -36,7 +37,10 @@ def _as_json_path(value: str) -> Path:
         raise ValueError(f"path does not exist: {path}")
     if path.is_symlink():
         raise ValueError(f"path must not be a symlink: {path}")
-    return path
+    try:
+        return path.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError(f"path could not be canonicalized: {path}") from exc
 
 
 def _as_instance_relative(path: object, field: str) -> Path:
@@ -111,60 +115,73 @@ def _validate_runtime_config(payload: dict[str, Any], config_path: Path) -> tupl
     manifest_relative = _as_instance_relative(payload.get("projection_manifest_path"), "projection_manifest_path")
 
     instance_root = config_path.parent
-    policy_path = instance_root / policy_relative
-    manifest_path = instance_root / manifest_relative
-    if not policy_path.is_file():
-        raise ValueError(f"policy file missing: {policy_path}")
-    if not manifest_path.is_file():
-        raise ValueError(f"projection manifest file missing: {manifest_path}")
+    proposal_stager = None
+    if "proposal_staging_path" in payload:
+        proposal_stager = ProposalStager.from_instance_root(instance_root, payload["proposal_staging_path"])
 
-    policy_payload = _read_json(policy_path)
-    policy = RuntimePolicy.parse(policy_payload)
+    try:
+        policy_path = instance_root / policy_relative
+        manifest_path = instance_root / manifest_relative
+        if not policy_path.is_file():
+            raise ValueError(f"policy file missing: {policy_path}")
+        if not manifest_path.is_file():
+            raise ValueError(f"projection manifest file missing: {manifest_path}")
 
-    manifest = parse_projection_manifest(manifest_path)
-    if manifest.manifest_version != MANIFEST_SCHEMA_VERSION:
-        raise ValueError(f"unsupported manifest version: {manifest.manifest_version}")
+        policy_payload = _read_json(policy_path)
+        policy = RuntimePolicy.parse(policy_payload)
 
-    records = manifest_records_to_core_payload(manifest)
-    core = V02Core(policy, records)
+        manifest = parse_projection_manifest(manifest_path)
+        if manifest.manifest_version != MANIFEST_SCHEMA_VERSION:
+            raise ValueError(f"unsupported manifest version: {manifest.manifest_version}")
 
-    return {
-        "runtime_schema_version": RUNTIME_SCHEMA_VERSION,
-        "mode": payload.get("mode"),
-        "transport": payload.get("transport"),
-        "listener": payload.get("listener"),
-        "policy_path": str(payload.get("policy_path")),
-        "projection_manifest_path": str(payload.get("projection_manifest_path")),
-        "host": host,
-        "port": port,
-        "path": path,
-        "manifest_identity": manifest.identity,
-        "manifest_generation": manifest.generation,
-        "records": len(manifest.records),
-    }, policy_path, manifest_path, instance_root, core
+        records = manifest_records_to_core_payload(manifest)
+        core = V02Core(policy, records, proposal_stager=proposal_stager)
+
+        return {
+            "runtime_schema_version": RUNTIME_SCHEMA_VERSION,
+            "mode": payload.get("mode"),
+            "transport": payload.get("transport"),
+            "listener": payload.get("listener"),
+            "policy_path": str(payload.get("policy_path")),
+            "projection_manifest_path": str(payload.get("projection_manifest_path")),
+            "host": host,
+            "port": port,
+            "path": path,
+            "manifest_identity": manifest.identity,
+            "manifest_generation": manifest.generation,
+            "records": len(manifest.records),
+            "proposal_staging_enabled": proposal_stager is not None,
+        }, policy_path, manifest_path, instance_root, core
+    except Exception:
+        if proposal_stager is not None:
+            proposal_stager.close()
+        raise
 
 
 def _run_check(payload: dict[str, Any]) -> dict[str, Any]:
     config_path = _as_json_path(payload["config"])
     config = _read_json(config_path)
     context, policy_path, manifest_path, instance_root, core = _validate_runtime_config(config, config_path)
-
-    return {
-        "ok": True,
-        "mode": "check",
-        "config_path": str(config_path),
-        "instance_root": str(instance_root),
-        "policy_path": str(policy_path),
-        "projection_manifest_path": str(manifest_path),
-        "listener": {
-            "host": context["host"],
-            "port": context["port"],
-            "path": context["path"],
-        },
-        "manifest_identity": context["manifest_identity"],
-        "manifest_generation": context["manifest_generation"],
-        "records": context["records"],
-    }
+    try:
+        return {
+            "ok": True,
+            "mode": "check",
+            "config_path": str(config_path),
+            "instance_root": str(instance_root),
+            "policy_path": str(policy_path),
+            "projection_manifest_path": str(manifest_path),
+            "listener": {
+                "host": context["host"],
+                "port": context["port"],
+                "path": context["path"],
+            },
+            "manifest_identity": context["manifest_identity"],
+            "manifest_generation": context["manifest_generation"],
+            "records": context["records"],
+            "proposal_staging_enabled": context["proposal_staging_enabled"],
+        }
+    finally:
+        core.close()
 
 
 def _run_serve(config_path: Path) -> None:
@@ -173,14 +190,17 @@ def _run_serve(config_path: Path) -> None:
     from brain_mcp.server import create_server
 
     mcp = create_server(core)
-    mcp.run(
-        transport="streamable-http",
-        host=context["host"],
-        port=context["port"],
-        streamable_http_path=context["path"],
-        json_response=True,
-        stateless_http=True,
-    )
+    try:
+        mcp.run(
+            transport="streamable-http",
+            host=context["host"],
+            port=context["port"],
+            streamable_http_path=context["path"],
+            json_response=True,
+            stateless_http=True,
+        )
+    finally:
+        core.close()
 
 
 def _dump(payload: dict[str, Any], as_json: bool) -> None:

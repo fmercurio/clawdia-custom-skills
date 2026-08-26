@@ -91,6 +91,24 @@ def create_server(core: CompatibilityCore | None = None) -> MCPServer:
                 ),
                 core,
             )
+
+        if core.proposal_staging_enabled:
+            @mcp.tool(name="propose_brain_delta", annotations=ToolAnnotations(readOnlyHint=False, openWorldHint=False))
+            def propose_brain_delta(
+                title: str,
+                summary: str,
+                proposed_changes: list[dict[str, str]],
+                provenance: list[str],
+            ) -> dict[str, Any]:
+                return _safe_payload(
+                    lambda: core.propose_brain_delta(
+                        title=title,
+                        summary=summary,
+                        proposed_changes=proposed_changes,
+                        provenance=provenance,
+                    ),
+                    core,
+                )
     else:
         @mcp.tool(name=COMPAT_TOOL_NAMES[0], annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
         def brain_status() -> dict[str, Any]:
