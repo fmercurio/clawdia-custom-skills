@@ -36,6 +36,12 @@ COMPAT_TOOL_NAMES = (
     "pull_brain_context",
 )
 
+PROPOSAL_STAGING_POLICY_METADATA = {
+    "domain": "engineering",
+    "classification": "internal",
+    "sensitivity": "low",
+}
+
 FORBIDDEN_PATH_SEGMENTS = {
     ".git",
     ".obsidian",
@@ -295,6 +301,23 @@ class V02Core(CompatibilityCore):
                 selected_because="proposal_staging_not_configured",
                 limits={},
                 warnings=["proposal_staging_not_configured"],
+                policy=self.policy,
+                retrieval_mode=self.retrieval_mode,
+            )
+
+        policy_decision = self.policy.evaluate(PROPOSAL_STAGING_POLICY_METADATA)
+        if not policy_decision.allowed:
+            return contract_payload(
+                status="denied",
+                resolved_intent="propose_brain_delta",
+                results=(),
+                citations=(),
+                classification=None,
+                state="denied",
+                confidence=EVIDENCE_CONFIDENCE_UNKNOWN,
+                selected_because="proposal_policy_denied",
+                limits={},
+                warnings=[self._denied_warning_reason()],
                 policy=self.policy,
                 retrieval_mode=self.retrieval_mode,
             )

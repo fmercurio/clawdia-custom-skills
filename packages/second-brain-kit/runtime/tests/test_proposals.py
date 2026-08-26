@@ -170,3 +170,34 @@ def test_run_mcp_check_opt_in_validates_without_creating_proposal(tmp_path: Path
     result = run_mcp._run_check({"config": str(instance / "runtime-config.json")})
     assert result["ok"] is True and result["proposal_staging_enabled"] is True
     assert not list(staging.iterdir())
+
+
+@pytest.mark.parametrize(
+    ("policy_field", "policy_value"),
+    [
+        ("allowed_classifications", ["public"]),
+        ("default_decision", "deny"),
+    ],
+)
+def test_tenant_policy_denial_prevents_proposal_staging(
+    tmp_path: Path,
+    policy_field: str,
+    policy_value: str | list[str],
+) -> None:
+    instance, staging = private_instance(tmp_path)
+    restricted_policy = policy_data()
+    restricted_policy[policy_field] = policy_value
+    core = V02Core(
+        restricted_policy,
+        records(),
+        proposal_stager=ProposalStager.from_instance_root(instance, "staging"),
+    )
+
+    proposal = valid_proposal()
+    result = core.propose_brain_delta(**proposal)
+
+    assert result["status"] == "denied"
+    assert result["results"] == [] and result["citations"] == []
+    assert result["warnings"] == ["policy_or_dlp_blocked"]
+    assert proposal["summary"] not in json.dumps(result)
+    assert not list(staging.iterdir())
