@@ -72,7 +72,7 @@ def records() -> list[dict]:
 
 def test_v02_mcp_server_exposes_four_readonly_tools() -> None:
     async def inspect() -> None:
-        server = create_server(core=V02Core(policy_data(), records()))
+        server = create_server(core=V02Core(policy_data(), records()), bearer_token="t" * 32)
         async with Client(server) as client:
             tools_result = await client.list_tools()
             tools = tools_result.tools
@@ -89,7 +89,7 @@ def test_v02_mcp_server_exposes_four_readonly_tools() -> None:
 
 def test_v02_mcp_server_structured_v02_payloads() -> None:
     async def inspect() -> None:
-        server = create_server(core=V02Core(policy_data(), records()))
+        server = create_server(core=V02Core(policy_data(), records()), bearer_token="t" * 32)
         async with Client(server) as client:
             search = await client.call_tool(
                 "search_brain",

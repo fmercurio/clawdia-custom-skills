@@ -73,7 +73,7 @@ def _proposal_staging_core(tmp_path: Path) -> tuple[V02Core, Path]:
 
 def test_mcp_smoke_uses_official_sdk_with_disposable_in_process_fixture() -> None:
     async def check() -> dict:
-        return await run_smoke(Client(create_server()))
+        return await run_smoke(Client(create_server(bearer_token="t" * 32)))
 
     payload = asyncio.run(check())
     assert payload["ok"] is True
@@ -93,7 +93,7 @@ def test_mcp_smoke_accepts_only_the_explicit_proposal_staging_profile(tmp_path: 
     async def check() -> dict:
         try:
             return await run_smoke(
-                Client(create_server(core=core)),
+                Client(create_server(core=core, bearer_token="t" * 32)),
                 expect_proposal_staging=True,
             )
         finally:
@@ -116,7 +116,7 @@ def test_proposal_staging_server_fails_the_default_readonly_smoke_contract(tmp_p
 
     async def check() -> dict:
         try:
-            return await run_smoke(Client(create_server(core=core)))
+            return await run_smoke(Client(create_server(core=core, bearer_token="t" * 32)))
         finally:
             core.close()
 

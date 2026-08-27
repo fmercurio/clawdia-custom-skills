@@ -20,11 +20,12 @@ def audit(vault: Path) -> dict:
 
 def create_vault(vault: Path, owner: str, organization: str | None) -> list[str]:
     created: list[str] = []
-    vault.mkdir(parents=True, exist_ok=True)
+    vault.mkdir(parents=True, exist_ok=True, mode=0o700)
+    vault.chmod(0o700)
     for name in REQUIRED_DIRS:
         path = vault / name
         if not path.exists():
-            path.mkdir(parents=True)
+            path.mkdir(parents=True, mode=0o700)
             created.append(str(path))
     org_line = f"\nOrganization: {organization}." if organization else ""
     docs = {
@@ -68,6 +69,10 @@ def main() -> int:
     cfg_path = config_path(home, args.profile)
     before = audit(vault)
     report = {"mode": "existing" if args.existing else "new", "dry_run": not args.apply, "before": before, "created": []}
+    if cfg_path.is_symlink():
+        report["error"] = "refusing symlink destination for configuration"
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return 2
     if args.existing and not vault.exists():
         report["error"] = "existing vault does not exist"
         print(json.dumps(report, ensure_ascii=False, indent=2))
@@ -88,7 +93,8 @@ def main() -> int:
         if not args.existing:
             report["created"] = create_vault(vault, args.owner, args.organization)
         cfg = default_config(args.owner, vault, args.profile, args.organization, args.mode, "existing" if args.existing else "new")
-        save_config(cfg_path, cfg)
+        home.mkdir(parents=True, exist_ok=True, mode=0o700)
+        save_config(cfg_path, cfg, root=home)
         report["config"] = str(cfg_path)
     report["after"] = audit(vault)
     print(json.dumps(report, ensure_ascii=False, indent=2))

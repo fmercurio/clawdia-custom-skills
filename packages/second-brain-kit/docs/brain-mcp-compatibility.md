@@ -39,7 +39,7 @@ The four v0.1 read-only tools and their bounded response contract remain the pub
 - The public runtime consumes only projection records, policy, and instance configuration; it never enumerates or reads a tenant vault.
 - Policy/DLP checks run again after projection parsing and before a record enters the searchable core.
 - Projection records require an explicit eligibility flag, classification, sensitivity, provenance, and freshness metadata.
-- The runner accepts only an instance-relative policy/manifest pair and a loopback listener contract; serve mode fails closed until a verified MCP HTTP transport is available.
+- The runner accepts only an instance-relative policy/manifest/token set and a loopback listener contract; serve mode fails closed until a verified MCP HTTP transport is available and every request presents the per-instance bearer token.
 
 The following remain intentionally unsupported: policy bypass, generic filesystems, direct vault ingestion, writes, shell/Git/SQL execution, index rebuild, and remote egress.
 

@@ -177,6 +177,31 @@ def test_run_mcp_check_canonicalizes_relative_and_parent_alias_config_paths(tmp_
         run_mcp._run_check({"config": str(config_link)})
 
 
+def test_run_mcp_check_rejects_projection_manifest_beneath_a_symlinked_parent(tmp_path: Path) -> None:
+    instance, _staging = private_instance(tmp_path)
+    write_opt_in_runtime(instance)
+    config_path = instance / "runtime-config.json"
+    runtime_config = json.loads(config_path.read_text(encoding="utf-8"))
+    runtime_config["projection_manifest_path"] = "nested/projection-manifest.json"
+    config_path.write_text(json.dumps(runtime_config), encoding="utf-8")
+    config_path.chmod(0o600)
+
+    external = tmp_path / "external"
+    external.mkdir(mode=0o700)
+    external_manifest = external / "projection-manifest.json"
+    external_manifest.write_text(
+        (instance / "projection-manifest.json").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    external_manifest.chmod(0o600)
+    (instance / "nested").symlink_to(external, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="symlink"):
+        run_mcp._run_check({"config": str(config_path)})
+
+    assert external_manifest.is_file()
+
+
 def test_post_publication_cleanup_attempts_temp_after_destination_cleanup_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

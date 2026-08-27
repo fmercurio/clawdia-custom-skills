@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import stat
 from pathlib import Path
 from typing import Any
 import sys
@@ -29,6 +31,7 @@ from brain_mcp.projection import (
 
 RUNTIME_SCHEMA_VERSION = "v0.2"
 LOOPBACK_HOST = "127.0.0.1"
+MAX_TOKEN_BYTES = 4096
 
 
 def _as_json_path(value: str) -> Path:
@@ -69,6 +72,73 @@ def _read_json(path: Path) -> dict[str, Any]:
     return payload
 
 
+def _read_private_token(path: Path, instance_root: Path) -> str:
+    """Read an owner-only token through a pinned, no-follow path walk."""
+    try:
+        relative = path.relative_to(instance_root)
+    except ValueError as exc:
+        raise ValueError("MCP access token must stay inside the instance") from exc
+    if not relative.parts:
+        raise ValueError("MCP access token path must name a file")
+
+    directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    file_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    try:
+        current_fd = os.open(instance_root, directory_flags)
+    except OSError as exc:
+        raise ValueError("MCP instance directory must be a real directory") from exc
+    try:
+        root_stat = os.fstat(current_fd)
+        if not stat.S_ISDIR(root_stat.st_mode) or root_stat.st_uid != os.geteuid():
+            raise ValueError("MCP instance directory must be owner-owned")
+        for component in relative.parts[:-1]:
+            try:
+                next_fd = os.open(component, directory_flags, dir_fd=current_fd)
+            except OSError as exc:
+                raise ValueError("MCP access token path must not contain symlinks or unreadable directories") from exc
+            try:
+                component_stat = os.fstat(next_fd)
+                if not stat.S_ISDIR(component_stat.st_mode) or component_stat.st_uid != os.geteuid():
+                    raise ValueError("MCP access token path must contain owner-owned directories")
+            except Exception:
+                os.close(next_fd)
+                raise
+            os.close(current_fd)
+            current_fd = next_fd
+
+        try:
+            token_fd = os.open(relative.parts[-1], file_flags, dir_fd=current_fd)
+        except OSError as exc:
+            raise ValueError("MCP access token is unreadable or symlinked") from exc
+        try:
+            token_stat = os.fstat(token_fd)
+            if not stat.S_ISREG(token_stat.st_mode):
+                raise ValueError("MCP access token must be a regular file")
+            if token_stat.st_uid != os.geteuid():
+                raise ValueError("MCP access token must be owned by the service user")
+            if stat.S_IMODE(token_stat.st_mode) & 0o077:
+                raise ValueError("MCP access token must be owner-only (mode 0600)")
+            payload = b""
+            while len(payload) <= MAX_TOKEN_BYTES:
+                chunk = os.read(token_fd, MAX_TOKEN_BYTES + 1 - len(payload))
+                if not chunk:
+                    break
+                payload += chunk
+            if len(payload) > MAX_TOKEN_BYTES:
+                raise ValueError("MCP access token is too large")
+        finally:
+            os.close(token_fd)
+    finally:
+        os.close(current_fd)
+    try:
+        token = payload.decode("utf-8").strip()
+    except UnicodeDecodeError as exc:
+        raise ValueError("MCP access token must be UTF-8") from exc
+    if len(token) < 32:
+        raise ValueError("MCP access token is invalid")
+    return token
+
+
 def _validate_listener(payload: Any) -> tuple[str, int, str]:
     if not isinstance(payload, dict):
         raise ValueError("listener must be an object")
@@ -90,7 +160,7 @@ def _validate_listener(payload: Any) -> tuple[str, int, str]:
     return host.strip(), port, path
 
 
-def _validate_runtime_config(payload: dict[str, Any], config_path: Path) -> tuple[dict[str, Any], Path, Path, Path, V02Core]:
+def _validate_runtime_config(payload: dict[str, Any], config_path: Path) -> tuple[dict[str, Any], Path, Path, Path, V02Core, str | None]:
     required = {
         "runtime_schema_version",
         "mode",
@@ -122,6 +192,10 @@ def _validate_runtime_config(payload: dict[str, Any], config_path: Path) -> tupl
     try:
         policy_path = instance_root / policy_relative
         manifest_path = instance_root / manifest_relative
+        token: str | None = None
+        if "auth_token_path" in payload:
+            token_relative = _as_instance_relative(payload.get("auth_token_path"), "auth_token_path")
+            token = _read_private_token(instance_root / token_relative, instance_root)
         if not policy_path.is_file():
             raise ValueError(f"policy file missing: {policy_path}")
         if not manifest_path.is_file():
@@ -130,7 +204,7 @@ def _validate_runtime_config(payload: dict[str, Any], config_path: Path) -> tupl
         policy_payload = _read_json(policy_path)
         policy = RuntimePolicy.parse(policy_payload)
 
-        manifest = parse_projection_manifest(manifest_path)
+        manifest = parse_projection_manifest(manifest_path, trusted_root=instance_root)
         if manifest.manifest_version != MANIFEST_SCHEMA_VERSION:
             raise ValueError(f"unsupported manifest version: {manifest.manifest_version}")
 
@@ -144,6 +218,7 @@ def _validate_runtime_config(payload: dict[str, Any], config_path: Path) -> tupl
             "listener": payload.get("listener"),
             "policy_path": str(payload.get("policy_path")),
             "projection_manifest_path": str(payload.get("projection_manifest_path")),
+            "auth_token_path": str(payload.get("auth_token_path")),
             "host": host,
             "port": port,
             "path": path,
@@ -151,7 +226,7 @@ def _validate_runtime_config(payload: dict[str, Any], config_path: Path) -> tupl
             "manifest_generation": manifest.generation,
             "records": len(manifest.records),
             "proposal_staging_enabled": proposal_stager is not None,
-        }, policy_path, manifest_path, instance_root, core
+        }, policy_path, manifest_path, instance_root, core, token
     except Exception:
         if proposal_stager is not None:
             proposal_stager.close()
@@ -161,7 +236,7 @@ def _validate_runtime_config(payload: dict[str, Any], config_path: Path) -> tupl
 def _run_check(payload: dict[str, Any]) -> dict[str, Any]:
     config_path = _as_json_path(payload["config"])
     config = _read_json(config_path)
-    context, policy_path, manifest_path, instance_root, core = _validate_runtime_config(config, config_path)
+    context, policy_path, manifest_path, instance_root, core, _token = _validate_runtime_config(config, config_path)
     try:
         return {
             "ok": True,
@@ -186,10 +261,14 @@ def _run_check(payload: dict[str, Any]) -> dict[str, Any]:
 
 def _run_serve(config_path: Path) -> None:
     config = _read_json(config_path)
-    context, _policy_path, _manifest_path, _instance_root, core = _validate_runtime_config(config, config_path)
+    context, _policy_path, _manifest_path, _instance_root, core, token = _validate_runtime_config(config, config_path)
+    if token is None:
+        core.close()
+        raise ValueError("runtime config must configure auth_token_path before --serve")
     from brain_mcp.server import create_server
 
-    mcp = create_server(core)
+    resource_server_url = f"http://{context['host']}:{context['port']}{context['path']}"
+    mcp = create_server(core, bearer_token=token, resource_server_url=resource_server_url)
     try:
         mcp.run(
             transport="streamable-http",

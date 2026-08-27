@@ -63,6 +63,171 @@ class TestKitE2E(unittest.TestCase):
         report = json.loads(run("doctor.py", "--hermes-home", str(self.home), "--profile", self.profile, "--smoke", "--json").stdout)
         self.assertTrue(report["ok"], report)
 
+    def test_new_vault_is_private_by_default(self):
+        previous_umask = os.umask(0o022)
+        try:
+            self.bootstrap()
+        finally:
+            os.umask(previous_umask)
+
+        self.assertEqual(stat.S_IMODE(self.vault.stat().st_mode), 0o700)
+        self.assertTrue(all(stat.S_IMODE(path.stat().st_mode) == 0o700 for path in self.vault.iterdir() if path.is_dir()))
+        self.assertTrue(all(stat.S_IMODE(path.stat().st_mode) == 0o600 for path in self.vault.rglob("*") if path.is_file()))
+
+    def test_bootstrap_writes_private_config_and_rejects_a_symlink_target(self):
+        self.bootstrap()
+        cfg_path = self.home / "second-brain-kit" / "profiles" / self.profile / "config.yaml"
+        self.assertEqual(stat.S_IMODE(self.home.stat().st_mode), 0o700)
+        self.assertEqual(stat.S_IMODE(cfg_path.stat().st_mode), 0o600)
+
+        cfg_path.unlink()
+        outside = self.root / "outside-config.json"
+        outside.write_text("sentinel\n", encoding="utf-8")
+        cfg_path.symlink_to(outside)
+        result = run(
+            "bootstrap.py",
+            "--hermes-home",
+            str(self.home),
+            "--profile",
+            self.profile,
+            "--vault",
+            str(self.vault),
+            "--owner",
+            "Example Owner",
+            "--existing",
+            "--apply",
+            "--json",
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("refusing symlink destination", result.stdout)
+        self.assertEqual(outside.read_text(encoding="utf-8"), "sentinel\n")
+
+    def test_install_rejects_dotdot_mcp_instance_before_writes(self):
+        self.bootstrap()
+        cfg_path = self.home / "second-brain-kit" / "profiles" / self.profile / "config.yaml"
+        cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+        cfg["mcp_readonly"] = {"enabled": True, "instance_name": ".."}
+        cfg_path.write_text(json.dumps(cfg), encoding="utf-8")
+
+        result = run(
+            "install.py",
+            "--hermes-home", str(self.home),
+            "--profile", self.profile,
+            "--enable-mcp",
+            "--apply",
+            "--json",
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("instance_name", result.stdout)
+        self.assertFalse((self.home / "second-brain-kit" / "instances").exists())
+
+    def test_install_rejects_symlinked_managed_parent_without_touching_target(self):
+        self.bootstrap()
+        outside = self.root / "outside-bin"
+        outside.mkdir()
+        sentinel = outside / "brain_ops.py"
+        sentinel.write_text("keep\n", encoding="utf-8")
+        bin_root = self.home / "second-brain-kit" / "bin"
+        bin_root.symlink_to(outside, target_is_directory=True)
+
+        result = run(
+            "install.py",
+            "--hermes-home", str(self.home),
+            "--profile", self.profile,
+            "--apply",
+            "--force",
+            "--json",
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("cannot securely open managed directory", result.stdout)
+        self.assertEqual(sentinel.read_text(encoding="utf-8"), "keep\n")
+
+    def test_install_rejects_symlinked_managed_file_without_touching_target(self):
+        self.bootstrap()
+        bin_root = self.home / "second-brain-kit" / "bin"
+        bin_root.mkdir(parents=True)
+        outside = self.root / "outside-script.py"
+        outside.write_text("keep\n", encoding="utf-8")
+        (bin_root / "bootstrap.py").symlink_to(outside)
+
+        result = run(
+            "install.py",
+            "--hermes-home", str(self.home),
+            "--profile", self.profile,
+            "--apply",
+            "--force",
+            "--json",
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("refusing symlink destination", result.stdout)
+        self.assertEqual(outside.read_text(encoding="utf-8"), "keep\n")
+
+    def test_service_plan_replaces_child_symlink_without_touching_target(self):
+        self.bootstrap()
+        self.install("--enable-mcp")
+        instance = self.home / "second-brain-kit" / "instances" / "second-brain-readonly"
+        output_dir = self.root / "service-output"
+        output_dir.mkdir(mode=0o700)
+        outside = self.root / "outside.service"
+        outside.write_text("sentinel\n", encoding="utf-8")
+        target = output_dir / "second-brain-mcp.service"
+        target.symlink_to(outside)
+
+        result = run(
+            "service_plan.py",
+            "--config", str(instance / "runtime-config.json"),
+            "--output-dir", str(output_dir),
+            "--service", "systemd",
+            "--apply",
+            "--json",
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(outside.read_text(encoding="utf-8"), "sentinel\n")
+        self.assertFalse(target.is_symlink())
+        self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o600)
+
+    def test_service_plan_rejects_symlinked_output_ancestor_without_writing(self):
+        self.bootstrap()
+        self.install("--enable-mcp")
+        instance = self.home / "second-brain-kit" / "instances" / "second-brain-readonly"
+        outside = self.root / "outside-service-output"
+        outside.mkdir()
+        linked_parent = self.root / "linked-parent"
+        linked_parent.symlink_to(outside, target_is_directory=True)
+        output_dir = linked_parent / "service-output"
+
+        result = run(
+            "service_plan.py",
+            "--config", str(instance / "runtime-config.json"),
+            "--output-dir", str(output_dir),
+            "--service", "systemd",
+            "--apply",
+            "--json",
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("symlink", result.stdout)
+        self.assertFalse((outside / "service-output").exists())
+
+    def test_push_brain_requires_separate_explicit_write_commit_and_push_gates(self):
+        skill = (REPO / "skills" / "note-taking" / "push-brain" / "SKILL.md").read_text(encoding="utf-8").lower()
+        self.assertNotIn("after completing a non-trivial", skill)
+        self.assertNotIn("when the user sends a url with no other instruction", skill)
+        self.assertIn("explicit confirmation", skill)
+        self.assertIn("commit is distinct", skill)
+        self.assertIn("push is distinct", skill)
+
     def test_python_version_preflight_matches_the_documented_minimum_before_writes(self):
         result = run(
             "bootstrap.py",
@@ -274,6 +439,18 @@ class TestKitE2E(unittest.TestCase):
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse((outside / "brain_search.sqlite").exists())
+
+    def test_search_rebuild_refuses_non_private_existing_vault(self):
+        self.bootstrap()
+        self.vault.chmod(0o777)
+        search = PACKAGE / "skills" / "brain-search" / "scripts" / "brain_search.py"
+        result = subprocess.run(
+            [PYTHON, str(search), "--vault", str(self.vault), "--rebuild", "--json"],
+            capture_output=True, text=True,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("not be writable by other users", result.stdout)
+        self.assertFalse((self.vault / ".brain-index").exists())
 
     def test_search_index_enforces_owner_only_permissions(self):
         self.bootstrap()
