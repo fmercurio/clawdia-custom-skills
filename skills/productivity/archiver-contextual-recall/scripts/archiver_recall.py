@@ -10,7 +10,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from archiver_db import DB, VAULT, connect_readonly, table_columns, table_exists
+from archiver_db import DB, VAULT, connect_readonly, read_vault_text, table_columns, table_exists
 
 SKIP_PREFIXES = {"90-meta", "attachments"}
 URL_PREFIX_RE = re.compile(r"\bhttps?://[^\s<>'\"`\]\[(){}]+")
@@ -423,7 +423,9 @@ def collect_note_results(query: str, limit: int, status: str | None) -> list[dic
         rel_parts = md_path.relative_to(VAULT).parts
         if rel_parts and rel_parts[0] in SKIP_PREFIXES:
             continue
-        text = md_path.read_text(encoding="utf-8", errors="ignore")
+        text = read_vault_text(VAULT, md_path)
+        if text is None:
+            continue
         meta = parse_frontmatter(md_path)
         if status and _normalize_status(meta.get("status", "")) != _normalize_status(status):
             continue

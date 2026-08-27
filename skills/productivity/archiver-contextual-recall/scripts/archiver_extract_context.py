@@ -2,10 +2,19 @@
 """Pure URL content extraction helpers for Archiver link contexts."""
 from __future__ import annotations
 
+import http.client
+import ipaddress
+import json
+import os
 import re
+import socket
+import subprocess
+import sys
+import time
 from importlib import import_module
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.parse import urlsplit
+from urllib.request import HTTPHandler, HTTPRedirectHandler, HTTPSHandler, ProxyHandler, Request, build_opener
 
 HTML_TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 HTML_META_DESCRIPTION_RE = re.compile(
@@ -15,6 +24,178 @@ HTML_META_DESCRIPTION_RE = re.compile(
 HTML_TAG_RE = re.compile(r"<[^>]+>")
 PDF_PAGE_LIMIT = 12
 PDF_TEXT_LIMIT = 20000
+PDF_WORKER_TIMEOUT_SECONDS = 5
+PDF_WORKER_ADDRESS_SPACE_BYTES = 512 * 1024 * 1024
+PDF_WORKER_CPU_SECONDS = 5
+PDF_WORKER_OUTPUT_BYTES = 64 * 1024
+
+
+def _remaining_deadline(deadline: float | None) -> float | None:
+    if deadline is None:
+        return None
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("URL extraction deadline exceeded")
+    return remaining
+
+
+def _public_addresses(
+    host: str,
+    port: int,
+    deadline: float | None = None,
+) -> list[tuple[int, tuple[object, ...]]]:
+    """Resolve only globally-routable targets before a network connection."""
+    try:
+        _remaining_deadline(deadline)
+        candidates = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+        _remaining_deadline(deadline)
+    except socket.gaierror as exc:
+        raise ValueError("host could not be resolved") from exc
+
+    addresses: list[tuple[int, tuple[object, ...]]] = []
+    for family, _socktype, _proto, _canonname, sockaddr in candidates:
+        address = ipaddress.ip_address(str(sockaddr[0]))
+        if not address.is_global:
+            raise ValueError("non-public network targets are not allowed")
+        addresses.append((family, sockaddr))
+    if not addresses:
+        raise ValueError("host did not resolve to an address")
+    return addresses
+
+
+def _validate_public_url(url: str, deadline: float | None = None) -> None:
+    parsed = urlsplit(url)
+    if parsed.scheme.lower() not in {"http", "https"}:
+        raise ValueError("only HTTP(S) URLs are supported")
+    if not parsed.hostname or parsed.username is not None or parsed.password is not None:
+        raise ValueError("URL must have a hostname and no embedded credentials")
+    try:
+        port = parsed.port or (443 if parsed.scheme.lower() == "https" else 80)
+    except ValueError as exc:
+        raise ValueError("URL has an invalid port") from exc
+    _public_addresses(parsed.hostname, port, deadline)
+
+
+def _connect_public_host(
+    host: str,
+    port: int,
+    timeout: float | object,
+    source_address=None,
+    deadline: float | None = None,
+) -> socket.socket:
+    """Connect to a vetted resolved address, avoiding a second DNS lookup."""
+    last_error: OSError | None = None
+    for family, sockaddr in _public_addresses(host, port, deadline):
+        sock = socket.socket(family, socket.SOCK_STREAM)
+        try:
+            remaining = _remaining_deadline(deadline)
+            socket_timeout = timeout
+            if remaining is not None:
+                socket_timeout = remaining if timeout is socket._GLOBAL_DEFAULT_TIMEOUT else min(float(timeout), remaining)
+            if socket_timeout is not socket._GLOBAL_DEFAULT_TIMEOUT:
+                sock.settimeout(socket_timeout)
+            if source_address:
+                sock.bind(source_address)
+            sock.connect(sockaddr)
+            return sock
+        except OSError as exc:
+            last_error = exc
+            sock.close()
+    raise last_error or OSError("could not connect to public host")
+
+
+class _PublicHTTPConnection(http.client.HTTPConnection):
+    extraction_deadline: float | None = None
+
+    def connect(self) -> None:
+        self.sock = _connect_public_host(
+            self.host, self.port, self.timeout, self.source_address, self.extraction_deadline
+        )
+        if self._tunnel_host:
+            self._tunnel()
+
+
+class _PublicHTTPSConnection(http.client.HTTPSConnection):
+    extraction_deadline: float | None = None
+
+    def connect(self) -> None:
+        self.sock = _connect_public_host(
+            self.host, self.port, self.timeout, self.source_address, self.extraction_deadline
+        )
+        if self._tunnel_host:
+            self._tunnel()
+            server_hostname = self._tunnel_host
+        else:
+            server_hostname = self.host
+        self.sock = self._context.wrap_socket(self.sock, server_hostname=server_hostname)
+
+
+def _connection_with_deadline(base_class, deadline: float | None):
+    return type("DeadlineBound" + base_class.__name__, (base_class,), {"extraction_deadline": deadline})
+
+
+class _PublicHTTPHandler(HTTPHandler):
+    def __init__(self, deadline: float | None = None):
+        super().__init__()
+        self._connection_class = _connection_with_deadline(_PublicHTTPConnection, deadline)
+
+    def http_open(self, req):
+        return self.do_open(self._connection_class, req)
+
+
+class _PublicHTTPSHandler(HTTPSHandler):
+    def __init__(self, deadline: float | None = None):
+        super().__init__()
+        self._connection_class = _connection_with_deadline(_PublicHTTPSConnection, deadline)
+
+    def https_open(self, req):
+        return self.do_open(self._connection_class, req, context=self._context, check_hostname=self._check_hostname)
+
+
+class _PublicRedirectHandler(HTTPRedirectHandler):
+    def __init__(self, deadline: float | None = None):
+        super().__init__()
+        self._deadline = deadline
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        _validate_public_url(newurl, self._deadline)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def _public_url_opener(deadline: float | None = None):
+    return build_opener(
+        ProxyHandler({}),
+        _PublicHTTPHandler(deadline),
+        _PublicHTTPSHandler(deadline),
+        _PublicRedirectHandler(deadline),
+    )
+
+
+def _set_response_timeout(response, deadline: float | None) -> None:
+    remaining = _remaining_deadline(deadline)
+    if remaining is None:
+        return
+    fp = getattr(response, "fp", None)
+    raw = getattr(fp, "raw", None)
+    sock = getattr(raw, "_sock", None)
+    if sock is not None:
+        sock.settimeout(remaining)
+
+
+def _read_response_with_deadline(response, max_bytes: int, deadline: float | None) -> bytes:
+    """Stream a bounded response while sharing the single extraction deadline."""
+    chunks: list[bytes] = []
+    remaining = max_bytes
+    reader = getattr(response, "read1", None) or response.read
+    while remaining:
+        _set_response_timeout(response, deadline)
+        chunk = reader(min(64 * 1024, remaining))
+        _remaining_deadline(deadline)
+        if not chunk:
+            break
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    return b"".join(chunks)
 
 
 def _strip_html(text: str) -> str:
@@ -166,29 +347,74 @@ def _extract_pdf_context(url: str, raw_bytes: bytes) -> dict[str, object]:
     }
 
 
+def _limit_pdf_worker() -> None:
+    """Apply best-effort POSIX limits before opening an untrusted PDF."""
+    try:
+        import resource
+
+        resource.setrlimit(resource.RLIMIT_AS, (PDF_WORKER_ADDRESS_SPACE_BYTES, PDF_WORKER_ADDRESS_SPACE_BYTES))
+        resource.setrlimit(resource.RLIMIT_CPU, (PDF_WORKER_CPU_SECONDS, PDF_WORKER_CPU_SECONDS))
+    except (ImportError, OSError, ValueError):
+        pass
+
+
+def _extract_pdf_in_worker(url: str, raw_bytes: bytes, deadline: float) -> dict[str, object]:
+    """Keep parser decompression and CPU work outside the Archiver process."""
+    try:
+        timeout = min(PDF_WORKER_TIMEOUT_SECONDS, _remaining_deadline(deadline))
+        completed = subprocess.run(
+            [sys.executable, str(__file__), "--pdf-worker", url],
+            input=raw_bytes,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=timeout,
+            check=False,
+            preexec_fn=_limit_pdf_worker if os.name == "posix" else None,
+        )
+    except subprocess.TimeoutExpired:
+        return _error_payload(url, "failed", "PDF extraction worker timed out", "pymupdf-worker")
+    except OSError as exc:
+        return _error_payload(url, "failed", str(exc), "pymupdf-worker")
+
+    if len(completed.stdout) > PDF_WORKER_OUTPUT_BYTES:
+        return _error_payload(url, "failed", "PDF extraction worker output exceeded limit", "pymupdf-worker")
+    if completed.returncode != 0:
+        return _error_payload(url, "failed", "PDF extraction worker failed", "pymupdf-worker")
+    try:
+        result = json.loads(completed.stdout.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return _error_payload(url, "failed", "PDF extraction worker returned invalid output", "pymupdf-worker")
+    if not isinstance(result, dict):
+        return _error_payload(url, "failed", "PDF extraction worker returned invalid payload", "pymupdf-worker")
+    return result
+
+
 def extract_url_context(
     url: str,
     timeout: int = 5,
     max_bytes: int = 512000,
     pdf_max_bytes: int = 8_000_000,
 ) -> dict[str, object]:
-    if not url.startswith(("http://", "https://")):
-        return _error_payload(url, "unsupported_content_type", "URL sem suporte para extração")
+    deadline = time.monotonic() + timeout
+    try:
+        _validate_public_url(url, deadline)
+    except ValueError as exc:
+        return _error_payload(url, "failed", str(exc))
 
     request = Request(url, headers={"User-Agent": "ArchiverContextBot/1.0"})
     try:
-        with urlopen(request, timeout=timeout) as response:
+        with _public_url_opener(deadline).open(request, timeout=_remaining_deadline(deadline)) as response:
             content_type = (response.headers.get("Content-Type") or "").lower()
             media_type = content_type.split(";", 1)[0].strip()
             is_pdf = media_type == "application/pdf" or _is_pdf_url(url)
             if media_type not in {"text/html", "text/plain"} and not is_pdf:
                 return _error_payload(url, "unsupported_content_type", "Tipo de conteúdo sem suporte")
-            raw_bytes = response.read(pdf_max_bytes if is_pdf else max_bytes)
+            raw_bytes = _read_response_with_deadline(response, pdf_max_bytes if is_pdf else max_bytes, deadline)
     except (URLError, HTTPError, TimeoutError, OSError, ValueError) as exc:
         return _error_payload(url, "failed", str(exc))
 
     if is_pdf:
-        return _extract_pdf_context(url, raw_bytes)
+        return _extract_pdf_in_worker(url, raw_bytes, deadline)
 
     try:
         charset_match = re.search(r"charset=([^;\s]+)", content_type or "")
@@ -222,3 +448,17 @@ def extract_url_context(
         "extractor": "urllib.request",
         "error": None,
     }
+
+
+def _pdf_worker_main(url: str) -> int:
+    raw_bytes = sys.stdin.buffer.read(8_000_000 + 1)
+    if len(raw_bytes) > 8_000_000:
+        return 2
+    result = _extract_pdf_context(url, raw_bytes)
+    sys.stdout.write(json.dumps(result, ensure_ascii=False))
+    return 0
+
+
+if __name__ == "__main__":
+    if len(sys.argv) == 3 and sys.argv[1] == "--pdf-worker":
+        raise SystemExit(_pdf_worker_main(sys.argv[2]))
