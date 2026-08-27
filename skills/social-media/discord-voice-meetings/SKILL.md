@@ -61,7 +61,7 @@ source env.example
 python scripts/meeting_bot.py
 ```
 
-In Discord, use `/meeting start [title]` in a voice channel → speak → `/meeting stop`.
+In Discord, use `/meeting start [title]` only in a configured private voice channel → speak → `/meeting stop`. The bot denies starts outside `discord.allowed_voice_channels`.
 
 ## Prerequisites
 

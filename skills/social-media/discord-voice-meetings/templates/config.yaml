@@ -3,12 +3,17 @@
 # Generic, framework-agnostic template for a Discord voice meeting bot.
 # Secrets are read from environment variables; see env.example in this directory.
 # Values shown here are safe defaults for a standalone meeting_bot.py implementation.
+# Custom LLM origins must be bound to their credential environment by the protected
+# process environment, e.g. LLM_CREDENTIAL_BINDINGS='{"https://llm.example.com":"LLM_EXAMPLE_KEY"}'.
+# Discord and Groq use the fixed names below unless the protected process
+# environment supplies MEETING_PROVIDER_CREDENTIAL_BINDINGS for that provider.
 
 # -----------------------------------------------------------------------------
 # Discord settings
 # -----------------------------------------------------------------------------
 discord:
-  # Environment variable that contains the Discord bot token.
+  # Environment variable that contains the Discord bot token. Keep this default
+  # unless the process manager provides a protected provider binding.
   # Keep the token out of this file so the config can be committed safely.
   token_env: DISCORD_BOT_TOKEN
 
@@ -34,6 +39,13 @@ discord:
   #   - "<DISCORD_USER_ID_FOR_MEETING_HOST>"
   #   - "<DISCORD_USER_ID_FOR_BACKUP_OPERATOR>"
 
+  # Required closed-channel allow-list for recording. Leave empty to deny every
+  # recording start. Add only private voice-channel IDs whose membership policy
+  # already covers the intended participants; this is the consent boundary.
+  allowed_voice_channels: []
+  # Example after approval:
+  #   - "<PRIVATE_VOICE_CHANNEL_ID>"
+
 # -----------------------------------------------------------------------------
 # Speech-to-text (STT) settings
 # -----------------------------------------------------------------------------
@@ -45,7 +57,8 @@ stt:
   provider: auto
 
   groq:
-    # Environment variable that contains the Groq API key.
+    # Environment variable that contains the Groq API key. Keep this default
+    # unless the process manager provides a protected provider binding.
     api_key_env: GROQ_API_KEY
 
     # Groq transcription model. Use a model supported by your Groq account.
@@ -159,6 +172,10 @@ meeting:
   # are written. The bot creates guild subdirectories as 0700 and transcript
   # markdown files as 0600. Relative paths are resolved from the process working directory.
   output_dir: ./meetings
+
+  # The reference bot enforces hard aggregate safety ceilings: 4 hours,
+  # 1000 utterances/STT calls, and 250000 transcript characters per meeting.
+  # When a ceiling is reached capture pauses until an operator runs /meeting stop.
 
   # Language used for generated summaries and meeting notes (ISO 639-1).
   language: pt
