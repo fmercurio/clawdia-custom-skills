@@ -10,6 +10,7 @@ import os
 import re
 import random
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -24,6 +25,11 @@ REQUIRED_METADATA_FIELDS = {
 REQUIRED_SECTION_ORDER = ("background", "intuition", "code", "quiz")
 BLOCK_TYPES = {"paragraph", "heading", "callout", "code", "list", "table", "flow", "before_after"}
 CALL_OUT_TONES = {"note", "tip", "warning", "info", "critical"}
+MAX_CONTENT_SPEC_BYTES = 1_048_576
+MAX_CONTENT_SPEC_NODES = 1_500
+MAX_CONTENT_SPEC_DEPTH = 12
+MAX_CONTENT_TEXT_CHARS = 50_000
+MAX_RENDERED_HTML_BYTES = 2_097_152
 
 
 def parse_args() -> argparse.Namespace:
@@ -72,6 +78,51 @@ def ensure_slug(value: Optional[str]) -> str:
 
 def safe_html(value: Any) -> str:
     return html.escape(as_text(value), quote=True)
+
+
+def load_content_spec(path: Path) -> Dict[str, Any]:
+    """Read a user-provided content spec without allocating beyond its budget."""
+    with path.open("rb") as handle:
+        payload = handle.read(MAX_CONTENT_SPEC_BYTES + 1)
+    if len(payload) > MAX_CONTENT_SPEC_BYTES:
+        fail(f"content spec exceeds {MAX_CONTENT_SPEC_BYTES} byte limit")
+    try:
+        data = json.loads(payload.decode("utf-8"))
+    except UnicodeDecodeError as exc:
+        fail(f"content spec is not UTF-8: {exc}")
+    except json.JSONDecodeError as exc:
+        fail(f"content spec is not valid JSON: {exc}")
+    if not isinstance(data, dict):
+        fail("content spec must be a JSON object")
+    return data
+
+
+def validate_content_budget(value: Any) -> None:
+    """Bound recursive JSON shapes before validation and HTML expansion."""
+    nodes = 0
+    text_chars = 0
+
+    def visit(current: Any, depth: int) -> None:
+        nonlocal nodes, text_chars
+        if depth > MAX_CONTENT_SPEC_DEPTH:
+            fail(f"content spec exceeds nesting depth limit of {MAX_CONTENT_SPEC_DEPTH}")
+        nodes += 1
+        if nodes > MAX_CONTENT_SPEC_NODES:
+            fail(f"content spec exceeds structure limit of {MAX_CONTENT_SPEC_NODES} nodes")
+        if isinstance(current, str):
+            if len(current) > MAX_CONTENT_TEXT_CHARS:
+                fail(f"content spec text exceeds {MAX_CONTENT_TEXT_CHARS} character limit")
+            text_chars += len(current)
+            if text_chars > MAX_CONTENT_SPEC_BYTES:
+                fail(f"content spec text exceeds aggregate byte limit of {MAX_CONTENT_SPEC_BYTES}")
+        elif isinstance(current, dict):
+            for item in current.values():
+                visit(item, depth + 1)
+        elif isinstance(current, list):
+            for item in current:
+                visit(item, depth + 1)
+
+    visit(value, 0)
 
 
 def validate_metadata(metadata: Dict[str, Any], warnings: List[str]) -> Dict[str, Any]:
@@ -443,7 +494,7 @@ def render_html(
 
     safe_quiz_json = (
         quiz_data_json
-        .replace("</", "<\\/")
+        .replace("<", "\\u003c")
         .replace("\u2028", "\\u2028")
         .replace("\u2029", "\\u2029")
     )
@@ -722,11 +773,25 @@ button:focus-visible {{
 
 def write_html(output_path: Path, content: str) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = output_path.with_suffix(output_path.suffix + ".tmp")
-    tmp_path.write_text(content, encoding="utf-8")
-    os.chmod(tmp_path, 0o600)
-    os.replace(tmp_path, output_path)
-    os.chmod(output_path, 0o600)
+    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{output_path.name}.", dir=output_path.parent)
+    temporary = Path(temporary_name)
+    try:
+        os.fchmod(descriptor, 0o600)
+        payload = content.encode("utf-8")
+        if len(payload) > MAX_RENDERED_HTML_BYTES:
+            fail(f"rendered HTML exceeds {MAX_RENDERED_HTML_BYTES} byte limit")
+        offset = 0
+        while offset < len(payload):
+            offset += os.write(descriptor, payload[offset:])
+        os.fsync(descriptor)
+        os.close(descriptor)
+        descriptor = -1
+        os.replace(temporary, output_path)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        if temporary.exists() or temporary.is_symlink():
+            temporary.unlink()
 
 
 def main() -> None:
@@ -734,13 +799,10 @@ def main() -> None:
     warnings: List[str] = []
 
     try:
-        data = json.loads(Path(args.input_json).read_text(encoding="utf-8"))
+        data = load_content_spec(Path(args.input_json))
     except OSError as exc:
         fail(f"cannot read content spec: {exc}")
-    except json.JSONDecodeError as exc:
-        fail(f"content spec is not valid JSON: {exc}")
-    if not isinstance(data, dict):
-        fail("content spec must be a JSON object")
+    validate_content_budget(data)
 
     metadata = validate_metadata(data.get("metadata", {}), warnings)
     sections = validate_sections(data.get("sections", []), warnings)

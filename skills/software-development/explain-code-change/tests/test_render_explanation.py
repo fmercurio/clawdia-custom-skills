@@ -78,7 +78,43 @@ def test_escaping_of_body_and_quiz_text(tmp_path):
     assert "&lt;b&gt;Which &quot;path&quot;?&lt;/b&gt;" in text
     assert "&amp;lt;b&amp;gt;" not in text
     assert "&lt;script&gt;unsafe()&lt;/script&gt;" in text
-    assert "A & B <\\/script> remain text" in text
+    assert "A & B \\u003c/script> remain text" in text
+
+
+def test_quiz_json_escapes_mixed_case_script_end_tag(tmp_path):
+    spec = _base_spec()
+    spec["sections"][3]["questions"][0]["explanation"] = "</ScRiPt><img src=x onerror=alert(1)>"
+    output = tmp_path / "artifact.html"
+
+    result = _run(spec, tmp_path, output=output)
+
+    assert result.returncode == 0
+    text = output.read_text(encoding="utf-8")
+    assert "</ScRiPt>" not in text
+    assert "\\u003c/ScRiPt>" in text
+
+
+def test_rejects_oversized_content_spec_before_json_parsing(tmp_path):
+    oversized = tmp_path / "oversized.json"
+    oversized.write_bytes(b"x" * (1_048_576 + 1))
+
+    result = subprocess.run([sys.executable, str(SCRIPT), str(oversized)], capture_output=True, text=True)
+
+    assert result.returncode != 0
+    assert "byte limit" in result.stderr
+
+
+def test_rejects_excessively_nested_content_spec(tmp_path):
+    payload = _base_spec()
+    nested = {"type": "before_after", "before": ["text"], "after": ["text"]}
+    for _ in range(20):
+        nested = {"type": "before_after", "before": [nested], "after": ["text"]}
+    payload["sections"][0]["blocks"] = [nested]
+
+    result = _run(payload, tmp_path, output=tmp_path / "artifact.html")
+
+    assert result.returncode != 0
+    assert "nesting depth" in result.stderr
 
 
 def test_exact_five_questions_validation(tmp_path):
@@ -127,6 +163,19 @@ def test_output_mode_0600(tmp_path):
     output = tmp_path / "artifact.html"
     assert _run(_base_spec(), tmp_path, output=output).returncode == 0
     assert output.stat().st_mode & 0o777 == 0o600
+
+
+def test_render_does_not_follow_predictable_temp_symlink(tmp_path):
+    output = tmp_path / "artifact.html"
+    outside = tmp_path / "outside.txt"
+    outside.write_text("sentinel\n", encoding="utf-8")
+    output.with_suffix(".html.tmp").symlink_to(outside)
+
+    result = _run(_base_spec(), tmp_path, output=output)
+
+    assert result.returncode == 0, result.stderr
+    assert outside.read_text(encoding="utf-8") == "sentinel\n"
+    assert output.read_text(encoding="utf-8").lower().startswith("<!doctype html>")
 
 
 def test_default_output_path_uses_home_override(tmp_path):
