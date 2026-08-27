@@ -9,6 +9,7 @@ import unittest
 import shutil
 from pathlib import Path
 from tempfile import TemporaryDirectory, gettempdir
+from unittest import mock
 
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "validate_staging.py"
 
@@ -589,6 +590,23 @@ class ValidateStagingTests(unittest.TestCase):
             )
             self.assertEqual(status, "unverifiable")
             self.assertEqual(payload["status"], "unverifiable")
+            self.assertIn("CANONICAL_DRIFT", [e["code"] for e in payload["errors"]])
+
+    def test_canonical_drift_detects_in_place_change_to_already_dirty_file(self):
+        with TemporaryDirectory() as tmp:
+            fixture = self._make_valid_fixture(tmp)
+            dirty = fixture["canonical"] / "base.txt"
+            dirty.write_text("dirty-before", encoding="utf-8")
+
+            def mutate():
+                dirty.write_text("dirty-after", encoding="utf-8")
+
+            status, payload = self._run_validator_internal(
+                fixture["staging"],
+                fixture["canonical"],
+                pre_final_mutation=mutate,
+            )
+            self.assertEqual(status, "unverifiable")
             self.assertIn("CANONICAL_DRIFT", [e["code"] for e in payload["errors"]])
 
     def test_invalid_artifact_with_canonical_mutation_becomes_unverifiable(self):
@@ -1303,6 +1321,12 @@ class ValidateStagingTests(unittest.TestCase):
                 "github_classic": "gh" + "p_" + "a" * 24,
                 "github_fine_grained": "github" + "_pat_" + "a" * 24,
                 "private_key": "-----BEGIN " + "PRIVATE KEY-----",
+                "slack": "xoxb-" + "a" * 24,
+                "gitlab": "glpat-" + "a" * 24,
+                "npm": "npm_" + "a" * 36,
+                "google": "AIza" + "a" * 35,
+                "stripe": "sk_live_" + "a" * 24,
+                "authorization": "Authorization: Bearer " + "a" * 24,
             }
             for label, secret in cases.items():
                 with self.subTest(provider=label):
@@ -1585,6 +1609,118 @@ class ValidateStagingTests(unittest.TestCase):
             code, payload = self._run_cli(fixture["staging"], fixture["canonical"])
             self.assertEqual(code, 1)
             self._assert_err(payload, message="budget.max_total_bytes exceeded")
+
+    def test_total_budget_is_rejected_before_inventory_artifacts_are_read(self):
+        with TemporaryDirectory() as tmp:
+            fixture = self._make_valid_fixture(tmp)
+            approval_path = fixture["staging"] / fixture["approval_manifest"]
+            approval = json.loads(approval_path.read_text(encoding="utf-8"))
+            approval["budget"]["max_total_bytes"] = 1
+            self._write_json(approval_path, approval)
+            self._refresh_checks(fixture)
+
+            batch = json.loads(
+                (fixture["staging"] / fixture["batch_manifest"]).read_text(encoding="utf-8")
+            )
+            inventory_paths = {entry["path"] for entry in batch["inventory"]}
+            touched_inventory = []
+
+            def seam(path, phase):
+                if path in inventory_paths:
+                    touched_inventory.append((path, phase))
+
+            status, payload = self._run_validator_internal(
+                fixture["staging"], fixture["canonical"], path_seam=seam
+            )
+
+            self.assertEqual(status, "invalid")
+            self._assert_err(payload, message="budget.max_total_bytes exceeded")
+            self.assertEqual(touched_inventory, [])
+
+    def test_total_budget_uses_actual_size_before_open_when_inventory_size_is_false(self):
+        with TemporaryDirectory() as tmp:
+            fixture = self._make_valid_fixture(tmp)
+            approval_path = fixture["staging"] / fixture["approval_manifest"]
+            approval = json.loads(approval_path.read_text(encoding="utf-8"))
+            approval["budget"]["max_total_bytes"] = 1
+            self._write_json(approval_path, approval)
+            self._refresh_checks(fixture)
+
+            batch_path = fixture["staging"] / fixture["batch_manifest"]
+            batch = json.loads(batch_path.read_text(encoding="utf-8"))
+            for entry in batch["inventory"]:
+                entry["size"] = 0
+            self._write_json(batch_path, batch)
+            inventory_paths = {entry["path"] for entry in batch["inventory"]}
+            touched_inventory = []
+
+            def seam(path, phase):
+                if path in inventory_paths:
+                    touched_inventory.append((path, phase))
+
+            status, payload = self._run_validator_internal(
+                fixture["staging"], fixture["canonical"], path_seam=seam
+            )
+
+            self.assertEqual(status, "invalid")
+            self._assert_err(payload, message="budget.max_total_bytes exceeded")
+            self.assertEqual(touched_inventory, [])
+
+    def test_inventory_reads_are_bounded_to_the_validated_file_size(self):
+        with TemporaryDirectory() as tmp:
+            fixture = self._make_valid_fixture(tmp)
+            batch = json.loads(
+                (fixture["staging"] / fixture["batch_manifest"]).read_text(encoding="utf-8")
+            )
+            inventory_sizes = {
+                entry["path"]: (fixture["staging"] / entry["path"]).stat().st_size
+                for entry in batch["inventory"]
+            }
+            active_path = {"value": None}
+            read_requests = []
+            real_read = validator.os.read
+
+            def seam(path, phase):
+                active_path["value"] = path
+
+            def bounded_read(fd, count):
+                if active_path["value"] in inventory_sizes:
+                    read_requests.append((active_path["value"], count))
+                return real_read(fd, count)
+
+            with mock.patch.object(validator.os, "read", side_effect=bounded_read):
+                status, payload = self._run_validator_internal(
+                    fixture["staging"], fixture["canonical"], path_seam=seam
+                )
+
+            self.assertEqual(status, "valid", payload)
+            self.assertTrue(read_requests)
+            self.assertTrue(
+                all(count <= inventory_sizes[path] for path, count in read_requests),
+                read_requests,
+            )
+
+    def test_inventory_entry_limit_is_rejected_before_inventory_artifacts_are_read(self):
+        with TemporaryDirectory() as tmp:
+            fixture = self._make_valid_fixture(tmp)
+            batch = json.loads(
+                (fixture["staging"] / fixture["batch_manifest"]).read_text(encoding="utf-8")
+            )
+            inventory_paths = {entry["path"] for entry in batch["inventory"]}
+            touched_inventory = []
+
+            def seam(path, phase):
+                if path in inventory_paths:
+                    touched_inventory.append((path, phase))
+
+            with mock.patch.object(validator, "MAX_INVENTORY_ENTRIES", 3, create=True):
+                status, payload = self._run_validator_internal(
+                    fixture["staging"], fixture["canonical"], path_seam=seam
+                )
+
+            self.assertEqual(status, "invalid")
+            self._assert_err(payload, message="inventory entry count limit exceeded")
+            self.assertEqual(touched_inventory, [])
 
     def test_public_anonymization_contract_surface_scan(self):
         package_root = Path(__file__).resolve().parents[1]
