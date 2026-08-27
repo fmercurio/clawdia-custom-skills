@@ -247,6 +247,39 @@ def absolute_action(action: str, current_url: str) -> str:
     return resolved
 
 
+def is_redirect_callback(url: str, redirect_uri: str) -> bool:
+    candidate = urllib.parse.urlsplit(url)
+    callback = urllib.parse.urlsplit(redirect_uri)
+    return (
+        candidate.scheme == callback.scheme
+        and candidate.netloc == callback.netloc
+        and candidate.path == callback.path
+    )
+
+
+def resolve_sso_redirect(location: str, current_url: str, redirect_uri: str) -> str:
+    resolved = urllib.parse.urljoin(current_url, location)
+    if is_redirect_callback(resolved, redirect_uri):
+        return resolved
+    parsed = urllib.parse.urlsplit(resolved)
+    if parsed.scheme != EXPECTED_SSO_SCHEME or parsed.netloc != EXPECTED_SSO_HOST:
+        die("SSO redirect left expected Agilize origin")
+    return resolved
+
+
+def fetch_sso_page(session, url: str, redirect_uri: str, timeout: int, params=None):
+    current = resolve_sso_redirect(url, AUTH_URL, redirect_uri)
+    for _ in range(6):
+        response = session.get(current, params=params, timeout=timeout, allow_redirects=False)
+        params = None
+        if not (300 <= response.status_code < 400 and response.headers.get("Location")):
+            return response
+        current = resolve_sso_redirect(response.headers["Location"], response.url, redirect_uri)
+        if is_redirect_callback(current, redirect_uri):
+            return response
+    die("too many SSO redirects")
+
+
 def code_from_url(url: str, expected_state: Optional[str] = None) -> Optional[str]:
     parsed = urllib.parse.urlparse(url)
     pairs = {}
@@ -261,9 +294,9 @@ def code_from_url(url: str, expected_state: Optional[str] = None) -> Optional[st
 def code_from_response(resp: requests.Response, redirect_uri: str, expected_state: Optional[str] = None) -> Optional[str]:
     if 300 <= resp.status_code < 400 and resp.headers.get("Location"):
         loc = urllib.parse.urljoin(resp.url, resp.headers["Location"])
-        if loc.startswith(redirect_uri) or "code=" in loc:
+        if is_redirect_callback(loc, redirect_uri):
             return code_from_url(loc, expected_state)
-    if resp.url and (resp.url.startswith(redirect_uri) or "code=" in resp.url):
+    if resp.url and is_redirect_callback(resp.url, redirect_uri):
         return code_from_url(resp.url, expected_state)
     return None
 
@@ -308,7 +341,7 @@ def login(creds: dict, client_id: str, redirect_uri: str, timeout: int, user_age
     })
 
     # Step 1: get auth page
-    r1 = session.get(AUTH_URL, params=params, timeout=timeout, allow_redirects=True)
+    r1 = fetch_sso_page(session, AUTH_URL, redirect_uri, timeout, params=params)
     if r1.status_code >= 400:
         die(f"auth page returned HTTP {r1.status_code}")
 
@@ -328,9 +361,10 @@ def login(creds: dict, client_id: str, redirect_uri: str, timeout: int, user_age
     if not code:
         otp_html, otp_url = r2.text, r2.url
         if 300 <= r2.status_code < 400 and r2.headers.get("Location"):
-            loc = urllib.parse.urljoin(r2.url, r2.headers["Location"])
-            if not loc.startswith(redirect_uri):
-                r2b = session.get(loc, timeout=timeout, allow_redirects=True)
+            loc = resolve_sso_redirect(r2.headers["Location"], r2.url, redirect_uri)
+            if not is_redirect_callback(loc, redirect_uri):
+                r2b = fetch_sso_page(session, loc, redirect_uri, timeout)
+                code = code_from_response(r2b, redirect_uri, expected_state=state)
                 otp_html, otp_url = r2b.text, r2b.url
             else:
                 code = code_from_url(loc, expected_state=state)
@@ -423,30 +457,94 @@ def api_get(token: LoginResult, path: str, company_cnpj: str, timeout: int) -> r
     return requests.get(url, headers=headers, timeout=timeout, allow_redirects=False)
 
 
+def _canonical_system_temp_alias(path: Path) -> Path:
+    """Normalize only macOS's built-in /var and /tmp aliases before fd traversal."""
+    candidate = path.expanduser()
+    for alias, target in ((Path("/var"), Path("/private/var")), (Path("/tmp"), Path("/private/tmp"))):
+        if candidate.is_absolute() and (candidate == alias or alias in candidate.parents):
+            try:
+                if alias.is_symlink() and alias.resolve(strict=True) == target:
+                    return target.joinpath(*candidate.relative_to(alias).parts)
+            except OSError:
+                pass
+            break
+    return candidate
+
+
+def _open_private_dir(path: Path) -> int:
+    """Create and pin every output-directory component without following links."""
+    candidate = _canonical_system_temp_alias(path)
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    if candidate.is_absolute():
+        descriptor = os.open("/", flags)
+        parts = candidate.parts[1:]
+    else:
+        descriptor = os.open(".", flags)
+        parts = candidate.parts
+    try:
+        for part in parts:
+            try:
+                next_descriptor = os.open(part, flags, dir_fd=descriptor)
+            except FileNotFoundError:
+                os.mkdir(part, mode=0o700, dir_fd=descriptor)
+                next_descriptor = os.open(part, flags, dir_fd=descriptor)
+            except OSError as exc:
+                raise OSError(f"output directory must not contain symlinks: {path}") from exc
+            os.close(descriptor)
+            descriptor = next_descriptor
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != os.geteuid():
+            raise OSError(f"output directory must be owner-owned: {path}")
+        os.fchmod(descriptor, stat.S_IRWXU)
+        return descriptor
+    except Exception:
+        os.close(descriptor)
+        raise
+
+
 def ensure_private_dir(path: Path) -> Path:
-    path = path.expanduser()
-    if path.exists() and path.is_symlink():
-        raise OSError(f"output directory must not be a symlink: {path}")
-    path.mkdir(parents=True, exist_ok=True, mode=0o700)
-    os.chmod(path, stat.S_IRWXU)
-    return path
+    descriptor = _open_private_dir(path)
+    os.close(descriptor)
+    return path.expanduser()
 
 
 def write_secure(path: str, content: str) -> None:
-    p = Path(path).expanduser()
-    ensure_private_dir(p.parent)
-    if p.exists() and p.is_symlink():
-        raise OSError(f"refusing to overwrite symlink: {p}")
-    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
-    fd = os.open(str(p), flags, 0o600)
-    with os.fdopen(fd, "w") as f:
-        f.write(content)
+    destination = Path(path).expanduser()
+    payload = content.encode("utf-8")
+    directory_fd = _open_private_dir(destination.parent)
+    temporary: str | None = None
     try:
-        os.chmod(str(p), stat.S_IRUSR | stat.S_IWUSR)
-    except Exception:
-        pass
+        try:
+            existing = os.stat(destination.name, dir_fd=directory_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            existing = None
+        if existing is not None and not stat.S_ISREG(existing.st_mode):
+            raise OSError(f"refusing to overwrite non-regular output: {destination}")
+        temporary = f".{destination.name}.{secrets.token_hex(16)}.tmp"
+        descriptor = os.open(
+            temporary,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+            dir_fd=directory_fd,
+        )
+        try:
+            offset = 0
+            while offset < len(payload):
+                offset += os.write(descriptor, payload[offset:])
+            os.fchmod(descriptor, stat.S_IRUSR | stat.S_IWUSR)
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        os.replace(temporary, destination.name, src_dir_fd=directory_fd, dst_dir_fd=directory_fd)
+        temporary = None
+        os.fsync(directory_fd)
+    finally:
+        if temporary is not None:
+            try:
+                os.unlink(temporary, dir_fd=directory_fd)
+            except FileNotFoundError:
+                pass
+        os.close(directory_fd)
 
 
 # ─── Main ────────────────────────────────────────────────────────────

@@ -128,6 +128,34 @@ def test_auth_form_action_allows_relative_sso_action(monkeypatch):
     )
 
 
+def test_sso_redirect_resolution_rejects_external_origins_and_allows_callback(monkeypatch):
+    module, _ = load_script(monkeypatch)
+
+    assert module.resolve_sso_redirect("/auth/continue", module.AUTH_URL, module.DEFAULT_REDIRECT_URI).startswith(module.EXPECTED_SSO_SCHEME)
+    assert module.resolve_sso_redirect("https://app.agilize.com.br/?code=auth&state=state", module.AUTH_URL, module.DEFAULT_REDIRECT_URI).startswith(module.DEFAULT_REDIRECT_URI)
+    with pytest.raises(SystemExit):
+        module.resolve_sso_redirect("https://attacker.example/collect", module.AUTH_URL, module.DEFAULT_REDIRECT_URI)
+
+
+def test_sso_fetch_disables_automatic_redirects_and_rejects_an_external_hop(monkeypatch):
+    module, _ = load_script(monkeypatch)
+    calls = []
+
+    class Session:
+        def get(self, url, **kwargs):
+            calls.append((url, kwargs))
+            response = FakeResponse()
+            response.status_code = 302
+            response.url = url
+            response.headers = {"Location": "https://attacker.example/collect"}
+            return response
+
+    with pytest.raises(SystemExit):
+        module.fetch_sso_page(Session(), module.AUTH_URL, module.DEFAULT_REDIRECT_URI, 5)
+
+    assert calls[0][1]["allow_redirects"] is False
+
+
 def test_config_file_with_credentials_must_not_be_group_or_world_readable(monkeypatch, tmp_path):
     module, _ = load_script(monkeypatch)
     config = tmp_path / "agilize.json"
@@ -174,3 +202,19 @@ def test_write_secure_rejects_symlink_output_dir(monkeypatch, tmp_path):
 
     with pytest.raises(OSError):
         module.write_secure(str(linked_dir / "response.json"), '{"ok":true}')
+
+
+def test_write_secure_rejects_symlinked_output_ancestor_without_writing(monkeypatch, tmp_path):
+    module, _ = load_script(monkeypatch)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    sentinel = outside / "sentinel.json"
+    sentinel.write_text("keep", encoding="utf-8")
+    linked_parent = tmp_path / "linked-parent"
+    linked_parent.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(OSError, match="symlink"):
+        module.write_secure(str(linked_parent / "reports" / "response.json"), '{"ok":true}')
+
+    assert sentinel.read_text(encoding="utf-8") == "keep"
+    assert not (outside / "reports" / "response.json").exists()

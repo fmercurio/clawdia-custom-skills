@@ -44,8 +44,8 @@ http:
 settings:
   encodeUrl: true
   timeout: 0
-  followRedirects: true
-  maxRedirects: 5
+  # Do not forward tenant or bearer headers to a redirect destination.
+  followRedirects: false
 
 docs: |-
   Bruno OpenCollection YAML request for Agilize API.
@@ -66,6 +66,7 @@ docs: |-
 - **Never** ask the user to paste a full browser cURL into chat, memory, skills, or audit logs.
 - If a one-time request needs live credentials, write to a temporary file with `0600` permissions and tell the user to delete after use.
 - Prefer Bruno environment variables for secrets (`{{access_token}}`, `{{company_cnpj}}`).
+- Keep redirects disabled for authenticated requests. Validate any `Location` manually before creating a new request with placeholders.
 
 ## Templates
 

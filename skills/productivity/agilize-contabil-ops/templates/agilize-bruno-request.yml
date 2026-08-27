@@ -20,8 +20,8 @@ http:
 settings:
   encodeUrl: true
   timeout: 0
-  followRedirects: true
-  maxRedirects: 5
+  # Do not forward tenant or bearer headers to a redirect destination.
+  followRedirects: false
 
 docs: |-
   Bruno OpenCollection YAML request template for Agilize API calls.
