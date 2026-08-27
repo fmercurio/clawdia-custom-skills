@@ -1,6 +1,9 @@
 import importlib.util
+import os
 import sqlite3
+import stat
 import sys
+import urllib.request
 from pathlib import Path
 
 import pytest
@@ -122,11 +125,148 @@ def test_embedding_endpoint_allows_remote_only_with_explicit_opt_in(monkeypatch)
     )
 
 
+def test_embedding_endpoint_rejects_remote_http_even_with_explicit_opt_in(monkeypatch):
+    monkeypatch.setattr(brain_search, "EMBED_URL", "http://embeddings.example/v1/embeddings")
+
+    with pytest.raises(brain_search.EmbeddingEndpointError, match="HTTPS"):
+        brain_search.resolve_embed_url(allow_remote=True)
+
+
+def test_embedding_redirect_rejects_https_downgrade_to_loopback_http():
+    with pytest.raises(brain_search.EmbeddingEndpointError, match="downgrade"):
+        brain_search.validate_embed_redirect_url(
+            "https://embeddings.example/v1/embeddings",
+            "http://127.0.0.1:1234/v1/embeddings",
+            allow_remote=True,
+        )
+
+
+def test_embedding_redirect_handler_enforces_redirect_policy():
+    request = urllib.request.Request("https://embeddings.example/v1/embeddings")
+    handler = brain_search.EmbeddingRedirectHandler(allow_remote=True)
+
+    with pytest.raises(brain_search.EmbeddingEndpointError, match="downgrade"):
+        handler.redirect_request(
+            request,
+            None,
+            302,
+            "Found",
+            {},
+            "http://127.0.0.1:1234/v1/embeddings",
+        )
+
+
+def test_embedding_redirect_handler_allows_remote_https_to_https():
+    request = urllib.request.Request("https://embeddings.example/v1/embeddings")
+    handler = brain_search.EmbeddingRedirectHandler(allow_remote=True)
+
+    redirected = handler.redirect_request(
+        request,
+        None,
+        302,
+        "Found",
+        {},
+        "https://backup.example/v1/embeddings",
+    )
+
+    assert redirected.full_url == "https://backup.example/v1/embeddings"
+
+
+def test_embedding_redirect_handler_allows_loopback_http_to_loopback_http():
+    request = urllib.request.Request("http://127.0.0.1:1234/v1/embeddings")
+    handler = brain_search.EmbeddingRedirectHandler()
+
+    redirected = handler.redirect_request(
+        request,
+        None,
+        302,
+        "Found",
+        {},
+        "http://localhost:1234/v1/embeddings",
+    )
+
+    assert redirected.full_url == "http://localhost:1234/v1/embeddings"
+
+
+def test_embedding_request_honors_remote_opt_in_environment(monkeypatch):
+    observed = []
+
+    class FakeOpener:
+        def open(self, request, timeout):
+            return request, timeout
+
+    def observe_handler(handler):
+        observed.append(handler.allow_remote)
+        return FakeOpener()
+
+    monkeypatch.setenv(brain_search.REMOTE_EMBED_OPT_IN_ENV, "1")
+    monkeypatch.setattr(brain_search.urllib.request, "build_opener", observe_handler)
+    request = urllib.request.Request("https://embeddings.example/v1/embeddings")
+
+    brain_search._open_embedding_request(request)
+
+    assert observed == [True]
+
+
+def test_loopback_http_embedding_request_disables_environment_proxies(monkeypatch):
+    observed_handlers = []
+
+    class FakeOpener:
+        def open(self, request, timeout):
+            return request, timeout
+
+    def observe_handlers(*handlers):
+        observed_handlers.extend(handlers)
+        return FakeOpener()
+
+    monkeypatch.setattr(brain_search.urllib.request, "build_opener", observe_handlers)
+    request = urllib.request.Request("http://127.0.0.1:1234/v1/embeddings")
+
+    brain_search._open_embedding_request(request)
+
+    proxy_handlers = [
+        handler
+        for handler in observed_handlers
+        if isinstance(handler, urllib.request.ProxyHandler)
+    ]
+    assert len(proxy_handlers) == 1
+    assert proxy_handlers[0].proxies == {}
+
+
 def test_store_embeddings_rejects_remote_endpoint_before_network(monkeypatch):
     monkeypatch.setattr(brain_search, "EMBED_URL", "https://attacker.example/v1/embeddings")
 
     with pytest.raises(brain_search.EmbeddingEndpointError):
         brain_search._store_embeddings(make_db(), [(1, "private vault chunk")])
+
+
+def test_embedding_response_is_bounded_before_json_decode():
+    class Response:
+        def read(self, limit):
+            assert limit == brain_search.MAX_EMBED_RESPONSE_BYTES + 1
+            return b"x" * limit
+
+    with pytest.raises(ValueError, match="byte limit"):
+        brain_search._read_embedding_json(Response())
+
+
+@pytest.mark.parametrize(
+    "result, expected_count, message",
+    [
+        ({"data": [{"embedding": [0.1]}]}, 2, "item count"),
+        ({"data": [{"embedding": [0.1, "bad"]}]}, 1, "finite numeric"),
+        ({"data": [{"embedding": [0.1] * (brain_search.MAX_EMBEDDING_DIMENSIONS + 1)}]}, 1, "dimension limit"),
+    ],
+)
+def test_embedding_response_rejects_invalid_cardinality_or_vectors(result, expected_count, message):
+    with pytest.raises(ValueError, match=message):
+        brain_search._extract_embedding_vectors(result, expected_count)
+
+
+def test_embedding_response_accepts_expected_finite_vectors():
+    assert brain_search._extract_embedding_vectors(
+        {"data": [{"embedding": [1, 0.5, -2.0]}]}, 1
+    ) == [[1.0, 0.5, -2.0]]
 
 
 def test_main_rejects_unsafe_update_before_initializing_db(monkeypatch, tmp_path):
@@ -170,6 +310,20 @@ def test_init_db_rejects_symlinked_index_database(monkeypatch, tmp_path):
     assert not outside.exists()
 
 
+@pytest.mark.parametrize("suffix", ["-wal", "-shm"])
+def test_init_db_rejects_symlinked_sqlite_sidecar(monkeypatch, tmp_path, suffix):
+    use_temp_vault(monkeypatch, tmp_path)
+    brain_search.DB_DIR.mkdir()
+    seed = sqlite3.connect(brain_search.DB_PATH)
+    seed.close()
+    outside = tmp_path / f"outside{suffix}"
+    Path(f"{brain_search.DB_PATH}{suffix}").symlink_to(outside)
+
+    with pytest.raises(ValueError, match="symlinked brain index database sidecar"):
+        brain_search.init_db()
+    assert not outside.exists()
+
+
 def test_init_db_creates_a_local_index_for_a_normal_vault(monkeypatch, tmp_path):
     vault = use_temp_vault(monkeypatch, tmp_path)
 
@@ -177,3 +331,73 @@ def test_init_db_creates_a_local_index_for_a_normal_vault(monkeypatch, tmp_path)
     con.close()
     assert brain_search.DB_PATH.is_file()
     assert brain_search.DB_PATH.parent == vault / ".brain-index"
+
+
+def test_init_db_enforces_owner_only_permissions_on_existing_cache(monkeypatch, tmp_path):
+    use_temp_vault(monkeypatch, tmp_path)
+    brain_search.DB_DIR.mkdir(mode=0o777)
+    brain_search.DB_PATH.touch(mode=0o666)
+    brain_search.DB_DIR.chmod(0o777)
+    brain_search.DB_PATH.chmod(0o666)
+
+    con = brain_search.init_db()
+    con.close()
+
+    assert stat.S_IMODE(brain_search.DB_DIR.stat().st_mode) == 0o700
+    assert stat.S_IMODE(brain_search.DB_PATH.stat().st_mode) == 0o600
+
+
+def test_init_db_secures_existing_database_files_before_connect(monkeypatch, tmp_path):
+    use_temp_vault(monkeypatch, tmp_path)
+    brain_search.DB_DIR.mkdir(mode=0o777)
+    existing_files = [
+        brain_search.DB_PATH,
+        Path(f"{brain_search.DB_PATH}-wal"),
+        Path(f"{brain_search.DB_PATH}-shm"),
+    ]
+    for path in existing_files:
+        path.touch(mode=0o666)
+        path.chmod(0o666)
+
+    def observe_connect(_path):
+        assert stat.S_IMODE(brain_search.DB_DIR.stat().st_mode) == 0o700
+        assert all(stat.S_IMODE(path.stat().st_mode) == 0o600 for path in existing_files)
+        raise RuntimeError("connect observed")
+
+    monkeypatch.setattr(brain_search.sqlite3, "connect", observe_connect)
+
+    with pytest.raises(RuntimeError, match="connect observed"):
+        brain_search.init_db()
+
+
+def test_init_db_keeps_database_and_sidecars_owner_only_while_open(monkeypatch, tmp_path):
+    use_temp_vault(monkeypatch, tmp_path)
+    previous_umask = os.umask(0o022)
+    con = None
+    try:
+        con = brain_search.init_db()
+        cache_files = [
+            brain_search.DB_PATH,
+            Path(f"{brain_search.DB_PATH}-wal"),
+            Path(f"{brain_search.DB_PATH}-shm"),
+        ]
+
+        assert stat.S_IMODE(brain_search.DB_DIR.stat().st_mode) == 0o700
+        assert all(path.is_file() for path in cache_files)
+        assert all(stat.S_IMODE(path.stat().st_mode) == 0o600 for path in cache_files)
+    finally:
+        if con is not None:
+            con.close()
+        os.umask(previous_umask)
+
+
+def test_init_db_refuses_symlinked_gitignore(monkeypatch, tmp_path):
+    vault = use_temp_vault(monkeypatch, tmp_path)
+    outside = tmp_path / "outside-gitignore"
+    outside.write_text("sentinel\n", encoding="utf-8")
+    (vault / ".gitignore").symlink_to(outside)
+
+    with pytest.raises(ValueError, match="gitignore"):
+        brain_search.init_db()
+
+    assert outside.read_text(encoding="utf-8") == "sentinel\n"

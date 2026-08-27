@@ -1,6 +1,6 @@
 ---
 name: push-brain
-description: Generic template — save, consolidate, and sync a PARA-first Second Brain vault after a meaningful session. Classifies session output into PARA destinations, writes durable knowledge, runs health-check, commits, pushes, and rebuilds search index.
+description: Generic template for explicitly requested PARA vault consolidation. Classifies durable knowledge and keeps writing, committing, pushing, and indexing as separate authorization gates.
 version: 1.0.0
 author: Hermes Agent
 license: MIT
@@ -32,16 +32,16 @@ Core principle:
 
 ## When to Use
 
-Use this skill when the user says or implies:
+Use this skill only when the user explicitly asks to save or consolidate knowledge, for example:
 
 - "save this to the brain" / "salva isso no cérebro";
 - "push-brain";
 - "sync" / "fecha sessão";
 - "update the brain" / "atualiza o cérebro";
 - "consolidate this" / "consolida isso";
-- "register this decision" / "registra essa decisão";
-- "let's wrap up" after a meaningful session;
-- after completing a non-trivial vault, project, or runtime task.
+- "register this decision" / "registra essa decisão".
+
+Do not infer write authorization from conversational wrap-up, task completion, or a bare URL. Fetching a URL, writing a note, committing it, pushing it, and rebuilding an index are separate actions. Obtain explicit confirmation for each state-changing gate that the user has not already authorized.
 
 Do not use to dump raw chat logs, secrets, transient task progress, or content without durable value.
 
@@ -143,7 +143,9 @@ python3 scripts/brain-health-check.py
 
 Fix issues before finishing unless intentional and reported.
 
-### 6. Commit changes
+### 6. Commit changes (separate authorization gate)
+
+Commit is distinct from writing. Run this step only after explicit confirmation to create a commit.
 
 ```bash
 cd <VAULT_ROOT>
@@ -152,9 +154,9 @@ git add <changed-files>
 git commit -m "Concise commit message"
 ```
 
-### 7. Push to remote
+### 7. Push to remote (separate authorization gate)
 
-After committing, always push so the vault stays in sync:
+Push is distinct from committing. Run this step only after explicit confirmation to publish the commit remotely:
 
 ```bash
 cd <VAULT_ROOT>
@@ -175,7 +177,7 @@ BRAIN_EMBED_MODEL="<EMBED_MODEL_NAME>" \
 
 ## URL Archiving (optional)
 
-When the user sends a URL with no other instruction, it's a quick-archive request — fetch, extract, write a structured note to `40_Archives/`. This is lighter than a full push-brain consolidation.
+A bare URL does not authorize fetching, archiving, writing, committing, or pushing. Ask what the user wants done with it before any state-changing action.
 
 Archive note structure:
 - Source URL and fetch date
