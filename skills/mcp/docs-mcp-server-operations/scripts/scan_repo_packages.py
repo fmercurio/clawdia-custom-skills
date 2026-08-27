@@ -14,6 +14,8 @@ import base64
 import json
 import os
 import re
+import secrets
+import stat
 import sys
 import urllib.error
 import urllib.parse
@@ -33,6 +35,97 @@ except Exception:  # pragma: no cover - optional dependency
 
 DEFAULT_REGISTRY = Path(__file__).resolve().parent.parent / "templates" / "docs-projects.example.yaml"
 MANIFEST_NAMES = ("package.json", "pyproject.toml", "go.mod", "composer.json")
+
+
+def _canonical_system_temp_alias(path: Path) -> Path:
+    """Accept only macOS's built-in /var and /tmp aliases before an fd walk."""
+    candidate = path.expanduser()
+    for alias, target in ((Path("/var"), Path("/private/var")), (Path("/tmp"), Path("/private/tmp"))):
+        if candidate.is_absolute() and (candidate == alias or alias in candidate.parents):
+            try:
+                if alias.is_symlink() and alias.resolve(strict=True) == target:
+                    return target.joinpath(*candidate.relative_to(alias).parts)
+            except OSError:
+                pass
+            break
+    return candidate
+
+
+def _open_private_output_dir(path: Path) -> int:
+    """Create and traverse every output component through no-follow descriptors."""
+    candidate = _canonical_system_temp_alias(path)
+    directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    if candidate.is_absolute():
+        descriptor = os.open("/", directory_flags)
+        parts = candidate.parts[1:]
+    else:
+        descriptor = os.open(".", directory_flags)
+        parts = candidate.parts
+    try:
+        for part in parts:
+            try:
+                next_descriptor = os.open(part, directory_flags, dir_fd=descriptor)
+            except FileNotFoundError:
+                os.mkdir(part, mode=0o700, dir_fd=descriptor)
+                next_descriptor = os.open(part, directory_flags, dir_fd=descriptor)
+            except OSError as exc:
+                raise ValueError("report output directory must not contain symlinks") from exc
+            os.close(descriptor)
+            descriptor = next_descriptor
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISDIR(metadata.st_mode):
+            raise ValueError("report output path must be a directory")
+        if metadata.st_uid != os.geteuid():
+            raise ValueError("report output directory must be owned by the current user")
+        os.fchmod(descriptor, 0o700)
+        return descriptor
+    except Exception:
+        os.close(descriptor)
+        raise
+
+
+def ensure_private_output_dir(path: Path) -> Path:
+    """Create a private report directory without following any symlink ancestor."""
+    descriptor = _open_private_output_dir(path)
+    os.close(descriptor)
+    return path
+
+
+def write_private_report(directory: Path, name: str, content: str) -> Path:
+    """Atomically write an owner-only report through a pinned directory descriptor."""
+    if not name or Path(name).name != name or name in {".", ".."}:
+        raise ValueError("report destination must be a single file name")
+    directory_fd = _open_private_output_dir(directory)
+    try:
+        try:
+            existing = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            existing = None
+        if existing is not None and not stat.S_ISREG(existing.st_mode):
+            raise ValueError(f"report destination is not a regular file: {name}")
+        temporary = f".{name}.{secrets.token_hex(16)}.tmp"
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        file_fd = os.open(temporary, flags, 0o600, dir_fd=directory_fd)
+        try:
+            payload = (content + "\n").encode("utf-8")
+            offset = 0
+            while offset < len(payload):
+                offset += os.write(file_fd, payload[offset:])
+            os.fchmod(file_fd, 0o600)
+            os.fsync(file_fd)
+        finally:
+            os.close(file_fd)
+        try:
+            os.replace(temporary, name, src_dir_fd=directory_fd, dst_dir_fd=directory_fd)
+            os.fsync(directory_fd)
+        finally:
+            try:
+                os.unlink(temporary, dir_fd=directory_fd)
+            except FileNotFoundError:
+                pass
+    finally:
+        os.close(directory_fd)
+    return directory / name
 
 
 def load_registry(path: Path) -> dict:
@@ -349,10 +442,9 @@ def main() -> int:
         outputs["md"] = render_markdown(results)
 
     if args.outdir:
-        outdir = Path(args.outdir)
-        outdir.mkdir(parents=True, exist_ok=True)
+        outdir = ensure_private_output_dir(Path(args.outdir))
         for ext, content in outputs.items():
-            (outdir / f"dependency-scan.{ext}").write_text(content + "\n", encoding="utf-8")
+            write_private_report(outdir, f"dependency-scan.{ext}", content)
     else:
         print("\n\n".join(outputs.values()))
     return 0

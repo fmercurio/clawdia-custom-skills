@@ -38,5 +38,6 @@ CMD [
   "--port", "6280",
   "--store-path", "/data",
   "--resume",
+  "--read-only",
   "--telemetry=false"
 ]
