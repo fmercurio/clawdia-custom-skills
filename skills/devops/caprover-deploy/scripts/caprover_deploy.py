@@ -9,7 +9,8 @@ Usage:
 
 Auth: CAPROVER_PASSWORD env, --keepass-entry with KEEPASS_DB/KEEPASS_KEY, or interactive.
 GitHub: github.com uses GITHUB_TOKEN env or gh auth token.
-Custom Git hosts require --repo-token-env with a host-specific env var.
+Custom Git hosts require an exact host-to-host-specific-token binding in
+CAPROVER_REPO_TOKEN_BINDINGS; --repo-token-env can only assert that binding.
 """
 import argparse
 import json
@@ -30,6 +31,7 @@ LOCAL_CAPROVER_HOSTS = {"localhost", "127.0.0.1", "::1"}
 DEFAULT_GITHUB_REPO_HOST = "github.com"
 ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 REPO_TOKEN_BINDINGS_ENV = "CAPROVER_REPO_TOKEN_BINDINGS"
+GENERIC_GITHUB_TOKEN_ENV_NAMES = {"GITHUB_TOKEN", "GH_TOKEN"}
 MAX_API_RESPONSE_BYTES = 1_048_576
 MAX_API_ERROR_BYTES = 8_192
 SSH_USER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
@@ -283,7 +285,13 @@ def _repo_token_bindings():
             raise CapRoverDeployError("caprover_config_invalid", "repo token binding host must be text")
         hostname, port = _normalize_expected_host(host, REPO_TOKEN_BINDINGS_ENV)
         key = hostname if port is None else f"{hostname}:{port}"
-        bindings[key] = _normalize_env_name(token_env, REPO_TOKEN_BINDINGS_ENV)
+        token_env_name = _normalize_env_name(token_env, REPO_TOKEN_BINDINGS_ENV)
+        if token_env_name in GENERIC_GITHUB_TOKEN_ENV_NAMES:
+            raise CapRoverDeployError(
+                "caprover_config_invalid",
+                f"{REPO_TOKEN_BINDINGS_ENV} custom-host bindings must use a host-specific environment variable",
+            )
+        bindings[key] = token_env_name
     return bindings
 
 
@@ -794,7 +802,10 @@ def build_arg_parser():
     parser.add_argument("--method", choices=["cli", "api", "playwright", "auto"], default="auto")
     parser.add_argument("--keepass-entry", help="KeePass entry path for password")
     parser.add_argument("--github-user", help="GitHub username")
-    parser.add_argument("--repo-token-env", help="Environment variable containing Git credentials for non-github.com repo hosts")
+    parser.add_argument(
+        "--repo-token-env",
+        help="Optional assertion that must match the protected non-github.com repo token binding",
+    )
     parser.add_argument("--expected-host", help="Required hostname assertion for non-local CapRover targets")
     parser.add_argument("--expected-repo-host", help="Required Git repo hostname assertion when --repo is not github.com")
     parser.add_argument("--allow-insecure", action="store_true", help="Allow non-HTTPS/self-signed local/dev CapRover targets")

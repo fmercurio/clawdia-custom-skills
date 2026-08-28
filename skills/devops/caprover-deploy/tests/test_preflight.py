@@ -399,6 +399,22 @@ class TestRepoSafety:
 
         assert cd.get_github_creds(args) == ("alice", "host-specific-token")
 
+    @pytest.mark.parametrize("generic_token_env", sorted(cd.GENERIC_GITHUB_TOKEN_ENV_NAMES))
+    def test_custom_repo_host_rejects_generic_github_token_binding(self, monkeypatch, generic_token_env):
+        monkeypatch.setenv(generic_token_env, "generic-github-token")
+        monkeypatch.setenv(
+            cd.REPO_TOKEN_BINDINGS_ENV,
+            json.dumps({"git.example.com": generic_token_env}),
+        )
+        args = SimpleNamespace(
+            github_user="alice",
+            repo="https://git.example.com/org/repo",
+            repo_token_env=None,
+        )
+
+        with pytest.raises(CapRoverDeployError, match="host-specific"):
+            cd.get_github_creds(args)
+
     def test_custom_repo_host_rejects_missing_protected_bound_token(self, monkeypatch):
         monkeypatch.setenv(
             cd.REPO_TOKEN_BINDINGS_ENV,
