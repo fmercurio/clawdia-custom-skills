@@ -5,7 +5,9 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import sqlite3
+import stat
 import sys
 from pathlib import Path
 from typing import Any
@@ -22,6 +24,7 @@ LAYERS = {
 }
 REQUIRED_DIRS = [*LAYERS.values(), "50_Templates", "_Hermes", "_Meta"]
 ROOT_DOCS = ["README.md", "MAPA.md", "PARA.md", "HERMES.md"]
+INSTANCE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 
 def require_supported_python(version_info: tuple[int, int] | None = None) -> None:
@@ -106,6 +109,84 @@ def write_text_beneath(
         file_fd = os.open(parts[-1], flags, file_mode, dir_fd=current_fd)
         with os.fdopen(file_fd, "w", encoding=encoding) as stream:
             stream.write(content)
+    finally:
+        os.close(current_fd)
+    return root.joinpath(*parts)
+
+
+def write_bytes_beneath(root: Path, relative: Path, payload: bytes, *, file_mode: int) -> Path:
+    """Atomically replace a regular file below a private, descriptor-anchored root.
+
+    Every directory component is opened with ``O_NOFOLLOW`` and made owner-only
+    through its descriptor.  The final leaf is rejected when it is a symlink or
+    another non-regular file, so a caller never follows a destination prepared
+    by another local user.
+    """
+    root = root.expanduser()
+    parts = _safe_relative_parts(relative)
+    directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        current_fd = os.open(root, directory_flags)
+    except OSError as exc:
+        raise OSError(f"cannot securely open root directory: {root}") from exc
+
+    try:
+        root_stat = os.fstat(current_fd)
+        if not stat.S_ISDIR(root_stat.st_mode):
+            raise OSError(f"root is not a directory: {root}")
+        if root_stat.st_uid != os.geteuid():
+            raise OSError(f"root must be owned by the current user: {root}")
+        os.fchmod(current_fd, 0o700)
+
+        for part in parts[:-1]:
+            try:
+                next_fd = os.open(part, directory_flags, dir_fd=current_fd)
+            except FileNotFoundError:
+                os.mkdir(part, mode=0o700, dir_fd=current_fd)
+                next_fd = os.open(part, directory_flags, dir_fd=current_fd)
+            except OSError as exc:
+                raise OSError(f"cannot securely open managed directory: {part}") from exc
+            next_stat = os.fstat(next_fd)
+            if not stat.S_ISDIR(next_stat.st_mode):
+                os.close(next_fd)
+                raise OSError(f"managed path component is not a directory: {part}")
+            if next_stat.st_uid != os.geteuid():
+                os.close(next_fd)
+                raise OSError(f"managed path component must be owned by the current user: {part}")
+            os.fchmod(next_fd, 0o700)
+            os.close(current_fd)
+            current_fd = next_fd
+
+        leaf = parts[-1]
+        try:
+            leaf_stat = os.stat(leaf, dir_fd=current_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            leaf_stat = None
+        if leaf_stat is not None:
+            if stat.S_ISLNK(leaf_stat.st_mode):
+                raise OSError(f"refusing symlink destination: {relative}")
+            if not stat.S_ISREG(leaf_stat.st_mode):
+                raise OSError(f"managed destination is not a regular file: {relative}")
+
+        temporary = f".{leaf}.{secrets.token_hex(16)}.tmp"
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        temporary_fd = os.open(temporary, flags, file_mode, dir_fd=current_fd)
+        try:
+            offset = 0
+            while offset < len(payload):
+                offset += os.write(temporary_fd, payload[offset:])
+            os.fchmod(temporary_fd, file_mode)
+            os.fsync(temporary_fd)
+        finally:
+            os.close(temporary_fd)
+        try:
+            os.replace(temporary, leaf, src_dir_fd=current_fd, dst_dir_fd=current_fd)
+            os.fsync(current_fd)
+        finally:
+            try:
+                os.unlink(temporary, dir_fd=current_fd)
+            except FileNotFoundError:
+                pass
     finally:
         os.close(current_fd)
     return root.joinpath(*parts)
@@ -211,8 +292,8 @@ def validate_config(data: dict[str, Any]) -> list[str]:
         else:
             if not instance_name.strip():
                 errors.append("mcp_readonly.instance_name must not be blank")
-            elif re.search(r"[\\\/]", instance_name):
-                errors.append("mcp_readonly.instance_name must not contain path separators")
+            elif instance_name != instance_name.strip() or not INSTANCE_NAME_RE.fullmatch(instance_name):
+                errors.append("mcp_readonly.instance_name must be a safe 1-64 character slug")
     emb = data.get("embeddings", {})
     endpoint = emb.get("endpoint") if isinstance(emb, dict) else None
     if endpoint and not emb.get("allow_remote", False):
@@ -223,13 +304,21 @@ def validate_config(data: dict[str, Any]) -> list[str]:
     return errors
 
 
-def save_config(path: Path, data: dict[str, Any]) -> None:
+def save_config(path: Path, data: dict[str, Any], *, root: Path) -> None:
     errors = validate_config(data)
     if errors:
         raise ValueError("; ".join(errors))
-    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        relative = path.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("configuration path must remain beneath the configured HERMES_HOME") from exc
     # JSON is a strict, deterministic subset of YAML and remains human-readable.
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
+    write_bytes_beneath(
+        root,
+        relative,
+        (json.dumps(data, indent=2, ensure_ascii=False, sort_keys=True) + "\n").encode("utf-8"),
+        file_mode=0o600,
+    )
 
 
 def load_config(path: Path) -> dict[str, Any]:
@@ -248,11 +337,24 @@ def sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def write_if_missing(path: Path, content: str) -> bool:
+def write_if_missing(path: Path, content: str, mode: int = 0o600) -> bool:
+    if path.is_symlink():
+        raise OSError(f"refusing symlink target: {path}")
     if path.exists():
         return False
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(path, flags, mode)
+    payload = content.encode("utf-8")
+    try:
+        offset = 0
+        while offset < len(payload):
+            offset += os.write(descriptor, payload[offset:])
+        os.fchmod(descriptor, mode)
+    finally:
+        os.close(descriptor)
     return True
 
 

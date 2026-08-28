@@ -9,6 +9,7 @@ Covers:
 - fail() exits with correct code and sanitized message
 """
 import importlib.util
+import json
 import sys
 from types import SimpleNamespace
 from pathlib import Path
@@ -122,6 +123,62 @@ class TestUrlSafety:
         assert exc.value.code == "caprover_config_invalid"
         assert "expected-host" in exc.value.message
 
+    def test_remote_credential_origin_must_match_protected_binding(self):
+        with pytest.raises(CapRoverDeployError) as exc:
+            cd.validate_credential_origin(
+                "https://attacker.example",
+                "https://captain.example.com",
+            )
+
+        assert exc.value.code == "caprover_config_invalid"
+        assert "CAPROVER_CREDENTIAL_ORIGIN" in exc.value.message
+
+    def test_remote_credential_origin_accepts_exact_origin(self):
+        assert cd.validate_credential_origin(
+            "https://captain.example.com",
+            "https://captain.example.com/",
+        ) is True
+
+    def test_local_credential_origin_requires_exact_binding(self):
+        with pytest.raises(CapRoverDeployError, match="CAPROVER_CREDENTIAL_ORIGIN"):
+            cd.validate_credential_origin("http://127.0.0.1:3000", "")
+        with pytest.raises(CapRoverDeployError):
+            cd.validate_credential_origin("http://127.0.0.1:3000", "http://127.0.0.1:4000")
+        assert cd.validate_credential_origin(
+            "http://127.0.0.1:3000", "http://127.0.0.1:3000/"
+        ) is True
+
+    def test_remote_credential_origin_rejects_invalid_port(self):
+        with pytest.raises(CapRoverDeployError):
+            cd.validate_credential_origin(
+                "https://captain.example.com",
+                "https://captain.example.com:not-a-port",
+            )
+
+    def test_main_rejects_unbound_remote_origin_before_password_resolution(self, monkeypatch, capsys):
+        monkeypatch.delenv("CAPROVER_CREDENTIAL_ORIGIN", raising=False)
+        monkeypatch.setattr(sys, "argv", [
+            "caprover_deploy.py",
+            "--caprover-url", "https://attacker.example",
+            "--expected-host", "attacker.example",
+            "--app-name", "my-app",
+        ])
+        monkeypatch.setattr(cd, "get_password", lambda args: pytest.fail("password was resolved"))
+
+        with pytest.raises(SystemExit) as exc:
+            cd.main()
+
+        assert exc.value.code == 2
+        assert "CAPROVER_CREDENTIAL_ORIGIN" in capsys.readouterr().out
+
+    def test_nginx_template_verifies_upstream_tls(self):
+        template = SCRIPT.parent.parent / "templates" / "nginx-proxy.conf"
+        text = template.read_text(encoding="utf-8")
+
+        assert "proxy_ssl_verify off" not in text
+        assert text.count("proxy_ssl_verify on") >= 2
+        assert text.count("proxy_ssl_trusted_certificate") >= 2
+
     def test_http_url_is_rejected_by_default(self):
         with pytest.raises(CapRoverDeployError) as exc:
             cd.validate_caprover_url("http://captain.example.com", expected_host="captain.example.com")
@@ -170,6 +227,34 @@ class TestUrlSafety:
         source = SCRIPT.read_text()
         assert "ignore_https_errors=True" not in source
         assert "ignore_https_errors=args.allow_insecure" in source
+
+    def test_cross_origin_redirect_is_rejected(self):
+        handler = cd.SameOriginRedirectHandler("https://captain.example.com")
+        with pytest.raises(CapRoverDeployError, match="cross-origin"):
+            handler.redirect_request(None, None, 302, "Found", {}, "https://attacker.example/login")
+
+    def test_same_origin_redirect_is_allowed(self):
+        handler = cd.SameOriginRedirectHandler("https://captain.example.com")
+        request = cd.urllib.request.Request("https://captain.example.com/start")
+        assert handler.redirect_request(request, None, 302, "Found", {}, "/login") is not None
+
+    @pytest.mark.parametrize(
+        "user,host,port",
+        [
+            ("-oProxyCommand=id", "captain.example.com", "22"),
+            ("root", "-oProxyCommand=id", "22"),
+            ("root", "captain.example.com", "-oProxyCommand=id"),
+            ("bad user", "captain.example.com", "22"),
+        ],
+    )
+    def test_ssh_destination_rejects_option_shaped_or_invalid_values(self, user, host, port):
+        with pytest.raises(CapRoverDeployError):
+            cd.build_ssh_command(host, user=user, port=port)
+
+    def test_ssh_destination_is_delimited_from_options(self):
+        assert cd.build_ssh_command("captain.example.com", user="deploy", port="2222") == [
+            "ssh", "-p", "2222", "--", "deploy@captain.example.com"
+        ]
 
     def test_main_rejects_remote_allow_insecure_before_password_resolution(self, monkeypatch, capsys):
         monkeypatch.setattr(sys, "argv", [
@@ -252,7 +337,7 @@ class TestRepoSafety:
         assert "caprover_config_invalid" in out
         assert "repo validation" in out
 
-    def test_custom_repo_host_requires_host_specific_token_env(self, monkeypatch):
+    def test_custom_repo_host_requires_protected_binding(self, monkeypatch):
         monkeypatch.setenv("GITHUB_TOKEN", "generic-github-token")
         args = SimpleNamespace(
             github_user=None,
@@ -264,9 +349,9 @@ class TestRepoSafety:
             cd.get_github_creds(args)
 
         assert exc.value.code == "caprover_config_invalid"
-        assert "--repo-token-env" in exc.value.message
+        assert cd.REPO_TOKEN_BINDINGS_ENV in exc.value.message
 
-    def test_custom_repo_host_rejects_generic_github_token_env(self, monkeypatch):
+    def test_custom_repo_host_rejects_cli_token_selector_without_matching_binding(self, monkeypatch):
         monkeypatch.setenv("GITHUB_TOKEN", "generic-github-token")
         args = SimpleNamespace(
             github_user=None,
@@ -278,7 +363,7 @@ class TestRepoSafety:
             cd.get_github_creds(args)
 
         assert exc.value.code == "caprover_config_invalid"
-        assert "host-specific" in exc.value.message
+        assert cd.REPO_TOKEN_BINDINGS_ENV in exc.value.message
 
     def test_custom_repo_host_does_not_fallback_to_gh_auth_token(self, monkeypatch):
         def fail_if_gh_auth_is_called(*args, **kwargs):
@@ -296,15 +381,16 @@ class TestRepoSafety:
             cd.get_github_creds(args)
 
         assert exc.value.code == "caprover_config_invalid"
-        assert "--repo-token-env" in exc.value.message
+        assert cd.REPO_TOKEN_BINDINGS_ENV in exc.value.message
 
-    def test_custom_repo_host_uses_only_declared_token_env(self, monkeypatch):
+    def test_custom_repo_host_uses_only_protected_bound_token_env(self, monkeypatch):
         def fail_if_gh_auth_is_called(*args, **kwargs):
             pytest.fail("gh auth token was called for a custom repo host")
 
         monkeypatch.setattr(cd.subprocess, "run", fail_if_gh_auth_is_called)
         monkeypatch.setenv("GITHUB_TOKEN", "generic-github-token")
         monkeypatch.setenv("GIT_EXAMPLE_TOKEN", "host-specific-token")
+        monkeypatch.setenv(cd.REPO_TOKEN_BINDINGS_ENV, json.dumps({"git.example.com": "GIT_EXAMPLE_TOKEN"}))
         args = SimpleNamespace(
             github_user="alice",
             repo="https://git.example.com/org/repo",
@@ -313,8 +399,56 @@ class TestRepoSafety:
 
         assert cd.get_github_creds(args) == ("alice", "host-specific-token")
 
+    @pytest.mark.parametrize("generic_token_env", sorted(cd.GENERIC_GITHUB_TOKEN_ENV_NAMES))
+    def test_custom_repo_host_rejects_generic_github_token_binding(self, monkeypatch, generic_token_env):
+        monkeypatch.setenv(generic_token_env, "generic-github-token")
+        monkeypatch.setenv(
+            cd.REPO_TOKEN_BINDINGS_ENV,
+            json.dumps({"git.example.com": generic_token_env}),
+        )
+        args = SimpleNamespace(
+            github_user="alice",
+            repo="https://git.example.com/org/repo",
+            repo_token_env=None,
+        )
+
+        with pytest.raises(CapRoverDeployError, match="host-specific"):
+            cd.get_github_creds(args)
+
+    def test_custom_repo_host_rejects_missing_protected_bound_token(self, monkeypatch):
+        monkeypatch.setenv(
+            cd.REPO_TOKEN_BINDINGS_ENV,
+            json.dumps({"git.example.com": "GIT_EXAMPLE_TOKEN"}),
+        )
+        monkeypatch.delenv("GIT_EXAMPLE_TOKEN", raising=False)
+        args = SimpleNamespace(
+            github_user="alice",
+            repo="https://git.example.com/org/repo",
+            repo_token_env="GIT_EXAMPLE_TOKEN",
+        )
+
+        with pytest.raises(CapRoverDeployError) as exc:
+            cd.get_github_creds(args)
+
+        assert exc.value.code == "caprover_config_invalid"
+        assert "configured-token-marker" not in str(exc.value)
+
+    def test_custom_repo_host_cannot_select_an_unbound_secret(self, monkeypatch):
+        monkeypatch.setenv("GIT_EXAMPLE_TOKEN", "repo-token")
+        monkeypatch.setenv("UNRELATED_SECRET", "do-not-send")
+        monkeypatch.setenv(cd.REPO_TOKEN_BINDINGS_ENV, json.dumps({"git.example.com": "GIT_EXAMPLE_TOKEN"}))
+        args = SimpleNamespace(
+            github_user="alice",
+            repo="https://git.example.com/org/repo",
+            repo_token_env="UNRELATED_SECRET",
+        )
+
+        with pytest.raises(CapRoverDeployError, match="does not match"):
+            cd.get_github_creds(args)
+
     def test_main_rejects_custom_repo_missing_token_env_before_password_resolution(self, monkeypatch, capsys):
         monkeypatch.setenv("GITHUB_TOKEN", "generic-github-token")
+        monkeypatch.setenv("CAPROVER_CREDENTIAL_ORIGIN", "https://captain.example.com")
         monkeypatch.setattr(sys, "argv", [
             "caprover_deploy.py",
             "--caprover-url", "https://captain.example.com",
@@ -332,6 +466,25 @@ class TestRepoSafety:
         out = capsys.readouterr().out
         assert "caprover_config_invalid" in out
         assert "repo token validation" in out
+
+
+class TestResponseLimits:
+    def test_api_rejects_oversized_success_response_before_json_decode(self, monkeypatch):
+        class Response:
+            def read(self, _limit):
+                return b"x" * (cd.MAX_API_RESPONSE_BYTES + 1)
+
+        class Opener:
+            def open(self, _request, timeout):
+                assert timeout == 30
+                return Response()
+
+        monkeypatch.setattr(cd.urllib.request, "build_opener", lambda *_args: Opener())
+
+        result = CapRoverAPI("https://captain.example.com")._request("GET", "/api/v2/test")
+
+        assert result["status"] == -1
+        assert "byte limit" in result["description"]
 
 
 class TestCliDeploySafety:

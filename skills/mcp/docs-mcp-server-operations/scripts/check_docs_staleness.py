@@ -9,14 +9,23 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
+import tempfile
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
 DEFAULT_PACKAGE = "@arabold/docs-mcp-server@2.4.2"
+
+
+def approved_docs_mcp_package(value: str) -> str:
+    """Keep npx execution pinned to the reviewed docs MCP package."""
+    if value != DEFAULT_PACKAGE:
+        raise ValueError(f"docs MCP package must be the approved pinned package: {DEFAULT_PACKAGE}")
+    return value
 
 
 def fetch_json(url: str, timeout: int = 12):
@@ -32,12 +41,36 @@ def load_indexed_libraries(server_url: str, package: str, list_json: str | None)
     if list_json:
         data = json.loads(Path(list_json).read_text(encoding="utf-8"))
         return data if isinstance(data, list) else data.get("libraries", [])
-    result = subprocess.run(
-        ["npx", package, "list", "--server-url", f"{server_url.rstrip('/')}/api", "--output", "json"],
-        capture_output=True,
-        text=True,
-        timeout=90,
-    )
+    with tempfile.TemporaryDirectory(prefix="docs-mcp-npx-") as workdir:
+        npm_env = {
+            "PATH": os.environ.get("PATH", ""),
+            "HOME": os.environ.get("HOME", ""),
+            "NPM_CONFIG_USERCONFIG": os.devnull,
+            "NPM_CONFIG_GLOBALCONFIG": os.devnull,
+            "NPM_CONFIG_REGISTRY": "https://registry.npmjs.org/",
+            "NPM_CONFIG_CACHE": str(Path(workdir) / "npm-cache"),
+            "NPM_CONFIG_AUDIT": "false",
+            "NPM_CONFIG_FUND": "false",
+        }
+        result = subprocess.run(
+            [
+                "npx",
+                "--yes",
+                "--registry",
+                "https://registry.npmjs.org/",
+                approved_docs_mcp_package(package),
+                "list",
+                "--server-url",
+                f"{server_url.rstrip('/')}/api",
+                "--output",
+                "json",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=90,
+            cwd=workdir,
+            env=npm_env,
+        )
     if result.returncode != 0:
         raise SystemExit("docs-mcp-server list failed; check server URL and CLI availability")
     return json.loads(result.stdout or "[]")
@@ -193,13 +226,17 @@ def render_markdown(rows: list[dict]) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Check docs-mcp-server index staleness and shallow-index flags.")
     parser.add_argument("--server-url", default="http://127.0.0.1:6280", help="Base server URL without /api")
-    parser.add_argument("--docs-mcp-package", default=DEFAULT_PACKAGE, help="npx package spec to run")
+    parser.add_argument("--docs-mcp-package", default=DEFAULT_PACKAGE, help="approved pinned npx package")
     parser.add_argument("--list-json", help="Read docs-mcp list JSON from a file instead of calling the server")
     parser.add_argument("--skip-registry", action="store_true", help="Do not call npm/PyPI/GitHub registries; only emit quality flags")
     parser.add_argument("--output", choices=["text", "markdown", "json"], default="text")
     args = parser.parse_args()
 
-    rows = analyze(load_indexed_libraries(args.server_url, args.docs_mcp_package, args.list_json), skip_registry=args.skip_registry)
+    try:
+        package = approved_docs_mcp_package(args.docs_mcp_package)
+    except ValueError as exc:
+        parser.error(str(exc))
+    rows = analyze(load_indexed_libraries(args.server_url, package, args.list_json), skip_registry=args.skip_registry)
     if args.output == "json":
         print(json.dumps(rows, indent=2, ensure_ascii=False))
     elif args.output == "markdown":

@@ -37,6 +37,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import stat
 import struct
 import subprocess
@@ -79,9 +80,18 @@ PLACEHOLDER_ALLOWED_USER_IDS = {
     "234567890123456789",
 }
 DEFAULT_LLM_API_KEY_ENV = "LLM_API_KEY"
+DEFAULT_DISCORD_TOKEN_ENV = "DISCORD_BOT_TOKEN"
+DEFAULT_GROQ_API_KEY_ENV = "GROQ_API_KEY"
 APPROVED_LLM_REMOTE_HOSTS = {"api.openai.com", "api.groq.com"}
 LOCAL_LLM_HOSTS = {"localhost", "127.0.0.1", "::1"}
 ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+LLM_CREDENTIAL_BINDINGS_ENV = "LLM_CREDENTIAL_BINDINGS"
+PROVIDER_CREDENTIAL_BINDINGS_ENV = "MEETING_PROVIDER_CREDENTIAL_BINDINGS"
+UNATTRIBUTED_USER_ID = 0
+MAX_MEETING_DURATION_SECONDS = 4 * 60 * 60
+MAX_MEETING_UTTERANCES = 1000
+MAX_MEETING_TRANSCRIPT_CHARS = 250_000
+MAX_MEETING_STT_CALLS = 1000
 
 
 def _truthy_config(value: Any) -> bool:
@@ -97,15 +107,97 @@ def _normalize_env_name(raw_name: Any, label: str) -> str:
     return name
 
 
+def _provider_credential_bindings() -> dict[str, str]:
+    """Load protected provider-to-environment bindings without trusting YAML."""
+    raw = os.environ.get(PROVIDER_CREDENTIAL_BINDINGS_ENV, "").strip()
+    if not raw:
+        return {}
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{PROVIDER_CREDENTIAL_BINDINGS_ENV} must be a JSON object") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"{PROVIDER_CREDENTIAL_BINDINGS_ENV} must be a JSON object")
+    allowed = {"discord", "groq"}
+    if set(payload) - allowed:
+        raise ValueError(f"{PROVIDER_CREDENTIAL_BINDINGS_ENV} has an unsupported provider")
+    return {
+        provider: _normalize_env_name(env_name, f"{PROVIDER_CREDENTIAL_BINDINGS_ENV}.{provider}")
+        for provider, env_name in payload.items()
+    }
+
+
+def resolve_provider_credential_env(provider: str, requested_env: Any, default_env: str) -> str:
+    """Bind a provider credential selector to a protected environment mapping."""
+    requested = _normalize_env_name(requested_env or default_env, f"{provider} credential environment")
+    allowed = _provider_credential_bindings().get(provider, default_env)
+    if requested != allowed:
+        raise ValueError(f"{provider} credential environment does not match the protected provider binding")
+    return allowed
+
+
 def _is_local_llm_host(hostname: str) -> bool:
     return (hostname or "").lower() in LOCAL_LLM_HOSTS
+
+
+def _llm_origin_key(base_url: str) -> str:
+    parsed = urllib.parse.urlsplit(base_url)
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("llm.base_url has an invalid port") from exc
+    if port is None:
+        port = 443 if parsed.scheme == "https" else 80
+    return f"{parsed.scheme.lower()}://{(parsed.hostname or '').lower()}:{port}"
+
+
+def _llm_credential_bindings() -> dict[str, str]:
+    """Load protected origin-to-token bindings without trusting YAML selectors."""
+    raw = os.environ.get(LLM_CREDENTIAL_BINDINGS_ENV, "").strip()
+    if not raw:
+        return {}
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{LLM_CREDENTIAL_BINDINGS_ENV} must be a JSON object") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"{LLM_CREDENTIAL_BINDINGS_ENV} must be a JSON object")
+    bindings: dict[str, str] = {}
+    for origin, env_name in payload.items():
+        if not isinstance(origin, str):
+            raise ValueError(f"{LLM_CREDENTIAL_BINDINGS_ENV} origins must be text")
+        normalized = validate_llm_base_url(origin, allow_custom_remote=True)
+        if urllib.parse.urlsplit(normalized).path:
+            raise ValueError(f"{LLM_CREDENTIAL_BINDINGS_ENV} entries must be origins without a path")
+        bindings[_llm_origin_key(normalized)] = _normalize_env_name(
+            env_name, LLM_CREDENTIAL_BINDINGS_ENV
+        )
+    return bindings
+
+
+def resolve_llm_api_key_env(base_url: str, requested_env: Any) -> str:
+    """Bind a configured LLM endpoint to a protected credential environment."""
+    requested = _normalize_env_name(requested_env or DEFAULT_LLM_API_KEY_ENV, "llm.api_key_env")
+    parsed = urllib.parse.urlsplit(base_url)
+    hostname = (parsed.hostname or "").lower()
+    default_env = DEFAULT_LLM_API_KEY_ENV if (
+        _is_local_llm_host(hostname) or hostname in APPROVED_LLM_REMOTE_HOSTS
+    ) else None
+    bound_env = _llm_credential_bindings().get(_llm_origin_key(base_url))
+    allowed_env = bound_env or default_env
+    if not allowed_env:
+        raise ValueError(
+            f"custom llm.base_url requires an exact protected credential binding in {LLM_CREDENTIAL_BINDINGS_ENV}"
+        )
+    if requested != allowed_env:
+        raise ValueError("llm.api_key_env does not match the protected LLM origin binding")
+    return allowed_env
 
 
 def validate_llm_base_url(
     raw_url: Any,
     *,
     allow_custom_remote: bool = False,
-    api_key_env: str = DEFAULT_LLM_API_KEY_ENV,
 ) -> str:
     """Validate summary LLM egress before transcript text or API keys are used."""
     candidate = str(raw_url or "").strip()
@@ -136,9 +228,6 @@ def validate_llm_base_url(
                 "llm.base_url custom remote endpoints require "
                 "llm.allow_custom_remote: true or LLM_ALLOW_CUSTOM_REMOTE=1"
             )
-        if api_key_env == DEFAULT_LLM_API_KEY_ENV:
-            raise ValueError("custom llm.base_url requires a host-specific llm.api_key_env instead of LLM_API_KEY")
-
     path = parsed.path.rstrip("/")
     return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, path, "", "")).rstrip("/")
 
@@ -154,6 +243,7 @@ class MeetingConfig:
     # Discord
     bot_token: str = ""
     allowed_user_ids: Set[str] = field(default_factory=set)
+    allowed_voice_channel_ids: Set[str] = field(default_factory=set)
 
     # STT
     stt_provider: str = "auto"
@@ -200,7 +290,9 @@ class MeetingConfig:
 
         # Discord token
         discord_cfg = yaml_data.get("discord", {})
-        token_env = discord_cfg.get("token_env", "DISCORD_BOT_TOKEN")
+        token_env = resolve_provider_credential_env(
+            "discord", discord_cfg.get("token_env"), DEFAULT_DISCORD_TOKEN_ENV
+        )
         cfg.bot_token = os.environ.get(token_env, "")
         cfg.allowed_user_ids = {
             str(user_id).strip()
@@ -213,6 +305,11 @@ class MeetingConfig:
                 "discord.allowed_users contains placeholder example IDs; "
                 "replace them with real approved Discord user IDs or leave the list empty"
             )
+        cfg.allowed_voice_channel_ids = {
+            str(channel_id).strip()
+            for channel_id in discord_cfg.get("allowed_voice_channels", [])
+            if str(channel_id).strip()
+        }
 
         # STT
         stt_cfg = yaml_data.get("stt", {})
@@ -221,7 +318,10 @@ class MeetingConfig:
             raise ValueError("stt.provider must be one of: auto, groq, local")
         cfg.stt_provider = provider
         groq_cfg = stt_cfg.get("groq", {})
-        cfg.groq_api_key = os.environ.get(groq_cfg.get("api_key_env", "GROQ_API_KEY"), "")
+        groq_key_env = resolve_provider_credential_env(
+            "groq", groq_cfg.get("api_key_env"), DEFAULT_GROQ_API_KEY_ENV
+        )
+        cfg.groq_api_key = os.environ.get(groq_key_env, "")
         cfg.stt_model = groq_cfg.get("model", cfg.stt_model)
         cfg.stt_language = groq_cfg.get("language", stt_cfg.get("language", cfg.stt_language))
         cfg.stt_prompt = groq_cfg.get("prompt", "")
@@ -234,10 +334,6 @@ class MeetingConfig:
 
         # LLM
         llm_cfg = yaml_data.get("llm", {})
-        llm_api_key_env = _normalize_env_name(
-            llm_cfg.get("api_key_env") or DEFAULT_LLM_API_KEY_ENV,
-            "llm.api_key_env",
-        )
         allow_custom_remote = (
             _truthy_config(llm_cfg.get("allow_custom_remote", False))
             or _truthy_config(os.environ.get("LLM_ALLOW_CUSTOM_REMOTE", ""))
@@ -246,7 +342,10 @@ class MeetingConfig:
         cfg.llm_base_url = validate_llm_base_url(
             raw_llm_base_url,
             allow_custom_remote=allow_custom_remote,
-            api_key_env=llm_api_key_env,
+        )
+        llm_api_key_env = resolve_llm_api_key_env(
+            cfg.llm_base_url,
+            llm_cfg.get("api_key_env") or DEFAULT_LLM_API_KEY_ENV,
         )
         cfg.llm_api_key = os.environ.get(llm_api_key_env, "")
         cfg.llm_model = os.environ.get("LLM_MODEL", llm_cfg.get("model", cfg.llm_model))
@@ -330,6 +429,8 @@ class VoiceReceiver:
     MIN_SPEECH_DURATION: float = 0.3  # minimum seconds to process (skip noise)
     SAMPLE_RATE: int = 48000          # Discord native rate
     CHANNELS: int = 2                 # Discord sends stereo
+    MAX_BUFFER_SECONDS: float = 30.0  # hard cap for a continuous speaker stream
+    MAX_TRACKED_SSRC: int = 16        # avoids unbounded decoder/buffer creation
 
     def __init__(
         self,
@@ -346,6 +447,9 @@ class VoiceReceiver:
         # Override constants from config
         self.SILENCE_THRESHOLD = config.silence_threshold
         self.MIN_SPEECH_DURATION = config.min_speech_duration
+        self.MAX_BUFFER_BYTES = int(
+            self.MAX_BUFFER_SECONDS * self.SAMPLE_RATE * self.CHANNELS * 2
+        )
 
         # Decryption
         self._secret_key: Optional[bytes] = None
@@ -410,9 +514,8 @@ class VoiceReceiver:
                 if buf_duration >= self.MIN_SPEECH_DURATION:
                     user_id = ssrc_user_map.get(ssrc, 0)
                     if not user_id:
-                        user_id = self._infer_user_for_ssrc(ssrc)
-                    if user_id:
-                        completed.append((user_id, bytes(buf)))
+                        user_id = self._infer_user_for_ssrc_locked(ssrc)
+                    completed.append((user_id, bytes(buf)))
             self._buffers.clear()
             self._last_packet_time.clear()
             self._decoders.clear()
@@ -427,6 +530,9 @@ class VoiceReceiver:
 
     def map_ssrc(self, ssrc: int, user_id: int) -> None:
         with self._lock:
+            if ssrc not in self._ssrc_to_user and len(self._ssrc_to_user) >= self.MAX_TRACKED_SSRC:
+                logger.warning("Ignoring SSRC %s: tracked speaker limit reached", ssrc)
+                return
             self._ssrc_to_user[ssrc] = user_id
 
     def _install_speaking_hook(self, conn) -> None:
@@ -459,11 +565,17 @@ class VoiceReceiver:
             logger.warning("Could not install hook on live ws: %s", e)
 
     def _infer_user_for_ssrc(self, ssrc: int) -> int:
+        """Infer and record a speaker while acquiring the receiver lock."""
+        with self._lock:
+            return self._infer_user_for_ssrc_locked(ssrc)
+
+    def _infer_user_for_ssrc_locked(self, ssrc: int) -> int:
         """Infer user_id for an unmapped SSRC using voice_states.
 
         When the bot rejoins a voice channel, Discord may not resend SPEAKING
         events. Use voice_states (populated by VOICE_STATE_UPDATE) to identify
-        members — this doesn't require the GUILD_MEMBERS intent.
+        members — this doesn't require the GUILD_MEMBERS intent. The caller
+        must hold ``self._lock``.
         """
         try:
             channel = self._vc.channel
@@ -488,16 +600,33 @@ class VoiceReceiver:
                 logger.info("Auto-mapped ssrc=%d -> user=%d (sole member)", ssrc, uid)
                 return uid
             if len(candidates) > 1:
-                with self._lock:
-                    already_mapped = set(self._ssrc_to_user.values())
-                for uid in candidates:
-                    if uid not in already_mapped:
-                        self._ssrc_to_user[ssrc] = uid
-                        logger.info("Auto-mapped ssrc=%d -> user=%d (unmapped member)", ssrc, uid)
-                        return uid
+                logger.warning(
+                    "Leaving ssrc=%d unattributed: %d candidate members",
+                    ssrc,
+                    len(candidates),
+                )
         except Exception:
             pass
         return 0
+
+    def _buffer_pcm(self, ssrc: int, pcm: bytes) -> bool:
+        """Append decoded audio only while per-stream and global limits hold."""
+        with self._lock:
+            if ssrc not in self._buffers and len(self._buffers) >= self.MAX_TRACKED_SSRC:
+                logger.warning("Dropping audio for SSRC %s: tracked speaker limit reached", ssrc)
+                return False
+            buffer = self._buffers[ssrc]
+            if len(buffer) + len(pcm) > self.MAX_BUFFER_BYTES:
+                # Do not retain an endlessly-speaking or malicious stream until it
+                # eventually falls silent; release its decoder state as well.
+                self._buffers.pop(ssrc, None)
+                self._last_packet_time.pop(ssrc, None)
+                self._decoders.pop(ssrc, None)
+                logger.warning("Dropping oversized audio buffer for SSRC %s", ssrc)
+                return False
+            buffer.extend(pcm)
+            self._last_packet_time[ssrc] = time.monotonic()
+            return True
 
     # ------------------------------------------------------------------
     # Packet handler (called from SocketReader thread)
@@ -574,12 +703,15 @@ class VoiceReceiver:
 
         # Opus decode → PCM
         try:
-            if ssrc not in self._decoders:
-                self._decoders[ssrc] = discord.opus.Decoder()
-            pcm = self._decoders[ssrc].decode(decrypted)
             with self._lock:
-                self._buffers[ssrc].extend(pcm)
-                self._last_packet_time[ssrc] = time.monotonic()
+                if ssrc not in self._decoders:
+                    if len(self._decoders) >= self.MAX_TRACKED_SSRC:
+                        logger.warning("Dropping audio for SSRC %s: decoder limit reached", ssrc)
+                        return
+                    self._decoders[ssrc] = discord.opus.Decoder()
+                decoder = self._decoders[ssrc]
+            pcm = decoder.decode(decrypted)
+            self._buffer_pcm(ssrc, pcm)
         except Exception as e:
             with self._lock:
                 self._decoders.pop(ssrc, None)
@@ -612,14 +744,17 @@ class VoiceReceiver:
                 if silence_duration >= self.SILENCE_THRESHOLD and buf_duration >= self.MIN_SPEECH_DURATION:
                     user_id = ssrc_user_map.get(ssrc, 0)
                     if not user_id:
-                        user_id = self._infer_user_for_ssrc(ssrc)
-                    if user_id:
-                        completed.append((user_id, bytes(buf)))
+                        user_id = self._infer_user_for_ssrc_locked(ssrc)
+                    completed.append((user_id, bytes(buf)))
                     self._buffers[ssrc] = bytearray()
                     self._last_packet_time.pop(ssrc, None)
+                    self._decoders.pop(ssrc, None)
+                    self._ssrc_to_user.pop(ssrc, None)
                 elif silence_duration >= self.SILENCE_THRESHOLD * 2:
                     self._buffers.pop(ssrc, None)
                     self._last_packet_time.pop(ssrc, None)
+                    self._decoders.pop(ssrc, None)
+                    self._ssrc_to_user.pop(ssrc, None)
 
         return completed
 
@@ -898,23 +1033,112 @@ def generate_meeting_markdown(meeting: dict, llm_result: Optional[dict] = None) 
     return "\n".join(md).strip() + "\n"
 
 
+def _canonical_system_temp_alias(path: Path) -> Path:
+    """Normalize only macOS's built-in /var and /tmp aliases before fd traversal."""
+    candidate = path.expanduser()
+    for alias, target in ((Path("/var"), Path("/private/var")), (Path("/tmp"), Path("/private/tmp"))):
+        if candidate.is_absolute() and (candidate == alias or alias in candidate.parents):
+            try:
+                if alias.is_symlink() and alias.resolve(strict=True) == target:
+                    return target.joinpath(*candidate.relative_to(alias).parts)
+            except OSError:
+                pass
+            break
+    return candidate
+
+
+def _open_private_output_dir(path: Path) -> int:
+    """Create and pin every output-root component without following symlinks."""
+    candidate = _canonical_system_temp_alias(path)
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    if candidate.is_absolute():
+        descriptor = os.open("/", flags)
+        parts = candidate.parts[1:]
+    else:
+        descriptor = os.open(".", flags)
+        parts = candidate.parts
+    try:
+        for part in parts:
+            try:
+                next_descriptor = os.open(part, flags, dir_fd=descriptor)
+            except FileNotFoundError:
+                os.mkdir(part, mode=0o700, dir_fd=descriptor)
+                next_descriptor = os.open(part, flags, dir_fd=descriptor)
+            except OSError as exc:
+                raise OSError(f"meeting output directory must not contain symlinks: {path}") from exc
+            os.close(descriptor)
+            descriptor = next_descriptor
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != os.geteuid():
+            raise OSError("meeting output directory must be an owner-owned directory")
+        os.fchmod(descriptor, stat.S_IRWXU)
+        return descriptor
+    except Exception:
+        os.close(descriptor)
+        raise
+
+
 def save_meeting_markdown(output_dir: str, meeting: dict, markdown: str) -> Path:
-    """Save the meeting markdown to disk and return the path."""
+    """Atomically persist meeting markdown under a descriptor-pinned private root."""
     safe_title = re.sub(r"[^A-Za-z0-9_.-]+", "-", meeting.get("title", "meeting")).strip("-")[:80] or "meeting"
     guild_id = str(meeting.get("guild_id", "default"))
     safe_guild_id = re.sub(r"[^A-Za-z0-9_-]+", "-", guild_id).strip("-")[:80] or "default"
-    out_dir = Path(output_dir) / safe_guild_id
-    out_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-    os.chmod(out_dir, stat.S_IRWXU)
-    path = out_dir / f"{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}-{safe_title}.md"
-    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
-    fd = os.open(str(path), flags, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as handle:
-        handle.write(markdown)
-    os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
-    return path
+    output_root = Path(output_dir).expanduser()
+    directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    root_fd = _open_private_output_dir(output_root)
+    try:
+        try:
+            os.mkdir(safe_guild_id, mode=0o700, dir_fd=root_fd)
+        except FileExistsError:
+            pass
+        try:
+            guild_fd = os.open(safe_guild_id, directory_flags, dir_fd=root_fd)
+        except OSError as exc:
+            raise OSError("meeting guild output directory must not contain symlinks") from exc
+        try:
+            guild_stat = os.fstat(guild_fd)
+            if not stat.S_ISDIR(guild_stat.st_mode) or guild_stat.st_uid != os.geteuid():
+                raise OSError("meeting guild output directory must be owner-owned")
+            os.fchmod(guild_fd, stat.S_IRWXU)
+            filename = f"{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}-{safe_title}.md"
+            temporary: str | None = None
+            try:
+                existing = os.stat(filename, dir_fd=guild_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                existing = None
+            if existing is not None and not stat.S_ISREG(existing.st_mode):
+                raise OSError("refusing to overwrite non-regular meeting output")
+            temporary = f".{filename}.{secrets.token_hex(16)}.tmp"
+            try:
+                fd = os.open(
+                    temporary,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+                    0o600,
+                    dir_fd=guild_fd,
+                )
+                try:
+                    payload = markdown.encode("utf-8")
+                    offset = 0
+                    while offset < len(payload):
+                        offset += os.write(fd, payload[offset:])
+                    os.fchmod(fd, stat.S_IRUSR | stat.S_IWUSR)
+                    os.fsync(fd)
+                finally:
+                    os.close(fd)
+                os.replace(temporary, filename, src_dir_fd=guild_fd, dst_dir_fd=guild_fd)
+                temporary = None
+                os.fsync(guild_fd)
+            finally:
+                if temporary is not None:
+                    try:
+                        os.unlink(temporary, dir_fd=guild_fd)
+                    except FileNotFoundError:
+                        pass
+        finally:
+            os.close(guild_fd)
+    finally:
+        os.close(root_fd)
+    return output_root / safe_guild_id / filename
 
 
 # ============================================================================
@@ -929,6 +1153,9 @@ class MeetingSession:
     started_at: datetime
     voice_channel_name: str = ""
     entries: List[dict] = field(default_factory=list)
+    stt_calls: int = 0
+    transcript_chars: int = 0
+    limit_reason: str = ""
     _stopping: bool = False
 
 
@@ -965,6 +1192,37 @@ class MeetingBot(discord.Client):
         """Return whether the invoker may control meeting recordings."""
         user_id = str(getattr(getattr(interaction, "user", None), "id", "")).strip()
         return bool(user_id and user_id in self._config.allowed_user_ids)
+
+    def _is_allowed_voice_channel(self, channel: Any) -> bool:
+        """Record only in an operator-approved closed voice channel."""
+        channel_id = str(getattr(channel, "id", "")).strip()
+        return bool(channel_id and channel_id in self._config.allowed_voice_channel_ids)
+
+    def _mark_meeting_limit(self, meeting: MeetingSession, reason: str) -> None:
+        if not meeting.limit_reason:
+            meeting.limit_reason = reason
+            logger.warning("Meeting %d reached safety limit: %s", meeting.guild_id, reason)
+        receiver = self._receivers.get(meeting.guild_id)
+        if receiver:
+            receiver.pause()
+
+    def _reserve_stt_call(self, meeting: MeetingSession) -> bool:
+        """Reserve one provider call while all aggregate meeting bounds hold."""
+        if meeting.limit_reason:
+            return False
+        elapsed = (datetime.now(timezone.utc) - meeting.started_at).total_seconds()
+        checks = (
+            (elapsed >= MAX_MEETING_DURATION_SECONDS, "duration_limit"),
+            (len(meeting.entries) >= MAX_MEETING_UTTERANCES, "utterance_limit"),
+            (meeting.transcript_chars >= MAX_MEETING_TRANSCRIPT_CHARS, "transcript_char_limit"),
+            (meeting.stt_calls >= MAX_MEETING_STT_CALLS, "stt_call_limit"),
+        )
+        for exceeded, reason in checks:
+            if exceeded:
+                self._mark_meeting_limit(meeting, reason)
+                return False
+        meeting.stt_calls += 1
+        return True
 
     async def _send_unauthorized(self, interaction: discord.Interaction) -> None:
         message = (
@@ -1048,6 +1306,13 @@ class MeetingBot(discord.Client):
             return
 
         voice_channel = voice_state.channel
+        if not self._is_allowed_voice_channel(voice_channel):
+            await interaction.followup.send(
+                "Este canal de voz não está aprovado para gravação. "
+                "Peça a um administrador para incluí-lo em `discord.allowed_voice_channels`.",
+                ephemeral=True,
+            )
+            return
 
         # Join the voice channel
         try:
@@ -1124,6 +1389,7 @@ class MeetingBot(discord.Client):
             f"Canal de voz: {meeting.voice_channel_name}\n"
             f"Duração: {minutes}min\n"
             f"Falas registradas: {len(meeting.entries)}\n"
+            f"Limite de segurança: {meeting.limit_reason or 'não atingido'}\n"
             "Participantes transcritos: " + (", ".join(participants) if participants else "nenhum ainda"),
             ephemeral=True,
         )
@@ -1159,6 +1425,8 @@ class MeetingBot(discord.Client):
             flushed = receiver.flush()
             logger.info("Meeting stop flush: returned %d utterance(s)", len(flushed))
             for user_id, pcm_data in flushed:
+                if not self._reserve_stt_call(meeting):
+                    break
                 try:
                     tmp_f = tempfile.NamedTemporaryFile(suffix=".wav", prefix="vc_flush_", delete=False)
                     wav_path = tmp_f.name
@@ -1247,6 +1515,12 @@ class MeetingBot(discord.Client):
             while receiver._running:
                 await asyncio.sleep(0.2)
 
+                meeting = self._meetings.get(guild_id)
+                if meeting:
+                    elapsed = (datetime.now(timezone.utc) - meeting.started_at).total_seconds()
+                    if elapsed >= MAX_MEETING_DURATION_SECONDS:
+                        self._mark_meeting_limit(meeting, "duration_limit")
+
                 # UDP keepalive to prevent Discord from dropping the session
                 now = time.monotonic()
                 if now - last_keepalive >= self._config.keepalive_interval:
@@ -1271,6 +1545,10 @@ class MeetingBot(discord.Client):
         logger.info("Voice input processing START for guild=%d user=%d, pcm=%d bytes",
                      guild_id, user_id, len(pcm_data))
 
+        meeting = self._meetings.get(guild_id)
+        if not meeting or meeting._stopping or not self._reserve_stt_call(meeting):
+            return
+
         tmp_f = tempfile.NamedTemporaryFile(suffix=".wav", prefix="vc_listen_", delete=False)
         wav_path = tmp_f.name
         tmp_f.close()
@@ -1291,9 +1569,7 @@ class MeetingBot(discord.Client):
 
             logger.info("Voice input from user %d transcribed (chars=%d)", user_id, len(transcript))
 
-            meeting = self._meetings.get(guild_id)
-            if meeting and not meeting._stopping:
-                self._record_transcript(meeting, user_id, transcript)
+            self._record_transcript(meeting, user_id, transcript)
         except Exception as e:
             logger.warning("Voice input processing failed: %s", e, exc_info=True)
         finally:
@@ -1302,24 +1578,41 @@ class MeetingBot(discord.Client):
             except OSError:
                 pass
 
-    def _record_transcript(self, meeting: MeetingSession, user_id: int, transcript: str) -> None:
+    def _record_transcript(self, meeting: MeetingSession, user_id: int, transcript: str) -> bool:
         """Append a transcript entry to the meeting."""
-        user_name = str(user_id)
-        try:
-            guild = self.get_guild(meeting.guild_id)
-            if guild:
-                member = guild.get_member(user_id)
-                if member:
-                    user_name = member.display_name or member.name
-        except Exception:
-            pass
+        text = transcript.strip()
+        if not text:
+            return False
+        if len(meeting.entries) >= MAX_MEETING_UTTERANCES:
+            self._mark_meeting_limit(meeting, "utterance_limit")
+            return False
+        if meeting.transcript_chars + len(text) > MAX_MEETING_TRANSCRIPT_CHARS:
+            self._mark_meeting_limit(meeting, "transcript_char_limit")
+            return False
+
+        if user_id == UNATTRIBUTED_USER_ID:
+            user_id_text = ""
+            user_name = "Unattributed"
+        else:
+            user_id_text = str(user_id)
+            user_name = user_id_text
+            try:
+                guild = self.get_guild(meeting.guild_id)
+                if guild:
+                    member = guild.get_member(user_id)
+                    if member:
+                        user_name = member.display_name or member.name
+            except Exception:
+                pass
 
         meeting.entries.append({
             "ts": datetime.now(timezone.utc).isoformat(timespec="seconds") + "Z",
-            "user_id": str(user_id),
+            "user_id": user_id_text,
             "user_name": user_name,
-            "text": transcript.strip(),
+            "text": text,
         })
+        meeting.transcript_chars += len(text)
+        return True
 
 
 # ============================================================================

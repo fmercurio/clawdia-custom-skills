@@ -6,6 +6,7 @@ from pathlib import Path
 
 from mcp import Client
 from mcp.types import Tool
+from starlette.testclient import TestClient
 
 RUNTIME_ROOT = Path(__file__).resolve().parents[1]
 if str(RUNTIME_ROOT) not in sys.path:
@@ -34,7 +35,7 @@ def tool_annotations(tool: Tool):
 
 def test_core_tool_names_and_annotations_are_exactly_four() -> None:
     async def inspect_tools() -> None:
-        server = create_server()
+        server = create_server(bearer_token="t" * 32)
         async with Client(server) as client:
             tools_result = await client.list_tools()
             tools = tools_result.tools
@@ -51,7 +52,7 @@ def test_core_tool_names_and_annotations_are_exactly_four() -> None:
 
 def test_server_tools_return_deterministic_payloads() -> None:
     async def call_tools() -> None:
-        server = create_server()
+        server = create_server(bearer_token="t" * 32)
         async with Client(server) as client:
             status = await client.call_tool("brain_status", {})
             assert status.structured_content == {
@@ -75,3 +76,17 @@ def test_server_tools_return_deterministic_payloads() -> None:
             assert pull.structured_content["intent"] == "state"
 
     asyncio.run(call_tools())
+
+
+def test_streamable_http_requires_the_instance_bearer_token() -> None:
+    token = "t" * 32
+    app = create_server(bearer_token=token).streamable_http_app()
+
+    with TestClient(app) as client:
+        denied = client.post("/mcp")
+        allowed = client.post("/mcp", headers={"Authorization": f"Bearer {token}"})
+
+    assert denied.status_code == 401
+    # The authenticated request reaches the protocol handler; its empty body
+    # is intentionally invalid MCP rather than an authorization failure.
+    assert allowed.status_code == 400

@@ -32,12 +32,16 @@ Design choices:
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
 import sqlite3
+import stat
 import sys
+import tempfile
 import time
 import urllib.parse
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -55,6 +59,9 @@ EMBED_URL = os.environ.get("BRAIN_EMBED_URL", "http://127.0.0.1:1234/v1/embeddin
 EMBED_MODEL = os.environ.get("BRAIN_EMBED_MODEL", "nomic-embed-text")
 LOOPBACK_EMBED_HOSTS = {"localhost", "127.0.0.1", "::1"}
 REMOTE_EMBED_OPT_IN_ENV = "BRAIN_ALLOW_REMOTE_EMBEDDINGS"
+MAX_EMBED_RESPONSE_BYTES = 1_048_576
+MAX_EMBEDDING_DIMENSIONS = 8_192
+MAX_EMBED_BATCH_ITEMS = 20
 
 # File scanning
 SUPPORTED_EXTS = {".md", ".txt", ".yaml", ".yml"}
@@ -67,6 +74,84 @@ MIN_CHUNK_CHARS = 50
 
 class EmbeddingEndpointError(ValueError):
     """Raised when embedding egress would leave the trusted local boundary."""
+
+
+def _read_embedding_json(response) -> dict:
+    """Decode one bounded embedding response from an untrusted endpoint."""
+    payload = response.read(MAX_EMBED_RESPONSE_BYTES + 1)
+    if len(payload) > MAX_EMBED_RESPONSE_BYTES:
+        raise ValueError("embedding response exceeds byte limit")
+    decoded = json.loads(payload.decode("utf-8"))
+    if not isinstance(decoded, dict):
+        raise ValueError("embedding response must be a JSON object")
+    return decoded
+
+
+def _validate_embedding_vector(value) -> list[float]:
+    if not isinstance(value, list) or not value:
+        raise ValueError("embedding vector must be a non-empty list")
+    if len(value) > MAX_EMBEDDING_DIMENSIONS:
+        raise ValueError("embedding vector exceeds dimension limit")
+    vector: list[float] = []
+    for item in value:
+        if isinstance(item, bool) or not isinstance(item, (int, float)) or not math.isfinite(item):
+            raise ValueError("embedding vector must contain finite numeric values")
+        vector.append(float(item))
+    return vector
+
+
+def _extract_embedding_vectors(result: dict, expected_count: int) -> list[list[float]]:
+    data = result.get("data")
+    if not isinstance(data, list) or len(data) != expected_count:
+        raise ValueError("embedding response item count does not match request")
+    vectors: list[list[float]] = []
+    for item in data:
+        if not isinstance(item, dict):
+            raise ValueError("embedding response items must be objects")
+        vectors.append(_validate_embedding_vector(item.get("embedding")))
+    return vectors
+
+
+def ensure_gitignore_entry(path: Path, entry: str = ".brain-index/") -> None:
+    """Atomically update a regular .gitignore without following symlinks."""
+    if path.is_symlink():
+        raise ValueError("symlinked gitignore is not allowed")
+    existing = ""
+    if path.exists():
+        flags = os.O_RDONLY
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        descriptor = os.open(path, flags)
+        try:
+            metadata = os.fstat(descriptor)
+            if not stat.S_ISREG(metadata.st_mode):
+                raise ValueError("gitignore must be a regular file")
+            payload = os.read(descriptor, 1024 * 1024 + 1)
+            if len(payload) > 1024 * 1024:
+                raise ValueError("gitignore is too large")
+            existing = payload.decode("utf-8")
+        finally:
+            os.close(descriptor)
+    if entry in existing.splitlines():
+        return
+    updated = existing.rstrip() + ("\n" if existing.strip() else "") + entry + "\n"
+    descriptor, temporary_name = tempfile.mkstemp(prefix="..gitignore.", dir=path.parent)
+    temporary = Path(temporary_name)
+    try:
+        os.fchmod(descriptor, 0o600)
+        payload = updated.encode("utf-8")
+        offset = 0
+        while offset < len(payload):
+            offset += os.write(descriptor, payload[offset:])
+        os.fsync(descriptor)
+        os.close(descriptor)
+        descriptor = -1
+        os.replace(temporary, path)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        if temporary.exists() or temporary.is_symlink():
+            temporary.unlink()
 
 
 def _env_flag(name: str) -> bool:
@@ -83,7 +168,10 @@ def validate_embed_url(raw_url: str, allow_remote: bool = False) -> str:
     if parsed.query or parsed.fragment:
         raise EmbeddingEndpointError("embedding endpoint must not include query or fragment")
     hostname = (parsed.hostname or "").lower()
-    if not allow_remote and hostname not in LOOPBACK_EMBED_HOSTS:
+    is_loopback = hostname in LOOPBACK_EMBED_HOSTS
+    if not is_loopback and parsed.scheme != "https":
+        raise EmbeddingEndpointError("remote embedding endpoint must use HTTPS")
+    if not allow_remote and not is_loopback:
         raise EmbeddingEndpointError(
             "embedding endpoint must be localhost by default; pass --allow-remote-embeddings "
             f"or set {REMOTE_EMBED_OPT_IN_ENV}=1 only for an approved remote provider"
@@ -92,11 +180,56 @@ def validate_embed_url(raw_url: str, allow_remote: bool = False) -> str:
     return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
 
 
+def validate_embed_redirect_url(
+    source_url: str,
+    target_url: str,
+    allow_remote: bool = False,
+) -> str:
+    """Validate an embedding redirect without allowing an HTTPS downgrade."""
+    source = urllib.parse.urlsplit(source_url)
+    resolved_target = urllib.parse.urljoin(source_url, target_url)
+    validated_target = validate_embed_url(resolved_target, allow_remote=allow_remote)
+    target = urllib.parse.urlsplit(validated_target)
+    if source.scheme == "https" and target.scheme != "https":
+        raise EmbeddingEndpointError("embedding redirect must not downgrade HTTPS to HTTP")
+    return validated_target
+
+
 def resolve_embed_url(allow_remote: bool = False) -> str:
     return validate_embed_url(
         EMBED_URL,
         allow_remote=allow_remote or _env_flag(REMOTE_EMBED_OPT_IN_ENV),
     )
+
+
+class EmbeddingRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Revalidate every embedding redirect before urllib follows it."""
+
+    def __init__(self, allow_remote: bool = False):
+        super().__init__()
+        self.allow_remote = allow_remote
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        validated_url = validate_embed_redirect_url(
+            req.full_url,
+            newurl,
+            allow_remote=self.allow_remote,
+        )
+        return super().redirect_request(req, fp, code, msg, headers, validated_url)
+
+
+def _open_embedding_request(
+    request: urllib.request.Request,
+    allow_remote: bool = False,
+    timeout: int = 30,
+):
+    effective_allow_remote = allow_remote or _env_flag(REMOTE_EMBED_OPT_IN_ENV)
+    handlers = [EmbeddingRedirectHandler(allow_remote=effective_allow_remote)]
+    request_host = (urllib.parse.urlsplit(request.full_url).hostname or "").lower()
+    if request_host in LOOPBACK_EMBED_HOSTS:
+        handlers.insert(0, urllib.request.ProxyHandler({}))
+    opener = urllib.request.build_opener(*handlers)
+    return opener.open(request, timeout=timeout)
 
 
 def ensure_vault_file(path: Path) -> Path:
@@ -280,29 +413,42 @@ def chunk_markdown(text: str, title: str = "") -> list[dict]:
 
 def init_db() -> sqlite3.Connection:
     """Initialize or open the database."""
+    # VAULT_ROOT is resolved when configured above, so .brain-index is the only
+    # remaining path component that can itself be a symlink.
     if DB_DIR.is_symlink():
         raise ValueError("symlinked brain index directory is not allowed")
     if DB_DIR.exists() and not DB_DIR.is_dir():
         raise ValueError("brain index path is not a directory")
-    DB_DIR.mkdir(parents=True, exist_ok=True)
+    DB_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+    DB_DIR.chmod(0o700)
     if DB_PATH.is_symlink():
         raise ValueError("symlinked brain index database is not allowed")
     if DB_PATH.exists() and not DB_PATH.is_file():
         raise ValueError("brain index database path is not a file")
+    sidecar_paths = [Path(f"{DB_PATH}-wal"), Path(f"{DB_PATH}-shm")]
+    for sidecar_path in sidecar_paths:
+        if sidecar_path.is_symlink():
+            raise ValueError("symlinked brain index database sidecar is not allowed")
+        if sidecar_path.exists() and not sidecar_path.is_file():
+            raise ValueError("brain index database sidecar path is not a file")
+    cache_files = [DB_PATH, *sidecar_paths]
+    for cache_file in cache_files:
+        if cache_file.exists():
+            cache_file.chmod(0o600)
     # Add .brain-index to .gitignore if not already there
-    gitignore = VAULT_ROOT / ".gitignore"
-    if gitignore.exists():
-        gi = gitignore.read_text()
-        if ".brain-index" not in gi:
-            gi = gi.rstrip() + "\n.brain-index/\n"
-            gitignore.write_text(gi)
-    else:
-        gitignore.write_text(".brain-index/\n")
+    ensure_gitignore_entry(VAULT_ROOT / ".gitignore")
 
-    con = sqlite3.connect(str(DB_PATH))
-    con.execute("PRAGMA journal_mode=WAL")
-    con.execute("PRAGMA foreign_keys=ON")
-    con.executescript(SCHEMA)
+    previous_umask = os.umask(0o077)
+    try:
+        con = sqlite3.connect(str(DB_PATH))
+        con.execute("PRAGMA journal_mode=WAL")
+        con.execute("PRAGMA foreign_keys=ON")
+        con.executescript(SCHEMA)
+    finally:
+        os.umask(previous_umask)
+    for cache_file in cache_files:
+        if cache_file.exists():
+            cache_file.chmod(0o600)
     return con
 
 
@@ -415,14 +561,9 @@ def _store_embeddings(
     allow_remote_embeddings: bool = False,
 ) -> int:
     """Generate and store embeddings via OpenAI-compatible API."""
-    try:
-        import urllib.request
-    except ImportError:
-        return 0
-
     embed_url = resolve_embed_url(allow_remote=allow_remote_embeddings)
     count = 0
-    batch_size = 20
+    batch_size = MAX_EMBED_BATCH_ITEMS
     for i in range(0, len(items), batch_size):
         batch = items[i:i + batch_size]
         texts = [t for _, t in batch]
@@ -440,17 +581,20 @@ def _store_embeddings(
         )
 
         try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                result = json.loads(resp.read().decode("utf-8"))
-            for j, emb_data in enumerate(result.get("data", [])):
-                vec = emb_data.get("embedding", [])
-                if vec:
-                    blob = _floats_to_blob(vec)
-                    con.execute(
-                        "INSERT OR REPLACE INTO embeddings (chunk_id, embedding, model) VALUES (?, ?, ?)",
-                        (ids[j], blob, EMBED_MODEL)
-                    )
-                    count += 1
+            with _open_embedding_request(
+                req,
+                allow_remote=allow_remote_embeddings,
+                timeout=30,
+            ) as resp:
+                result = _read_embedding_json(resp)
+            vectors = _extract_embedding_vectors(result, len(ids))
+            for chunk_id, vec in zip(ids, vectors):
+                blob = _floats_to_blob(vec)
+                con.execute(
+                    "INSERT OR REPLACE INTO embeddings (chunk_id, embedding, model) VALUES (?, ?, ?)",
+                    (chunk_id, blob, EMBED_MODEL)
+                )
+                count += 1
             con.commit()
         except Exception:
             # Graceful: skip this batch if embedding endpoint is down
@@ -604,7 +748,6 @@ def search_vector(
     allow_remote_embeddings: bool = False,
 ) -> list[dict]:
     """Semantic search via embeddings + cosine similarity."""
-    import urllib.request
     embed_url = resolve_embed_url(allow_remote=allow_remote_embeddings)
 
     payload = json.dumps({
@@ -619,14 +762,19 @@ def search_vector(
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            result = json.loads(resp.read().decode("utf-8"))
+        with _open_embedding_request(
+            req,
+            allow_remote=allow_remote_embeddings,
+            timeout=30,
+        ) as resp:
+            result = _read_embedding_json(resp)
     except Exception as e:
         return [{"error": f"Embedding endpoint unavailable: {e}"}]
 
-    query_vec = result["data"][0]["embedding"]
-    if not query_vec:
-        return []
+    try:
+        query_vec = _extract_embedding_vectors(result, 1)[0]
+    except ValueError as exc:
+        return [{"error": f"Embedding endpoint unavailable: {exc}"}]
 
     # Compare against stored embeddings
     rows = con.execute("""

@@ -9,7 +9,8 @@ Usage:
 
 Auth: CAPROVER_PASSWORD env, --keepass-entry with KEEPASS_DB/KEEPASS_KEY, or interactive.
 GitHub: github.com uses GITHUB_TOKEN env or gh auth token.
-Custom Git hosts require --repo-token-env with a host-specific env var.
+Custom Git hosts require an exact host-to-host-specific-token binding in
+CAPROVER_REPO_TOKEN_BINDINGS; --repo-token-env can only assert that binding.
 """
 import argparse
 import json
@@ -29,6 +30,12 @@ except ImportError:
 LOCAL_CAPROVER_HOSTS = {"localhost", "127.0.0.1", "::1"}
 DEFAULT_GITHUB_REPO_HOST = "github.com"
 ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+REPO_TOKEN_BINDINGS_ENV = "CAPROVER_REPO_TOKEN_BINDINGS"
+GENERIC_GITHUB_TOKEN_ENV_NAMES = {"GITHUB_TOKEN", "GH_TOKEN"}
+MAX_API_RESPONSE_BYTES = 1_048_576
+MAX_API_ERROR_BYTES = 8_192
+SSH_USER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+SSH_HOST_RE = re.compile(r"^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
 
 # ──────────────────────────────────────────────
 #  Utilities
@@ -49,11 +56,12 @@ class CapRoverAPI:
             headers["x-captain-auth"] = self.token
         req = urllib.request.Request(url, data=data, headers=headers, method=method)
         try:
-            resp = urllib.request.urlopen(req, timeout=30)
-            body = json.loads(resp.read())
+            opener = urllib.request.build_opener(SameOriginRedirectHandler(self.base_url))
+            resp = opener.open(req, timeout=30)
+            body = json.loads(_read_limited_response(resp, MAX_API_RESPONSE_BYTES))
             return body
         except urllib.error.HTTPError as e:
-            raw = e.read().decode()[:500]
+            raw = _read_limited_response(e, MAX_API_ERROR_BYTES).decode(errors="replace")
             return {"status": e.code, "description": raw}
         except Exception as e:
             return {"status": -1, "description": str(e)}
@@ -174,6 +182,56 @@ class CapRoverDeployError(RuntimeError):
         self.message = message or code
 
 
+def _origin(url):
+    parsed = urllib.parse.urlsplit(url)
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise CapRoverDeployError("caprover_config_invalid", "URL has an invalid port") from exc
+    if port is None:
+        port = 443 if parsed.scheme == "https" else 80
+    return parsed.scheme.lower(), (parsed.hostname or "").lower(), port
+
+
+def require_same_origin(url, base_url):
+    absolute = urllib.parse.urljoin(base_url.rstrip("/") + "/", url)
+    if _origin(absolute) != _origin(base_url):
+        raise CapRoverDeployError("caprover_network_blocked", "cross-origin CapRover redirect blocked")
+    return absolute
+
+
+class SameOriginRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Allow dashboard redirects only within the configured CapRover origin."""
+
+    def __init__(self, base_url):
+        super().__init__()
+        self.base_url = base_url
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        safe_url = require_same_origin(newurl, self.base_url)
+        return super().redirect_request(req, fp, code, msg, headers, safe_url)
+
+
+def build_ssh_command(host, *, user="root", port="22", key=None):
+    host = (host or "").strip()
+    user = (user or "root").strip()
+    if not SSH_USER_RE.fullmatch(user):
+        raise CapRoverDeployError("caprover_config_invalid", "SSH user has an invalid format")
+    if host.startswith("-") or "@" in host or not SSH_HOST_RE.fullmatch(host):
+        raise CapRoverDeployError("caprover_config_invalid", "SSH host has an invalid format")
+    try:
+        port_number = int(str(port), 10)
+    except (TypeError, ValueError) as exc:
+        raise CapRoverDeployError("caprover_config_invalid", "SSH port must be an integer") from exc
+    if not 1 <= port_number <= 65535 or str(port).strip() != str(port_number):
+        raise CapRoverDeployError("caprover_config_invalid", "SSH port must be in range [1,65535]")
+    command = ["ssh"]
+    if key:
+        command += ["-i", str(key)]
+    command += ["-p", str(port_number), "--", f"{user}@{host}"]
+    return command
+
+
 def fail(code, message=None, detail=None, exit_code=1):
     print(code)
     if message:
@@ -190,6 +248,53 @@ def _normalize_env_name(raw_name, label):
     return name
 
 
+def _read_limited_response(response, limit):
+    """Read an HTTP response only after enforcing its configured byte budget."""
+    payload = response.read(limit + 1)
+    if len(payload) > limit:
+        raise CapRoverDeployError("caprover_network_blocked", "CapRover API response exceeded byte limit")
+    return payload
+
+
+def _repo_host_key(raw_repo):
+    parsed = urllib.parse.urlsplit((raw_repo or "").strip())
+    hostname, port = _parsed_host_port(parsed, "Git repo URL")
+    return hostname if port is None else f"{hostname}:{port}"
+
+
+def _repo_token_bindings():
+    """Load protected, exact host-to-environment credential bindings."""
+    raw = os.environ.get(REPO_TOKEN_BINDINGS_ENV, "").strip()
+    if not raw:
+        return {}
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise CapRoverDeployError(
+            "caprover_config_invalid",
+            f"{REPO_TOKEN_BINDINGS_ENV} must be a JSON object",
+        ) from exc
+    if not isinstance(payload, dict):
+        raise CapRoverDeployError(
+            "caprover_config_invalid",
+            f"{REPO_TOKEN_BINDINGS_ENV} must be a JSON object",
+        )
+    bindings = {}
+    for host, token_env in payload.items():
+        if not isinstance(host, str):
+            raise CapRoverDeployError("caprover_config_invalid", "repo token binding host must be text")
+        hostname, port = _normalize_expected_host(host, REPO_TOKEN_BINDINGS_ENV)
+        key = hostname if port is None else f"{hostname}:{port}"
+        token_env_name = _normalize_env_name(token_env, REPO_TOKEN_BINDINGS_ENV)
+        if token_env_name in GENERIC_GITHUB_TOKEN_ENV_NAMES:
+            raise CapRoverDeployError(
+                "caprover_config_invalid",
+                f"{REPO_TOKEN_BINDINGS_ENV} custom-host bindings must use a host-specific environment variable",
+            )
+        bindings[key] = token_env_name
+    return bindings
+
+
 def _repo_uses_default_github_host(raw_repo):
     parsed = urllib.parse.urlsplit((raw_repo or "").strip())
     hostname, port = _parsed_host_port(parsed, "Git repo URL")
@@ -203,22 +308,30 @@ def get_github_creds(args):
     repo_token_env = getattr(args, "repo_token_env", None)
 
     if repo and not _repo_uses_default_github_host(repo):
-        if not repo_token_env:
+        token_env = _repo_token_bindings().get(_repo_host_key(repo))
+        if not token_env:
             raise CapRoverDeployError(
                 "caprover_config_invalid",
-                "Non-github.com repo URLs require --repo-token-env with a host-specific token environment variable",
+                f"Non-github.com repo URLs require an exact protected binding in {REPO_TOKEN_BINDINGS_ENV}",
             )
-        token_env = _normalize_env_name(repo_token_env, "--repo-token-env")
-        if token_env == "GITHUB_TOKEN":
+        if repo_token_env and _normalize_env_name(repo_token_env, "--repo-token-env") != token_env:
             raise CapRoverDeployError(
                 "caprover_config_invalid",
-                "--repo-token-env for non-github.com repos must be host-specific, not GITHUB_TOKEN",
+                "--repo-token-env does not match the protected repo host binding",
             )
-        return gh_user, os.environ.get(token_env, "")
+        token = os.environ.get(token_env, "")
+        if not token:
+            raise CapRoverDeployError(
+                "caprover_config_invalid",
+                "protected repo credential is unavailable for this repo host",
+            )
+        return gh_user, token
 
     if repo_token_env:
-        token_env = _normalize_env_name(repo_token_env, "--repo-token-env")
-        return gh_user, os.environ.get(token_env, "")
+        raise CapRoverDeployError(
+            "caprover_config_invalid",
+            "--repo-token-env is only an assertion for a protected non-github.com repo binding",
+        )
 
     gh_token = os.environ.get("GITHUB_TOKEN") or ""
     if not gh_token:
@@ -293,6 +406,46 @@ def validate_caprover_url(raw_url, allow_insecure=False, expected_host=None):
 
     path = parsed.path.rstrip("/")
     return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, path, "", "")).rstrip("/")
+
+
+def validate_credential_origin(caprover_url, credential_origin):
+    """Bind reusable CapRover credentials to one protected remote origin."""
+    target = urllib.parse.urlsplit(caprover_url)
+    configured = urllib.parse.urlsplit((credential_origin or "").strip())
+    local_target = is_local_caprover_host(target.hostname)
+    allowed_schemes = {"https"}
+    if local_target:
+        allowed_schemes.add("http")
+    if (
+        configured.scheme not in allowed_schemes
+        or not configured.netloc
+        or configured.username
+        or configured.password
+        or configured.path not in {"", "/"}
+        or configured.query
+        or configured.fragment
+    ):
+        raise CapRoverDeployError(
+            "caprover_config_invalid",
+            "Credentials require CAPROVER_CREDENTIAL_ORIGIN set to their exact target origin",
+        )
+
+    try:
+        target_port = target.port or (443 if target.scheme == "https" else 80)
+        configured_port = configured.port or (443 if configured.scheme == "https" else 80)
+    except ValueError as exc:
+        raise CapRoverDeployError(
+            "caprover_config_invalid",
+            "CAPROVER_CREDENTIAL_ORIGIN has an invalid port",
+        ) from exc
+    target_origin = (target.scheme.lower(), (target.hostname or "").lower(), target_port)
+    configured_origin = (configured.scheme.lower(), (configured.hostname or "").lower(), configured_port)
+    if target_origin != configured_origin:
+        raise CapRoverDeployError(
+            "caprover_config_invalid",
+            "CapRover URL does not match CAPROVER_CREDENTIAL_ORIGIN",
+        )
+    return True
 
 
 def validate_github_repo_url(raw_repo, expected_host=None):
@@ -448,10 +601,21 @@ def deploy_via_playwright(args, password, gh_user, gh_token):
         context = browser.new_context(ignore_https_errors=args.allow_insecure)
         page = context.new_page()
 
+        def same_origin_route(route, request):
+            try:
+                require_same_origin(request.url, base_url)
+            except CapRoverDeployError:
+                route.abort()
+                return
+            route.continue_()
+
+        page.route("**/*", same_origin_route)
+
         # Login
         print("  Logging in...")
         page.goto(f"{base_url}/#/login")
         page.wait_for_timeout(2000)
+        require_same_origin(page.url, base_url)
         page.locator('input[type="password"]').fill(password)
         page.locator('button:has-text("Login")').click()
         page.wait_for_timeout(3000)
@@ -460,6 +624,7 @@ def deploy_via_playwright(args, password, gh_user, gh_token):
         # Navigate to app
         page.goto(f"{base_url}/#/apps/details/{app}")
         page.wait_for_timeout(3000)
+        require_same_origin(page.url, base_url)
 
         # Click Deployment tab
         dep_tab = page.locator("text=Deployment").first
@@ -637,7 +802,10 @@ def build_arg_parser():
     parser.add_argument("--method", choices=["cli", "api", "playwright", "auto"], default="auto")
     parser.add_argument("--keepass-entry", help="KeePass entry path for password")
     parser.add_argument("--github-user", help="GitHub username")
-    parser.add_argument("--repo-token-env", help="Environment variable containing Git credentials for non-github.com repo hosts")
+    parser.add_argument(
+        "--repo-token-env",
+        help="Optional assertion that must match the protected non-github.com repo token binding",
+    )
     parser.add_argument("--expected-host", help="Required hostname assertion for non-local CapRover targets")
     parser.add_argument("--expected-repo-host", help="Required Git repo hostname assertion when --repo is not github.com")
     parser.add_argument("--allow-insecure", action="store_true", help="Allow non-HTTPS/self-signed local/dev CapRover targets")
@@ -669,6 +837,14 @@ def main():
     if args.allow_insecure:
         print("  ⚠️  Insecure CapRover target allowed for local/dev use only")
 
+    try:
+        validate_credential_origin(
+            args.caprover_url,
+            os.environ.get("CAPROVER_CREDENTIAL_ORIGIN"),
+        )
+    except CapRoverDeployError as e:
+        fail(e.code, e.message, detail="credential origin validation", exit_code=2)
+
     # Resolve credentials
     gh_user = ""
     gh_token = ""
@@ -682,11 +858,15 @@ def main():
     # Build SSH command for verification
     ssh_cmd = None
     if args.ssh_host:
-        ssh_parts = ["ssh"]
-        if args.ssh_key:
-            ssh_parts += ["-i", args.ssh_key]
-        ssh_parts += ["-p", str(args.ssh_port), f"{args.ssh_user or 'root'}@{args.ssh_host}"]
-        ssh_cmd = ssh_parts
+        try:
+            ssh_cmd = build_ssh_command(
+                args.ssh_host,
+                user=args.ssh_user or "root",
+                port=args.ssh_port,
+                key=args.ssh_key,
+            )
+        except CapRoverDeployError as e:
+            fail(e.code, e.message, detail="SSH validation", exit_code=2)
 
     # Authenticate
     api = CapRoverAPI(args.caprover_url)

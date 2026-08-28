@@ -2,6 +2,7 @@ import importlib.util
 import stat
 import sys
 import types
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -54,6 +55,76 @@ def load_download_script(monkeypatch):
     return module
 
 
+def test_onedrive_navigation_rejects_non_cloud_and_private_targets(monkeypatch):
+    module = load_download_script(monkeypatch)
+
+    with pytest.raises(ValueError, match="trusted OneDrive"):
+        module.validate_shared_url("https://attacker.example/share")
+    with pytest.raises(ValueError, match="HTTPS"):
+        module.validate_shared_url("http://1drv.ms/share")
+
+    monkeypatch.setattr(module.socket, "getaddrinfo", lambda *args, **kwargs: [(None, None, None, None, ("127.0.0.1", 443))])
+    with pytest.raises(ValueError, match="public"):
+        module.validate_outbound_url("https://1drv.ms/share", require_trusted_host=True)
+
+
+def test_onedrive_navigation_allows_public_microsoft_hosts(monkeypatch):
+    module = load_download_script(monkeypatch)
+    monkeypatch.setattr(module.socket, "getaddrinfo", lambda *args, **kwargs: [(None, None, None, None, ("20.190.128.1", 443))])
+
+    assert module.validate_shared_url("https://tenant.sharepoint.com/:f:/s/example")
+    assert module.validate_outbound_url("https://onedrive.live.com/download", require_trusted_host=True)
+
+
+def test_onedrive_browser_guard_aborts_an_untrusted_route_before_navigation(monkeypatch, tmp_path):
+    module = load_download_script(monkeypatch)
+
+    class RouteAborted(RuntimeError):
+        pass
+
+    observed = {"aborted": False}
+
+    class Route:
+        def abort(self):
+            observed["aborted"] = True
+            raise RouteAborted()
+
+        def continue_(self):
+            raise AssertionError("untrusted request must not continue")
+
+    class Page:
+        url = "https://onedrive.live.com/"
+
+        def route(self, _pattern, callback):
+            self.callback = callback
+
+        def goto(self, *_args, **_kwargs):
+            self.callback(Route(), types.SimpleNamespace(url="https://attacker.example/tracker.js"))
+
+    class Browser:
+        def new_page(self, **_kwargs):
+            return Page()
+
+    class PlaywrightContext:
+        def __enter__(self):
+            return types.SimpleNamespace(chromium=types.SimpleNamespace(launch=lambda **_kwargs: Browser()))
+
+        def __exit__(self, *_args):
+            return False
+
+    monkeypatch.setattr(module, "sync_playwright", lambda: PlaywrightContext())
+    monkeypatch.setattr(module, "validate_shared_url", lambda value: value)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["download_onedrive_shared_xmls.py", "https://onedrive.live.com/share", "--out", str(tmp_path / "xmls")],
+    )
+
+    with pytest.raises(RouteAborted):
+        module.main()
+    assert observed["aborted"] is True
+
+
 def test_match_spreadsheet_rejects_broad_config_permissions_before_network(monkeypatch, tmp_path):
     module = load_match_script(monkeypatch)
     config = tmp_path / "agilize.json"
@@ -77,6 +148,58 @@ def test_match_spreadsheet_rejects_broad_config_permissions_before_network(monke
     )
 
     assert module.main() == 1
+
+
+def test_match_reauth_disables_redirects_while_preserving_json_success(monkeypatch):
+    module = load_match_script(monkeypatch)
+    calls = []
+
+    class Response:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"items": []}
+
+    class Session:
+        @staticmethod
+        def get(url, **kwargs):
+            calls.append((url, kwargs))
+            return Response()
+
+    status, payload = module.request_json_with_reauth(
+        Session(), {}, "https://app.agilize.com.br/api/v1/companies/example", {"key": "synthetic-cnpj"}, timeout=5
+    )
+
+    assert (status, payload) == (200, {"items": []})
+    assert calls == [
+        (
+            "https://app.agilize.com.br/api/v1/companies/example",
+            {"headers": {"key": "synthetic-cnpj"}, "timeout": 5, "allow_redirects": False},
+        )
+    ]
+
+
+def test_match_reauth_does_not_follow_a_redirect_with_tenant_headers(monkeypatch):
+    module = load_match_script(monkeypatch)
+    calls = []
+
+    class RedirectResponse:
+        status_code = 302
+
+    class Session:
+        @staticmethod
+        def get(url, **kwargs):
+            calls.append((url, kwargs))
+            return RedirectResponse()
+
+    status, payload = module.request_json_with_reauth(
+        Session(), {}, "https://app.agilize.com.br/api/v1/companies/example", {"key": "synthetic-cnpj"}, timeout=5
+    )
+
+    assert (status, payload) == (302, None)
+    assert len(calls) == 1
+    assert calls[0][1]["allow_redirects"] is False
 
 
 def test_match_spreadsheet_writes_private_artifacts_and_rejects_symlinks(monkeypatch, tmp_path):
@@ -111,6 +234,22 @@ def test_match_spreadsheet_rejects_symlink_output_dir(monkeypatch, tmp_path):
         module.ensure_private_dir(linked_dir)
 
 
+def test_match_spreadsheet_rejects_symlinked_output_ancestor_without_writing(monkeypatch, tmp_path):
+    module = load_match_script(monkeypatch)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    sentinel = outside / "sentinel.json"
+    sentinel.write_text("keep", encoding="utf-8")
+    linked_parent = tmp_path / "linked-parent"
+    linked_parent.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(OSError, match="symlink"):
+        module.write_secure(linked_parent / "audit" / "matched.json", "{}")
+
+    assert sentinel.read_text(encoding="utf-8") == "keep"
+    assert not (outside / "audit" / "matched.json").exists()
+
+
 def test_match_spreadsheet_rejects_oversized_input_before_loading(monkeypatch, tmp_path):
     module = load_match_script(monkeypatch)
     source = tmp_path / "sheet.xlsx"
@@ -123,10 +262,134 @@ def test_match_spreadsheet_rejects_oversized_input_before_loading(monkeypatch, t
         module.parse_sheet(str(source))
 
 
+def test_match_spreadsheet_rejects_high_zip_compression_ratio_before_loading(monkeypatch, tmp_path):
+    module = load_match_script(monkeypatch)
+    source = tmp_path / "sheet.xlsx"
+    with zipfile.ZipFile(source, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("xl/worksheets/sheet1.xml", b"A" * 100_000)
+
+    monkeypatch.setattr(module, "MAX_XLSX_COMPRESSION_RATIO", 10.0, raising=False)
+    monkeypatch.setattr(
+        module.openpyxl,
+        "load_workbook",
+        lambda *args, **kwargs: pytest.fail("workbook must not load"),
+    )
+
+    with pytest.raises(ValueError, match="compression ratio"):
+        module.parse_sheet(str(source))
+
+
+def test_match_spreadsheet_rejects_too_many_zip_members_before_loading(monkeypatch, tmp_path):
+    module = load_match_script(monkeypatch)
+    source = tmp_path / "sheet.xlsx"
+    with zipfile.ZipFile(source, "w", compression=zipfile.ZIP_STORED) as archive:
+        archive.writestr("[Content_Types].xml", b"content-types")
+        archive.writestr("xl/workbook.xml", b"workbook")
+
+    monkeypatch.setattr(module, "MAX_XLSX_MEMBERS", 1, raising=False)
+    monkeypatch.setattr(
+        module.openpyxl,
+        "load_workbook",
+        lambda *args, **kwargs: pytest.fail("workbook must not load"),
+    )
+
+    with pytest.raises(ValueError, match="member count"):
+        module.parse_sheet(str(source))
+
+
+def test_match_spreadsheet_rejects_oversized_uncompressed_member_before_loading(monkeypatch, tmp_path):
+    module = load_match_script(monkeypatch)
+    source = tmp_path / "sheet.xlsx"
+    with zipfile.ZipFile(source, "w", compression=zipfile.ZIP_STORED) as archive:
+        archive.writestr("xl/worksheets/sheet1.xml", b"x" * 16)
+
+    monkeypatch.setattr(module, "MAX_XLSX_MEMBER_UNCOMPRESSED_BYTES", 8, raising=False)
+    monkeypatch.setattr(
+        module.openpyxl,
+        "load_workbook",
+        lambda *args, **kwargs: pytest.fail("workbook must not load"),
+    )
+
+    with pytest.raises(ValueError, match="uncompressed member limit"):
+        module.parse_sheet(str(source))
+
+
+def test_match_spreadsheet_rejects_oversized_total_uncompressed_size_before_loading(monkeypatch, tmp_path):
+    module = load_match_script(monkeypatch)
+    source = tmp_path / "sheet.xlsx"
+    with zipfile.ZipFile(source, "w", compression=zipfile.ZIP_STORED) as archive:
+        archive.writestr("xl/worksheets/sheet1.xml", b"x" * 8)
+        archive.writestr("xl/sharedStrings.xml", b"y" * 8)
+
+    monkeypatch.setattr(module, "MAX_XLSX_TOTAL_UNCOMPRESSED_BYTES", 12, raising=False)
+    monkeypatch.setattr(
+        module.openpyxl,
+        "load_workbook",
+        lambda *args, **kwargs: pytest.fail("workbook must not load"),
+    )
+
+    with pytest.raises(ValueError, match="total uncompressed limit"):
+        module.parse_sheet(str(source))
+
+
+def test_match_spreadsheet_rejects_duplicate_zip_members_before_loading(monkeypatch, tmp_path):
+    module = load_match_script(monkeypatch)
+    source = tmp_path / "sheet.xlsx"
+    with pytest.warns(UserWarning, match="Duplicate name"):
+        with zipfile.ZipFile(source, "w", compression=zipfile.ZIP_STORED) as archive:
+            archive.writestr("xl/workbook.xml", b"first")
+            archive.writestr("xl/workbook.xml", b"second")
+
+    monkeypatch.setattr(
+        module.openpyxl,
+        "load_workbook",
+        lambda *args, **kwargs: pytest.fail("workbook must not load"),
+    )
+
+    with pytest.raises(ValueError, match="duplicate member"):
+        module.parse_sheet(str(source))
+
+
+def test_match_spreadsheet_rejects_normalized_duplicate_zip_members_before_loading(monkeypatch, tmp_path):
+    module = load_match_script(monkeypatch)
+    source = tmp_path / "sheet.xlsx"
+    with zipfile.ZipFile(source, "w", compression=zipfile.ZIP_STORED) as archive:
+        archive.writestr("xl/workbook.xml", b"first")
+        archive.writestr("xl\\workbook.xml", b"second")
+
+    monkeypatch.setattr(
+        module.openpyxl,
+        "load_workbook",
+        lambda *args, **kwargs: pytest.fail("workbook must not load"),
+    )
+
+    with pytest.raises(ValueError, match="duplicate member"):
+        module.parse_sheet(str(source))
+
+
+def test_match_spreadsheet_rejects_unsafe_zip_member_path_before_loading(monkeypatch, tmp_path):
+    module = load_match_script(monkeypatch)
+    source = tmp_path / "sheet.xlsx"
+    with zipfile.ZipFile(source, "w", compression=zipfile.ZIP_STORED) as archive:
+        archive.writestr("../workbook.xml", b"workbook")
+
+    monkeypatch.setattr(
+        module.openpyxl,
+        "load_workbook",
+        lambda *args, **kwargs: pytest.fail("workbook must not load"),
+    )
+
+    with pytest.raises(ValueError, match="unsafe member path"):
+        module.parse_sheet(str(source))
+
+
 def test_match_spreadsheet_rejects_oversized_sheet(monkeypatch, tmp_path):
     module = load_match_script(monkeypatch)
     source = tmp_path / "sheet.xlsx"
-    source.write_bytes(b"x")
+    with zipfile.ZipFile(source, "w", compression=zipfile.ZIP_STORED) as archive:
+        archive.writestr("[Content_Types].xml", b"content-types")
+        archive.writestr("xl/workbook.xml", b"workbook")
+        archive.writestr("xl/worksheets/sheet1.xml", b"worksheet")
     rows = [
         ("MÊS", "DATA", "DESCRIÇÃO", "VALOR", "CLASSIFICAÇÃO"),
         ("2025-01", "2025-01-01", "one", 1, "class"),
@@ -210,6 +473,22 @@ def test_onedrive_downloader_rejects_symlink_output_dir(monkeypatch, tmp_path):
         module.ensure_private_dir(linked_dir)
 
 
+def test_onedrive_downloader_rejects_symlinked_output_ancestor_without_writing(monkeypatch, tmp_path):
+    module = load_download_script(monkeypatch)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    sentinel = outside / "sentinel.xml"
+    sentinel.write_text("keep", encoding="utf-8")
+    linked_parent = tmp_path / "linked-parent"
+    linked_parent.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(OSError, match="symlink"):
+        module.write_secure_bytes(linked_parent / "xmls" / "nota.xml", b"<xml />")
+
+    assert sentinel.read_text(encoding="utf-8") == "keep"
+    assert not (outside / "xmls" / "nota.xml").exists()
+
+
 def test_onedrive_downloader_accepts_only_expected_download_origin(monkeypatch):
     module = load_download_script(monkeypatch)
 
@@ -246,6 +525,39 @@ def test_onedrive_downloader_rejects_oversized_response(monkeypatch):
     )
 
     assert module.extract_valid_xml_body([oversized], max_bytes=4) is None
+
+
+def test_onedrive_downloader_streams_browser_discovered_urls_with_a_hard_cap(monkeypatch):
+    module = load_download_script(monkeypatch)
+    xml_body = b"<?xml version='1.0'?><ConsultarNfseResposta xmlns='http://www.sped.fazenda.gov.br/nfse'><CompNfse /></ConsultarNfseResposta>"
+    observed = {}
+
+    class Response:
+        status = 200
+        headers = {"content-type": "application/xml", "content-length": str(len(xml_body))}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self, size):
+            observed["read_size"] = size
+            return xml_body
+
+    class Opener:
+        def open(self, _request, timeout):
+            observed["timeout"] = timeout
+            return Response()
+
+    monkeypatch.setattr(module, "validate_outbound_url", lambda *_args, **_kwargs: "ok")
+    monkeypatch.setattr(module.urllib.request, "build_opener", lambda *_handlers: Opener())
+    url = "https://my.microsoftpersonalcontent.com/personal/demo/_layouts/15/download.aspx?UniqueId=abc&tempauth=redacted"
+
+    assert module.fetch_valid_xml_body(url, max_bytes=len(xml_body), timeout=7) == xml_body
+    assert observed["read_size"] == len(xml_body) + 1
+    assert observed["timeout"] == 7
 
 
 def test_onedrive_downloader_skips_playwright_body_errors(monkeypatch):

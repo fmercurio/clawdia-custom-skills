@@ -6,6 +6,7 @@ import json
 import os
 import re
 import sqlite3
+import stat
 import sys
 from pathlib import Path
 
@@ -60,7 +61,26 @@ def db_path(vault: Path) -> Path:
     return vault / ".brain-index" / "brain_search.sqlite"
 
 
+def trusted_vault(vault: Path) -> Path:
+    """Require a vault path that cannot be replaced by another local user."""
+    resolved = vault.expanduser().resolve(strict=True)
+    metadata = resolved.stat()
+    if not stat.S_ISDIR(metadata.st_mode):
+        raise ValueError("vault path is not a directory")
+    if metadata.st_uid != os.geteuid():
+        raise ValueError("vault must be owned by the current user")
+    current = resolved
+    while True:
+        if stat.S_IMODE(current.stat().st_mode) & 0o022:
+            raise ValueError("vault path must not be writable by other users")
+        if current.parent == current:
+            break
+        current = current.parent
+    return resolved
+
+
 def connect(vault: Path) -> sqlite3.Connection:
+    vault = trusted_vault(vault)
     index_dir = private_directory(vault, Path(".brain-index"))
     target = index_dir / "brain_search.sqlite"
     if target.is_symlink():

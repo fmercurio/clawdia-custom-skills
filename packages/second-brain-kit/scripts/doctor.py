@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import sqlite3
 import stat
@@ -82,6 +83,13 @@ def _safe_mode(path: Path) -> str:
     return oct(stat.S_IMODE(path.stat().st_mode) & 0o777) if path.exists() else "missing"
 
 
+def _owned_by_effective_user(path: Path) -> bool:
+    try:
+        return path.stat().st_uid == os.geteuid()
+    except OSError:
+        return False
+
+
 def _is_instance_relative(value: object) -> bool:
     if not isinstance(value, str):
         return False
@@ -116,6 +124,7 @@ def _check_mcp_state(home: Path, cfg: dict, profile: str, check_optional: bool, 
     runtime_cfg_path = instance_root / "runtime-config.json"
     policy_path = instance_root / "policy.json"
     manifest_path = instance_root / "projection-manifest.json"
+    token_path = instance_root / "access-token"
 
     detail = {
         "enabled": True,
@@ -124,17 +133,21 @@ def _check_mcp_state(home: Path, cfg: dict, profile: str, check_optional: bool, 
         "runtime_config": str(runtime_cfg_path),
         "policy": str(policy_path),
         "projection_manifest": str(manifest_path),
+        "access_token": str(token_path),
     }
 
     ok = True
-    if not instance_root.is_dir():
+    if not instance_root.is_dir() or instance_root.is_symlink():
         detail["instance_root_state"] = "missing"
         ok = False
     else:
         detail["instance_root_state"] = "present"
+        detail["instance_root_owner_ok"] = _owned_by_effective_user(instance_root)
+        if not detail["instance_root_owner_ok"]:
+            ok = False
 
-    for artifact_path in (runtime_cfg_path, policy_path, manifest_path):
-        if not artifact_path.is_file():
+    for artifact_path in (runtime_cfg_path, policy_path, manifest_path, token_path):
+        if artifact_path.is_symlink() or not artifact_path.is_file():
             detail[f"{artifact_path.name}"] = "missing"
             if artifact_path.name == "projection-manifest.json":
                 detail["projection_manifest_present"] = False
@@ -142,8 +155,13 @@ def _check_mcp_state(home: Path, cfg: dict, profile: str, check_optional: bool, 
             ok = False
             continue
         detail[f"{artifact_path.name}_mode"] = _safe_mode(artifact_path)
+        detail[f"{artifact_path.name}_owner_ok"] = _owned_by_effective_user(artifact_path)
+        if not detail[f"{artifact_path.name}_owner_ok"]:
+            ok = False
         if artifact_path.name == "projection-manifest.json":
             detail["projection_manifest_present"] = True
+            if _safe_mode(artifact_path) != "0o600":
+                ok = False
             continue
         if _safe_mode(artifact_path) != "0o600":
             ok = False
@@ -154,6 +172,15 @@ def _check_mcp_state(home: Path, cfg: dict, profile: str, check_optional: bool, 
     manifest_ok = False
     listener_ok = False
     schema_ok = False
+    token_ok = False
+
+    if token_path.is_file() and not token_path.is_symlink():
+        try:
+            token_ok = len(token_path.read_text(encoding="utf-8").strip()) >= 32
+        except OSError:
+            token_ok = False
+    if not token_ok:
+        ok = False
 
     if runtime_cfg_path.is_file():
         try:
@@ -168,6 +195,8 @@ def _check_mcp_state(home: Path, cfg: dict, profile: str, check_optional: bool, 
                     and runtime_cfg.get("policy_path") == policy_path.name
                     and _is_instance_relative(runtime_cfg.get("projection_manifest_path"))
                     and runtime_cfg.get("projection_manifest_path") == manifest_path.name
+                    and _is_instance_relative(runtime_cfg.get("auth_token_path"))
+                    and runtime_cfg.get("auth_token_path") == token_path.name
                 )
                 schema_ok = runtime_cfg.get("runtime_schema_version") == RUNTIME_SCHEMA_VERSION
                 listener = runtime_cfg.get("listener") if isinstance(runtime_cfg.get("listener"), dict) else None
@@ -184,6 +213,7 @@ def _check_mcp_state(home: Path, cfg: dict, profile: str, check_optional: bool, 
                 detail["runtime_listener"] = listener
                 detail["runtime_policy_path"] = runtime_cfg.get("policy_path")
                 detail["runtime_projection_manifest_path"] = runtime_cfg.get("projection_manifest_path")
+                detail["runtime_auth_token_path"] = runtime_cfg.get("auth_token_path")
                 detail["runtime_schema_ok"] = schema_ok
                 detail["runtime_listener_ok"] = listener_ok
         except (OSError, json.JSONDecodeError):
@@ -208,14 +238,18 @@ def _check_mcp_state(home: Path, cfg: dict, profile: str, check_optional: bool, 
     if policy_path.is_file() and _safe_mode(policy_path) != "0o600":
         ok = False
 
-    if manifest_path.is_file():
-        manifest_ok = _safe_mode(manifest_path) == "0o600"
+    if manifest_path.is_file() and not manifest_path.is_symlink():
+        manifest_ok = (
+            _safe_mode(manifest_path) == "0o600"
+            and _owned_by_effective_user(manifest_path)
+        )
 
     detail.update(
         {
             "runtime_config_ok": runtime_config_ok,
             "runtime_schema_ok": schema_ok,
             "listener_ok": listener_ok,
+            "access_token_ok": token_ok,
             "projection_manifest_ok": manifest_ok,
             "policy_ok": policy_ok,
             "projection_manifest_present": manifest_path.is_file(),

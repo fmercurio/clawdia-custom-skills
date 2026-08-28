@@ -6,6 +6,8 @@ import argparse
 import json
 import os
 import pwd
+import secrets
+import stat
 import sys
 from pathlib import Path
 
@@ -226,17 +228,84 @@ def _plan(
     return output
 
 
+def _open_private_output_dir(output_dir: Path) -> int:
+    """Open every output path component without following a symlink."""
+    candidate = output_dir.expanduser()
+    # macOS exposes /var and /tmp as system aliases below /private. Normalize
+    # only those exact OS-owned aliases before the descriptor walk; user-owned
+    # symlinked ancestors remain a hard failure.
+    for alias, target in ((Path("/var"), Path("/private/var")), (Path("/tmp"), Path("/private/tmp"))):
+        if candidate.is_absolute() and (candidate == alias or alias in candidate.parents):
+            try:
+                if alias.is_symlink() and alias.resolve(strict=True) == target:
+                    candidate = target.joinpath(*candidate.relative_to(alias).parts)
+            except OSError:
+                pass
+            break
+    if candidate.is_absolute():
+        current_fd = os.open("/", os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0))
+        parts = candidate.parts[1:]
+    else:
+        current_fd = os.open(".", os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0))
+        parts = candidate.parts
+    directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        for part in parts:
+            try:
+                next_fd = os.open(part, directory_flags, dir_fd=current_fd)
+            except FileNotFoundError:
+                os.mkdir(part, mode=0o700, dir_fd=current_fd)
+                next_fd = os.open(part, directory_flags, dir_fd=current_fd)
+            except OSError as exc:
+                raise ServiceError("--output-dir must not include symlinks") from exc
+            os.close(current_fd)
+            current_fd = next_fd
+        output_stat = os.fstat(current_fd)
+        if not stat.S_ISDIR(output_stat.st_mode):
+            raise ServiceError("--output-dir must be a directory")
+        if output_stat.st_uid != os.geteuid():
+            raise ServiceError("--output-dir must be owned by the current user")
+        os.fchmod(current_fd, 0o700)
+        return current_fd
+    except Exception:
+        os.close(current_fd)
+        raise
+
+
 def _apply(output_dir: Path, rendered: dict[str, str]) -> list[str]:
-    output_dir.mkdir(parents=True, exist_ok=True)
+    output_fd = _open_private_output_dir(output_dir)
     rendered_paths = []
-    for name in sorted(rendered):
-        if name == "metadata":
-            continue
-        content = rendered[name]
-        target = output_dir / name
-        target.write_text(content, encoding="utf-8")
-        target.chmod(0o600)
-        rendered_paths.append(str(target))
+    try:
+        for name in sorted(rendered):
+            if name == "metadata":
+                continue
+            temporary = f".{name}.{secrets.token_hex(16)}.tmp"
+            descriptor = os.open(
+                temporary,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+                0o600,
+                dir_fd=output_fd,
+            )
+            try:
+                payload = rendered[name].encode("utf-8")
+                offset = 0
+                while offset < len(payload):
+                    offset += os.write(descriptor, payload[offset:])
+                os.fchmod(descriptor, 0o600)
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+            try:
+                os.replace(temporary, name, src_dir_fd=output_fd, dst_dir_fd=output_fd)
+                os.fsync(output_fd)
+            finally:
+                try:
+                    os.unlink(temporary, dir_fd=output_fd)
+                except FileNotFoundError:
+                    pass
+            rendered_paths.append(str(output_dir / name))
+    finally:
+        os.close(output_fd)
     return rendered_paths
 
 

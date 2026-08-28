@@ -12,7 +12,17 @@ import json
 import re
 from pathlib import Path
 
-from archiver_db import DB, VAULT, connect, collect_urls_and_context, ensure_schema, upsert_link_context
+from archiver_db import (
+    DB,
+    VAULT,
+    collect_urls_and_context,
+    connect,
+    ensure_private_directory,
+    ensure_schema,
+    restrict_sqlite_permissions,
+    upsert_link_context,
+    write_private_text_exclusive,
+)
 from archiver_extract_context import extract_url_context
 
 INBOX = VAULT / "00-inbox"
@@ -66,17 +76,16 @@ def main() -> int:
     if not tags:
         tags = ["inbox"]
 
-    INBOX.mkdir(parents=True, exist_ok=True)
-    DB.parent.mkdir(parents=True, exist_ok=True)
-
     stem = f"{dt.date.today().isoformat()}-{slugify(args.title)}"
-    path = INBOX / f"{stem}.md"
-    counter = 2
-    while path.exists():
-        path = INBOX / f"{stem}-{counter}.md"
-        counter += 1
-
     body = args.body.strip() or "_Sem corpo ainda._"
+    try:
+        links = collect_urls_and_context(body, args.source)
+    except ValueError as exc:
+        parser.error(str(exc))
+
+    ensure_private_directory(VAULT)
+    ensure_private_directory(INBOX)
+    ensure_private_directory(DB.parent)
     content = f"""---
 title: {json.dumps(args.title, ensure_ascii=False)}
 created: {json.dumps(now)}
@@ -93,7 +102,15 @@ status: {json.dumps(args.status)}
 ## Fonte
 {args.source or '_Sem fonte informada._'}
 """
-    path.write_text(content, encoding="utf-8")
+    counter = 1
+    while True:
+        suffix = "" if counter == 1 else f"-{counter}"
+        path = INBOX / f"{stem}{suffix}.md"
+        try:
+            write_private_text_exclusive(path, content)
+            break
+        except FileExistsError:
+            counter += 1
 
     con = connect(DB)
     ensure_schema(con)
@@ -102,7 +119,6 @@ status: {json.dumps(args.status)}
         (args.title, args.source, str(path.relative_to(VAULT)), json.dumps(tags, ensure_ascii=False), args.status, now, now),
     )
     item_id = cur.lastrowid
-    links = collect_urls_and_context(body, args.source)
     context_count = 0
     extracted_context_count = 0
 
@@ -170,6 +186,7 @@ status: {json.dumps(args.status)}
     )
     con.commit()
     con.close()
+    restrict_sqlite_permissions(DB)
 
     if args.json:
         print(json.dumps({

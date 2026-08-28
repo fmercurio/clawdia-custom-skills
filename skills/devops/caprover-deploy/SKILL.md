@@ -38,13 +38,18 @@ trigger build → poll until done → enable HTTPS + WebSocket → verify
 
 - **CapRover URL** (e.g. `https://captain.example.com`)
 - **CapRover password** — via env var, KeePass, or interactive prompt; never CLI args
-- **Git repo token** — `github.com` uses `GITHUB_TOKEN` or `gh auth token`; non-`github.com` hosts require a host-specific env var named by `--repo-token-env`
+- **Git repo token** — `github.com` uses `GITHUB_TOKEN` or `gh auth token`; non-`github.com` hosts require a protected exact host-to-token binding
 - **Python 3.9+** with `requests` (or `urllib` fallback)
 - **Playwright** (optional, for method 3) — `pip install playwright && playwright install chromium`
 
 ## Quick Start
 
 ```bash
+# Bind the reusable credential to this exact remote origin in the protected environment.
+export CAPROVER_CREDENTIAL_ORIGIN=https://captain.example.com
+# Bind each non-github.com host in the protected job environment, not the CLI.
+export CAPROVER_REPO_TOKEN_BINDINGS='{"git.example.com":"GIT_EXAMPLE_TOKEN"}'
+
 # Full deploy from GitHub repo
 python3 scripts/caprover_deploy.py \
   --caprover-url https://captain.example.com \
@@ -60,7 +65,6 @@ python3 scripts/caprover_deploy.py \
   --app-name my-app \
   --repo https://git.example.com/org/repo \
   --expected-repo-host git.example.com \
-  --repo-token-env GIT_EXAMPLE_TOKEN \
   --branch main
 
 # Force rebuild existing app
@@ -94,19 +98,20 @@ GitHub token for `github.com` repos:
 Git token for non-`github.com` repos:
 
 1. Pass `--expected-repo-host git.example.com`
-2. Pass `--repo-token-env GIT_EXAMPLE_TOKEN`
-3. Export that host-specific env var before running the script
+2. Set `CAPROVER_REPO_TOKEN_BINDINGS` in the protected job environment, for example `{"git.example.com":"GIT_EXAMPLE_TOKEN"}`
+3. Export the referenced host-specific token environment variable before running the script
 
-The script does not use generic `GITHUB_TOKEN` or `gh auth token` for custom Git hosts.
+The CLI cannot select a token environment variable. `--repo-token-env` is optional only as an assertion that must match the protected binding. The script does not use generic `GITHUB_TOKEN` or `gh auth token` for custom Git hosts.
 
 Do not pass passwords or tokens through CLI arguments; process arguments are visible to local process inspection on many systems.
 
 ## URL Safety
 
 - Use `https://` CapRover dashboard URLs by default.
-- Pass `--expected-host captain.example.com` for every non-local target. Include the port in `--expected-host` when the CapRover URL uses a non-default port. The script refuses to resolve credentials for a non-local CapRover URL without this host assertion.
+- Pass `--expected-host captain.example.com` for every non-local target. Include the port in `--expected-host` when the CapRover URL uses a non-default port.
+- Set `CAPROVER_CREDENTIAL_ORIGIN` in the protected job or secret environment to the exact origin associated with the CapRover credential, for example `https://captain.example.com` (or the exact local `http://127.0.0.1:port` development origin). The script checks this binding before resolving the password; a matching CLI `--expected-host` alone is not sufficient.
 - Git repo URLs default to `https://github.com/org/repo`. For GitHub Enterprise or another trusted Git host, pass `--expected-repo-host git.example.com` before using `--repo`. Include the port in `--expected-repo-host` when the repo URL uses one.
-- Git credentials are resolved only after the repo URL host is validated. Non-`github.com` repo hosts must use `--repo-token-env` with a host-specific env var; `GITHUB_TOKEN` and `gh auth token` are reserved for `github.com`.
+- Git credentials are resolved only after the repo URL host is validated. Non-`github.com` repo hosts must have an exact protected `CAPROVER_REPO_TOKEN_BINDINGS` entry; `GITHUB_TOKEN` and `gh auth token` are reserved for `github.com`.
 - `--allow-insecure` is only for local/dev targets and makes Playwright tolerate certificate errors for that run.
 
 ## CLI Safety

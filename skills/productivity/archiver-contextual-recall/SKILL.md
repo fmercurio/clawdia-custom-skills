@@ -149,7 +149,7 @@ python3 "${HERMES_HOME:-$HOME/.hermes}/scripts/archive_weekly_review_cron.py" --
 
 ```bash
 python3 "${ARCHIVER_SKILL_DIR}/scripts/backfill_link_contexts.py" --dry-run --json
-python3 "${ARCHIVER_SKILL_DIR}/scripts/backfill_link_contexts.py" --extract-existing --json
+python3 "${ARCHIVER_SKILL_DIR}/scripts/backfill_link_contexts.py" --extract-existing --extract-limit 50 --extract-budget-seconds 300 --json
 ```
 
 ## Hardening model

@@ -33,11 +33,19 @@ KNOWN_SECRET_SHAPES = (
     r"\bASIA[0-9A-Z]{16}\b",
     r"\bgh[pousr]_[A-Za-z0-9_-]{20,}\b",
     r"\bgithub_pat_[A-Za-z0-9_-]{20,}\b",
+    r"\bglpat-[A-Za-z0-9_-]{16,}\b",
+    r"\bxox[baprs]-[A-Za-z0-9-]{20,}\b",
+    r"\bnpm_[A-Za-z0-9_-]{20,}\b",
+    r"\bAIza[A-Za-z0-9_-]{20,}\b",
+    r"\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}\b",
+    r"\b(?:proxy-)?authorization\b[ \t]*[:=][ \t]*[\"']?(?:(?:bearer|basic|token|api[-_]?key)[ \t]+)?[A-Za-z0-9._~+/=-]{12,}",
     r"BEGIN\s+(?:RSA|EC|DSA|OPENSSH|PRIVATE)\s+PRIVATE\s+KEY",
     r"-----BEGIN PRIVATE KEY-----",
 )
 
 FILE_SIZE_CAP_BYTES = 16 * 1024 * 1024
+MAX_INVENTORY_ENTRIES = 10_000
+MAX_CANONICAL_SNAPSHOT_BYTES = 256 * 1024 * 1024
 CANDIDATE_CAPTURE_STATUSES = {"fetched", "locator-only", "rejected", "quarantined"}
 PROMOTION_ALLOWED_STATUSES = {"success", "partial", "failed", "unverifiable"}
 CANDIDATE_PATH_PREFIXES = ("entities/", "concepts/", "relationships/", "syntheses/", "meta/")
@@ -236,6 +244,7 @@ def _assert_root_path_identity(
 
 def _collect_git_state(
     canonical_root: str,
+    canonical_fd: int,
     expected_root_fingerprint: Optional[Tuple[int, int, int, int, int]] = None,
 ) -> Dict[str, Any]:
     if expected_root_fingerprint is not None:
@@ -251,6 +260,10 @@ def _collect_git_state(
     if head.returncode != 0:
         raise UnverifiableError("canonical repository has no commits yet")
 
+    index_tree = _run_git(["write-tree"], canonical_root)
+    if index_tree.returncode != 0:
+        raise UnverifiableError("failed to capture canonical index state")
+
     status = _run_git(
         ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
         canonical_root,
@@ -259,11 +272,55 @@ def _collect_git_state(
         raise UnverifiableError("failed to capture canonical diff state")
 
     status_payload = status.stdout
+    listed = []
+    for args in (
+        ["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+        ["ls-files", "-z", "--others", "--ignored", "--exclude-standard"],
+    ):
+        result = _run_git(args, canonical_root)
+        if result.returncode != 0:
+            raise UnverifiableError("failed to enumerate canonical workspace content")
+        listed.extend(item for item in result.stdout.split(b"\0") if item)
+    paths = sorted(set(listed))
+    if len(paths) > MAX_INVENTORY_ENTRIES:
+        raise UnverifiableError("canonical workspace exceeds the file-count evidence limit")
+
+    snapshot = hashlib.sha256()
+    total_bytes = 0
+    for raw_path in paths:
+        rel_path = os.fsdecode(raw_path)
+        absolute = os.path.join(canonical_root, rel_path)
+        try:
+            node = os.stat(absolute, follow_symlinks=False)
+        except FileNotFoundError:
+            snapshot.update(raw_path + b"\0missing\0")
+            continue
+        if stat.S_ISDIR(node.st_mode):
+            snapshot.update(raw_path + b"\0directory\0")
+            continue
+        if not stat.S_ISREG(node.st_mode):
+            raise UnverifiableError(f"canonical workspace contains a non-regular path: {rel_path}")
+        try:
+            _, content, _ = _read_file_bytes(
+                canonical_root,
+                canonical_fd,
+                rel_path,
+                aggregate_budget_bytes=MAX_CANONICAL_SNAPSHOT_BYTES - total_bytes,
+            )
+        except ValidationError as exc:
+            raise UnverifiableError(f"failed to snapshot canonical workspace: {rel_path}") from exc
+        total_bytes += len(content)
+        snapshot.update(raw_path + b"\0" + _sha256_bytes(content).encode("ascii") + b"\0")
+
     result = {
         "head": head.stdout.strip().decode("utf-8", errors="replace"),
+        "index_tree": index_tree.stdout.strip().decode("ascii", errors="replace"),
         "status_sha256": _sha256_bytes(status_payload),
         "status_size": len(status_payload),
         "dirty": len(status_payload) > 0,
+        "workspace_sha256": snapshot.hexdigest(),
+        "workspace_files": len(paths),
+        "workspace_bytes": total_bytes,
     }
     if expected_root_fingerprint is not None:
         _assert_root_path_identity(canonical_root, expected_root_fingerprint)
@@ -425,6 +482,7 @@ def _read_file_bytes(
     root_fd: int,
     rel_path: str,
     seam: Optional[Callable[[str, str], str]] = None,
+    aggregate_budget_bytes: Optional[int] = None,
 ) -> Tuple[str, bytes, Dict[str, Any]]:
     rel = _normalize_artifact_path(rel_path)
     abs_target = os.path.join(root_real, rel)
@@ -436,6 +494,11 @@ def _read_file_bytes(
 
     if path_stat.st_size > FILE_SIZE_CAP_BYTES:
         raise ValidationError(f"artifact exceeds file cap ({FILE_SIZE_CAP_BYTES} bytes): {rel}")
+    if aggregate_budget_bytes is not None and path_stat.st_size > aggregate_budget_bytes:
+        raise ValidationError(
+            "budget.max_total_bytes exceeded before reading inventory content: "
+            f"{rel}"
+        )
 
     _apply_path_seam(rel, "after_lstat_before_open", seam)
 
@@ -463,13 +526,19 @@ def _read_file_bytes(
             raise ValidationError(f"artifact must be a regular file: {rel}")
 
         data = bytearray()
-        while True:
-            chunk = os.read(descriptor, 1024 * 1024)
+        validated_size = opened_fstat.st_size
+        while len(data) < validated_size:
+            chunk = os.read(descriptor, min(1024 * 1024, validated_size - len(data)))
             if not chunk:
                 break
             data.extend(chunk)
             if len(data) > FILE_SIZE_CAP_BYTES:
                 raise ValidationError(f"artifact exceeds file cap ({FILE_SIZE_CAP_BYTES} bytes): {rel}")
+            if aggregate_budget_bytes is not None and len(data) > aggregate_budget_bytes:
+                raise ValidationError(
+                    "budget.max_total_bytes exceeded while reading inventory content: "
+                    f"{rel}"
+                )
 
         post_fstat = os.fstat(descriptor)
     finally:
@@ -755,6 +824,14 @@ def _parse_batch(
         raise ValidationError("inventory must be a list")
     if not inventory:
         raise ValidationError("inventory must be a non-empty list")
+    budget_entry_limit = min(
+        MAX_INVENTORY_ENTRIES,
+        approval["budget"]["max_candidates"] + (2 * approval["budget"]["max_sources"]),
+    )
+    if len(inventory) > budget_entry_limit:
+        raise ValidationError(
+            f"inventory entry count limit exceeded ({budget_entry_limit})"
+        )
 
     exclusions = manifest.get("exclusions")
     if not isinstance(exclusions, list):
@@ -771,8 +848,34 @@ def _parse_batch(
             raise ValidationError(f"duplicate batch exclusion path: {exclusion_norm}")
         exclusion_map[exclusion_norm] = exclusion_reason
 
+    preflight_inventory: List[Tuple[Dict[str, Any], str, int, str]] = []
+    preflight_entry_paths: Set[str] = set()
+    declared_total_inventory_bytes = 0
+    max_total_inventory_bytes = approval["budget"]["max_total_bytes"]
+    for entry in inventory:
+        if not isinstance(entry, dict):
+            raise ValidationError("inventory entries must be objects")
+
+        entry_path = _normalize_artifact_path(entry.get("path"))
+        if entry_path in preflight_entry_paths:
+            raise ValidationError(f"duplicate path in inventory: {entry_path}")
+        if any(_artifact_paths_overlap(entry_path, exclusion_path) for exclusion_path in exclusion_map):
+            raise ValidationError(f"inventory path conflicts with batch exclusion: {entry_path}")
+
+        declared_size = entry.get("size")
+        declared_sha = entry.get("sha256")
+        if not isinstance(declared_size, int) or declared_size < 0:
+            raise ValidationError(f"invalid size in inventory entry: {entry_path}")
+        if not _is_hex64(declared_sha):
+            raise ValidationError(f"invalid sha256 in inventory entry: {entry_path}")
+        if declared_size > max_total_inventory_bytes - declared_total_inventory_bytes:
+            raise ValidationError("budget.max_total_bytes exceeded by inventory content")
+
+        declared_total_inventory_bytes += declared_size
+        preflight_entry_paths.add(entry_path)
+        preflight_inventory.append((entry, entry_path, declared_size, declared_sha))
+
     seen_entry_paths: List[str] = []
-    seen_entry_path_set: Set[str] = set()
     seen_source_ids: Set[str] = set()
     seen_summary_ids: Set[str] = set()
     seen_candidate_ids: Set[str] = set()
@@ -782,33 +885,25 @@ def _parse_batch(
     source_summaries: Dict[str, Dict[str, Any]] = {}
     candidate_map: Dict[str, Dict[str, Any]] = {}
 
-    for entry in inventory:
-        if not isinstance(entry, dict):
-            raise ValidationError("inventory entries must be objects")
-
-        entry_path = _normalize_artifact_path(entry.get("path"))
-        if entry_path in seen_entry_path_set:
-            raise ValidationError(f"duplicate path in inventory: {entry_path}")
-        if any(_artifact_paths_overlap(entry_path, exclusion_path) for exclusion_path in exclusion_map):
-            raise ValidationError(f"inventory path conflicts with batch exclusion: {entry_path}")
-
-        entry_payload_path, entry_payload, entry_evidence = _read_file_bytes(root_real, root_fd, entry_path, seam=seam)
+    for entry, entry_path, declared_size, declared_sha in preflight_inventory:
+        remaining_inventory_bytes = max_total_inventory_bytes - total_inventory_bytes
+        entry_payload_path, entry_payload, entry_evidence = _read_file_bytes(
+            root_real,
+            root_fd,
+            entry_path,
+            seam=seam,
+            aggregate_budget_bytes=remaining_inventory_bytes,
+        )
         # Scan raw artifact bytes before extracting identifiers that may later be echoed.
         entry_text = _decode_utf8(entry_payload, f"inventory artifact {entry_path}")
         _validate_secret_free(entry_text, "inventory artifact")
 
-        declared_size = entry.get("size")
-        declared_sha = entry.get("sha256")
-        if not isinstance(declared_size, int) or declared_size < 0:
-            raise ValidationError(f"invalid size in inventory entry: {entry_path}")
-        if not _is_hex64(declared_sha):
-            raise ValidationError(f"invalid sha256 in inventory entry: {entry_path}")
         if declared_size != entry_evidence["size"]:
             raise ValidationError(f"inventory size mismatch: {entry_path}")
         if declared_sha != entry_evidence["sha256"]:
             raise ValidationError(f"inventory sha mismatch: {entry_path}")
 
-        total_inventory_bytes += declared_size
+        total_inventory_bytes += entry_evidence["size"]
         state = _require_non_empty_string(entry.get("state"), f"inventory entry state for {entry_path}")
 
         if state == "source_snapshot" and not entry_path.startswith("sources/"):
@@ -1009,7 +1104,6 @@ def _parse_batch(
             raise ValidationError(f"unsupported inventory state: {state}")
 
         seen_entry_paths.append(entry_payload_path)
-        seen_entry_path_set.add(entry_path)
 
     if seen_entry_paths != sorted(seen_entry_paths):
         raise ValidationError("inventory is not sorted by path")
@@ -1449,7 +1543,7 @@ def run_validation(
         )
         canonical_fd = _open_secure_fd(canonical_abs, canonical_fingerprint)
 
-        baseline_git = _collect_git_state(canonical_abs, canonical_fingerprint)
+        baseline_git = _collect_git_state(canonical_abs, canonical_fd, canonical_fingerprint)
         evidence["git"]["baseline"] = baseline_git
 
         staging_stat = os.stat(staging_abs, follow_symlinks=False)
@@ -1510,7 +1604,7 @@ def run_validation(
             if pre_final_mutation is not None:
                 pre_final_mutation()
 
-            final_git = _collect_git_state(canonical_abs, canonical_fingerprint)
+            final_git = _collect_git_state(canonical_abs, canonical_fd, canonical_fingerprint)
             evidence["git"]["final"] = final_git
             if final_git != baseline_git:
                 status = "unverifiable"
@@ -1571,7 +1665,9 @@ def run_validation(
 
     if status in {"invalid", "unverifiable"} and baseline_git is not None and not evidence["git"]["final"] and canonical_abs is not None:
         try:
-            final_git = _collect_git_state(canonical_abs, canonical_fingerprint)
+            if canonical_fd is None:
+                raise UnverifiableError("canonical root descriptor is unavailable")
+            final_git = _collect_git_state(canonical_abs, canonical_fd, canonical_fingerprint)
             evidence["git"]["final"] = final_git
             if final_git != baseline_git:
                 status = "unverifiable"

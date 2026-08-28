@@ -7,6 +7,7 @@ import json
 import os
 import re
 import sqlite3
+import stat
 import subprocess
 import sys
 from contextlib import redirect_stderr, redirect_stdout
@@ -24,6 +25,7 @@ ARCHIVE_ITEM_PATH = SCRIPTS_DIR / "archive_item.py"
 ARCHIVER_RECALL_PATH = SCRIPTS_DIR / "archiver_recall.py"
 BACKFILL_PATH = SCRIPTS_DIR / "backfill_link_contexts.py"
 ARCHIVER_DB_PATH = SCRIPTS_DIR / "archiver_db.py"
+ARCHIVER_EXTRACT_PATH = SCRIPTS_DIR / "archiver_extract_context.py"
 SKILL_PATH = Path(__file__).resolve().parent.parent / "SKILL.md"
 
 EXPECTED_SUPPORT_LINKS = {
@@ -55,6 +57,15 @@ def module_archive_review():
 @pytest.fixture
 def module_archiver_db():
     spec = importlib.util.spec_from_file_location("archiver_db_for_tests", ARCHIVER_DB_PATH)
+    module = importlib.util.module_from_spec(spec)
+    assert spec is not None and spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture
+def module_archiver_extract():
+    spec = importlib.util.spec_from_file_location("archiver_extract_context_for_tests", ARCHIVER_EXTRACT_PATH)
     module = importlib.util.module_from_spec(spec)
     assert spec is not None and spec.loader is not None
     spec.loader.exec_module(module)
@@ -913,6 +924,7 @@ def test_cron_wrapper_passes_args_and_propagates_exit_and_timeout(module_cron):
         return SimpleNamespace(returncode=7)
 
     with pytest.MonkeyPatch.context() as m:
+        m.setenv("ARCHIVER_SKILL_DIR", str(Path(module_cron.__file__).resolve().parents[1]))
         m.setattr(module_cron.subprocess, "run", fake_run)
         rc = module_cron.main(["--timeout", "31", "--days", "30", "--json"])
 
@@ -924,6 +936,7 @@ def test_cron_wrapper_passes_args_and_propagates_exit_and_timeout(module_cron):
         raise subprocess.TimeoutExpired(cmd=cmd, timeout=timeout)
 
     with pytest.MonkeyPatch.context() as m:
+        m.setenv("ARCHIVER_SKILL_DIR", str(Path(module_cron.__file__).resolve().parents[1]))
         m.setattr(module_cron.subprocess, "run", fake_run_timeout)
         rc = module_cron.main(["--timeout", "9", "--days", "1"])
 
@@ -1122,6 +1135,298 @@ def test_archive_item_recall_and_backfill_use_temporary_archiver_home(tmp_path):
     backfill_result = json.loads(backfill_payload.stdout)
     assert backfill_result["added_items"] >= 1
     assert backfill_result["added_links"] >= 1
+
+
+def test_archive_item_uses_private_permissions_and_skips_preexisting_symlink(tmp_path):
+    home = tmp_path / "archiver"
+    inbox = home / "archive-vault" / "00-inbox"
+    inbox.mkdir(parents=True)
+    outside = tmp_path / "outside.md"
+    outside.write_text("must remain unchanged", encoding="utf-8")
+    today = datetime.now().astimezone().date().isoformat()
+    symlink_path = inbox / f"{today}-private-note.md"
+    symlink_path.symlink_to(outside)
+
+    result = run_script(
+        ARCHIVE_ITEM_PATH,
+        ["--title", "Private note", "--no-extract", "--json"],
+        env={"ARCHIVER_HOME": str(home)},
+    )
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    created = Path(payload["path"])
+    assert created.name == f"{today}-private-note-2.md"
+    assert created.read_text(encoding="utf-8").startswith("---\n")
+    assert outside.read_text(encoding="utf-8") == "must remain unchanged"
+    assert stat.S_IMODE(created.stat().st_mode) == 0o600
+    assert stat.S_IMODE((home / "archive-vault").stat().st_mode) == 0o700
+    assert stat.S_IMODE((home / "archive-vault" / "90-meta" / "archiver.sqlite3").stat().st_mode) == 0o600
+
+
+def test_archiver_db_rejects_symlinked_parent_for_private_writes_and_sqlite(module_archiver_db, tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    redirected_home = tmp_path / "redirected-home"
+    redirected_home.symlink_to(outside, target_is_directory=True)
+    note_path = redirected_home / "archive-vault" / "00-inbox" / "note.md"
+    db_path = redirected_home / "archive-vault" / "90-meta" / "archiver.sqlite3"
+
+    with pytest.raises(ValueError, match="symlink"):
+        module_archiver_db.write_private_text_exclusive(note_path, "must not escape")
+    with pytest.raises(ValueError, match="symlink"):
+        module_archiver_db.connect(db_path)
+
+    assert not any(outside.iterdir())
+
+
+def test_archiver_db_readonly_connection_escapes_sqlite_uri_filename(module_archiver_db, tmp_path):
+    db_path = tmp_path / "private" / "archive?mode=rw.sqlite"
+    writer = module_archiver_db.connect(db_path)
+    try:
+        writer.execute("CREATE TABLE probe (value TEXT)")
+        writer.execute("INSERT INTO probe (value) VALUES ('present')")
+        writer.commit()
+    finally:
+        writer.close()
+
+    reader = module_archiver_db.connect_readonly(db_path)
+    try:
+        assert reader.execute("SELECT value FROM probe").fetchone()[0] == "present"
+    finally:
+        reader.close()
+
+
+def test_archive_item_rejects_excessive_url_fanout_before_writing(tmp_path):
+    home = tmp_path / "archiver"
+    body = "\n".join(f"https://example.com/{index}" for index in range(26))
+
+    result = run_script(
+        ARCHIVE_ITEM_PATH,
+        ["--title", "Fanout", "--body", body, "--no-extract", "--json"],
+        env={"ARCHIVER_HOME": str(home)},
+    )
+
+    assert result.returncode == 2
+    assert "URL limit" in result.stderr
+    assert not (home / "archive-vault" / "00-inbox").exists()
+
+
+def test_archive_item_rejects_oversized_body_before_writing(tmp_path):
+    home = tmp_path / "archiver"
+
+    result = run_script(
+        ARCHIVE_ITEM_PATH,
+        ["--title", "Oversized", "--body", "x" * (64 * 1024 + 1), "--no-extract"],
+        env={"ARCHIVER_HOME": str(home)},
+    )
+
+    assert result.returncode == 2
+    assert "body byte limit" in result.stderr
+    assert not (home / "archive-vault" / "00-inbox").exists()
+
+
+def test_recall_and_backfill_ignore_symlinked_notes_outside_vault(tmp_path):
+    home = tmp_path / "archiver"
+    vault = home / "archive-vault"
+    notes = vault / "notes"
+    notes.mkdir(parents=True)
+    outside = tmp_path / "outside.md"
+    outside.write_text("needle outside vault", encoding="utf-8")
+    (notes / "outside.md").symlink_to(outside)
+
+    recall = run_script(
+        ARCHIVER_RECALL_PATH,
+        ["--json", "--query", "needle", "--limit", "5"],
+        env={"ARCHIVER_HOME": str(home)},
+    )
+    backfill = run_script(BACKFILL_PATH, ["--json"], env={"ARCHIVER_HOME": str(home)})
+
+    assert recall.returncode == 0
+    assert json.loads(recall.stdout)["count"] == 0
+    assert backfill.returncode == 0
+    assert json.loads(backfill.stdout)["added_items"] == 0
+
+
+@pytest.mark.parametrize("url", ["http://127.0.0.1/internal", "http://[::1]/internal"])
+def test_context_extractor_rejects_private_network_url_literals(module_archiver_extract, url):
+    result = module_archiver_extract.extract_url_context(url)
+
+    assert result["context_status"] == "failed"
+    assert result["error"] == "non-public network targets are not allowed"
+
+
+def test_context_extractor_rejects_private_dns_targets(module_archiver_extract, monkeypatch):
+    monkeypatch.setattr(
+        module_archiver_extract.socket,
+        "getaddrinfo",
+        lambda *_args, **_kwargs: [
+            (
+                module_archiver_extract.socket.AF_INET,
+                module_archiver_extract.socket.SOCK_STREAM,
+                6,
+                "",
+                ("169.254.169.254", 80),
+            )
+        ],
+    )
+
+    result = module_archiver_extract.extract_url_context("http://metadata.example/latest")
+
+    assert result["context_status"] == "failed"
+    assert result["error"] == "non-public network targets are not allowed"
+
+
+def test_context_extractor_disables_ambient_proxy_settings(module_archiver_extract, monkeypatch):
+    monkeypatch.setenv("HTTP_PROXY", "http://proxy.example:8080")
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:8080")
+    captured_handlers = []
+    real_build_opener = module_archiver_extract.build_opener
+
+    def capture_build_opener(*handlers):
+        captured_handlers.extend(handlers)
+        return real_build_opener(*handlers)
+
+    monkeypatch.setattr(module_archiver_extract, "build_opener", capture_build_opener)
+
+    opener = module_archiver_extract._public_url_opener()
+    explicit_proxy_handlers = [
+        handler for handler in captured_handlers if handler.__class__.__name__ == "ProxyHandler"
+    ]
+    captured_handler_names = {handler.__class__.__name__ for handler in captured_handlers}
+    proxy_handlers = [handler for handler in opener.handlers if handler.__class__.__name__ == "ProxyHandler"]
+
+    assert len(explicit_proxy_handlers) == 1
+    assert explicit_proxy_handlers[0].proxies == {}
+    assert {
+        "_PublicHTTPHandler",
+        "_PublicHTTPSHandler",
+        "_PublicRedirectHandler",
+    }.issubset(captured_handler_names)
+    assert all(handler.proxies == {} for handler in proxy_handlers)
+    assert not any(handler.proxies for handler in proxy_handlers)
+
+
+def test_context_extractor_uses_one_deadline_for_validation_open_and_reads(module_archiver_extract, monkeypatch):
+    observed = []
+    reads = 0
+
+    class Response:
+        headers = {"Content-Type": "text/plain"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read1(self, size):
+            nonlocal reads
+            observed.append(size)
+            reads += 1
+            return b"bounded context" if reads == 1 else b""
+
+    class Opener:
+        def open(self, _request, timeout):
+            observed.append(timeout)
+            return Response()
+
+    monkeypatch.setattr(module_archiver_extract, "_validate_public_url", lambda *_args: None)
+    monkeypatch.setattr(module_archiver_extract, "_public_url_opener", lambda deadline: Opener())
+
+    result = module_archiver_extract.extract_url_context("https://public.example/article", timeout=5)
+
+    assert result["context_status"] == "extracted"
+    assert isinstance(observed[0], float)
+    assert observed[0] <= 5
+    assert observed[1] == 64 * 1024
+
+
+def test_context_extractor_rejects_read_after_deadline(module_archiver_extract, monkeypatch):
+    class Response:
+        headers = {"Content-Type": "text/plain"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read1(self, _size):
+            return b"late"
+
+    class Opener:
+        def open(self, *_args, **_kwargs):
+            return Response()
+
+    ticks = iter([0.0, 0.0, 1.0])
+    monkeypatch.setattr(module_archiver_extract, "_validate_public_url", lambda *_args: None)
+    monkeypatch.setattr(module_archiver_extract, "_public_url_opener", lambda deadline: Opener())
+    monkeypatch.setattr(module_archiver_extract.time, "monotonic", lambda: next(ticks))
+
+    result = module_archiver_extract.extract_url_context("https://public.example/article", timeout=0.5)
+
+    assert result["context_status"] == "failed"
+    assert "deadline" in result["error"]
+
+
+def test_context_extractor_sends_pdf_parsing_to_a_bounded_worker(module_archiver_extract, monkeypatch):
+    class Response:
+        headers = {"Content-Type": "application/pdf"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read1(self, _size):
+            if hasattr(self, "done"):
+                return b""
+            self.done = True
+            return b"%PDF-1.7"
+
+    class Opener:
+        def open(self, *_args, **_kwargs):
+            return Response()
+
+    observed = {}
+
+    def fake_worker(url, payload, deadline):
+        observed["url"] = url
+        observed["payload"] = payload
+        observed["deadline"] = deadline
+        return {"url": url, "context_status": "failed", "extractor": "pymupdf-worker", "error": "bounded"}
+
+    monkeypatch.setattr(module_archiver_extract, "_validate_public_url", lambda *_args: None)
+    monkeypatch.setattr(module_archiver_extract, "_public_url_opener", lambda _deadline: Opener())
+    monkeypatch.setattr(module_archiver_extract, "_extract_pdf_in_worker", fake_worker)
+
+    result = module_archiver_extract.extract_url_context("https://public.example/report.pdf", timeout=5)
+
+    assert result["extractor"] == "pymupdf-worker"
+    assert observed["payload"] == b"%PDF-1.7"
+
+
+def test_pdf_worker_uses_timeout_and_resource_limited_subprocess(module_archiver_extract, monkeypatch):
+    observed = {}
+
+    def fake_run(command, **kwargs):
+        observed["command"] = command
+        observed.update(kwargs)
+        return SimpleNamespace(returncode=0, stdout=b'{"context_status":"extracted"}')
+
+    monkeypatch.setattr(module_archiver_extract.subprocess, "run", fake_run)
+    result = module_archiver_extract._extract_pdf_in_worker(
+        "https://public.example/report.pdf",
+        b"%PDF-1.7",
+        module_archiver_extract.time.monotonic() + 30,
+    )
+
+    assert result["context_status"] == "extracted"
+    assert observed["command"][1:3] == [str(ARCHIVER_EXTRACT_PATH), "--pdf-worker"]
+    assert observed["timeout"] <= module_archiver_extract.PDF_WORKER_TIMEOUT_SECONDS
+    assert observed["preexec_fn"] is module_archiver_extract._limit_pdf_worker
 
 
 def test_archiver_db_legacy_link_contexts_migration_is_idempotent_and_upserts_without_duplicates(module_archiver_db, tmp_path):
@@ -1373,3 +1678,52 @@ def test_backfill_dry_run_and_apply_cover_source_only_url_and_extract_existing_s
     assert after[2] == "extracted text body"
     assert after != before_status
     con.close()
+
+
+def test_backfill_extraction_uses_a_bounded_cursor_batch(tmp_path):
+    home = tmp_path / "archiver"
+    env = {"ARCHIVER_HOME": str(home)}
+    for index in (1, 2):
+        created = run_script(
+            ARCHIVE_ITEM_PATH,
+            [
+                "--title",
+                f"Bounded {index}",
+                "--body",
+                f"https://public{index}.example/item",
+                "--no-extract",
+                "--json",
+            ],
+            env=env,
+        )
+        assert created.returncode == 0
+
+    stub_dir = tmp_path / "stub_extract"
+    stub_dir.mkdir()
+    (stub_dir / "sitecustomize.py").write_text(
+        "import sys\n"
+        "from types import SimpleNamespace\n"
+        "def extract_url_context(url, timeout=None):\n"
+        "    return {'extractor': 'stub', 'context_status': 'extracted', 'title': url, 'description': '', 'summary': '', 'extracted_text': '', 'keywords': []}\n"
+        "sys.modules['archiver_extract_context'] = SimpleNamespace(extract_url_context=extract_url_context)\n",
+        encoding="utf-8",
+    )
+    bounded_env = {"ARCHIVER_HOME": str(home), "PYTHONPATH": os.pathsep.join([str(stub_dir), str(SCRIPTS_DIR)])}
+
+    first = run_script(
+        BACKFILL_PATH,
+        ["--extract-existing", "--force", "--extract-limit", "1", "--extract-budget-seconds", "60", "--json"],
+        env=bounded_env,
+    )
+    assert first.returncode == 0
+    first_payload = json.loads(first.stdout)
+    assert first_payload["extract_candidates"] == 1
+    assert first_payload["next_extract_after_id"] == 1
+
+    second = run_script(
+        BACKFILL_PATH,
+        ["--extract-existing", "--force", "--extract-limit", "1", "--extract-after-id", "1", "--extract-budget-seconds", "60", "--json"],
+        env=bounded_env,
+    )
+    assert second.returncode == 0
+    assert json.loads(second.stdout)["next_extract_after_id"] == 2

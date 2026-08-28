@@ -69,7 +69,7 @@ def annotation_bool(value, name: str) -> bool | None:
 
 def test_default_server_remains_four_readonly_tools() -> None:
     async def inspect() -> None:
-        async with Client(create_server(core=V02Core(policy_data(), records()))) as client:
+        async with Client(create_server(core=V02Core(policy_data(), records()), bearer_token="t" * 32)) as client:
             tools = (await client.list_tools()).tools
             assert [tool.name for tool in tools] == list(COMPAT_TOOL_NAMES)
             assert all(annotation_bool(tool.annotations, "readOnlyHint") is True for tool in tools)
@@ -88,7 +88,7 @@ def test_opt_in_tool_stages_citable_private_artifact_without_vault_write(tmp_pat
     assert core.list_tools() == (*COMPAT_TOOL_NAMES, "propose_brain_delta")
 
     async def invoke() -> dict:
-        async with Client(create_server(core=core)) as client:
+        async with Client(create_server(core=core, bearer_token="t" * 32)) as client:
             tools = (await client.list_tools()).tools
             proposal_tool = next(tool for tool in tools if tool.name == "propose_brain_delta")
             assert annotation_bool(proposal_tool.annotations, "readOnlyHint") is False

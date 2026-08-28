@@ -5,14 +5,27 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
-import shutil
 import sqlite3
+import time
 from pathlib import Path
 
-from archiver_db import DB, VAULT, connect, connect_readonly, ensure_schema, table_columns, table_exists, upsert_link_context
+from archiver_db import (
+    DB,
+    VAULT,
+    connect,
+    connect_readonly,
+    ensure_schema,
+    read_vault_text,
+    table_columns,
+    table_exists,
+    upsert_link_context,
+    write_private_bytes_exclusive,
+)
 from archiver_extract_context import extract_url_context
 
 SKIP_PREFIXES = {"90-meta", "attachments"}
+DEFAULT_EXTRACT_LIMIT = 50
+DEFAULT_EXTRACT_BUDGET_SECONDS = 300
 
 
 def now_iso() -> str:
@@ -91,7 +104,9 @@ def iter_notes(vault: Path):
         rel_parts = md_path.relative_to(vault).parts
         if rel_parts and rel_parts[0] in SKIP_PREFIXES:
             continue
-        raw = md_path.read_text(encoding="utf-8", errors="ignore")
+        raw = read_vault_text(vault, md_path)
+        if raw is None:
+            continue
         meta, body = parse_frontmatter(raw)
         rel_path = str(md_path.relative_to(vault))
         source = str(meta.get("source", "") or "")
@@ -100,13 +115,19 @@ def iter_notes(vault: Path):
 
 
 def add_backup(path: Path) -> str | None:
-    if not path.exists():
+    if not path.exists() or path.is_symlink() or not path.is_file():
         return None
     stamp = dt.datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
-    backup = path.with_name(f"{path.name}.pre-context-{stamp}.bak")
-    backup.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(path, backup)
-    return str(backup)
+    content = path.read_bytes()
+    counter = 1
+    while True:
+        suffix = "" if counter == 1 else f"-{counter}"
+        backup = path.with_name(f"{path.name}.pre-context-{stamp}{suffix}.bak")
+        try:
+            write_private_bytes_exclusive(backup, content)
+            return str(backup)
+        except FileExistsError:
+            counter += 1
 
 
 def ensure_item(con, vault: Path, rel_path: str, meta: dict[str, object], created: str) -> tuple[int, bool]:
@@ -156,7 +177,17 @@ def ensure_link(
     return link_id, True
 
 
-def extract_existing_contexts(con, *, dry_run: bool, force: bool) -> dict[str, int]:
+def extract_existing_contexts(
+    con,
+    *,
+    dry_run: bool,
+    force: bool,
+    limit: int = DEFAULT_EXTRACT_LIMIT,
+    after_id: int = 0,
+    budget_seconds: int = DEFAULT_EXTRACT_BUDGET_SECONDS,
+) -> dict[str, int | None]:
+    if limit < 1 or budget_seconds < 1 or after_id < 0:
+        raise ValueError("extraction limit, cursor, and budget must be positive")
     link_cols = {column.lower() for column in table_columns(con, "links")} if table_exists(con, "links") else set()
     has_links = {"id", "url", "context"}.issubset(link_cols)
     if not has_links:
@@ -165,6 +196,8 @@ def extract_existing_contexts(con, *, dry_run: bool, force: bool) -> dict[str, i
             "extracted_contexts": 0,
             "failed_contexts": 0,
             "body_only_contexts": 0,
+            "deferred_contexts": 0,
+            "next_extract_after_id": None,
         }
 
     context_cols = {column.lower() for column in table_columns(con, "link_contexts")} if table_exists(con, "link_contexts") else set()
@@ -190,9 +223,9 @@ def extract_existing_contexts(con, *, dry_run: bool, force: bool) -> dict[str, i
             ]
         )
         join_sql = "LEFT JOIN link_contexts lc ON lc.link_id = l.id"
-        where_sql = ""
+        where_clauses = ["l.id > ?"]
         if not force:
-            where_sql = "WHERE lc.id IS NULL OR COALESCE(lc.context_status, '') IN ('pending', 'body_only', 'failed')"
+            where_clauses.append("(lc.id IS NULL OR COALESCE(lc.context_status, '') IN ('pending', 'body_only', 'failed'))")
     else:
         select_fields.extend(
             [
@@ -208,7 +241,7 @@ def extract_existing_contexts(con, *, dry_run: bool, force: bool) -> dict[str, i
             ]
         )
         join_sql = ""
-        where_sql = ""
+        where_clauses = ["l.id > ?"]
 
     previous_factory = con.row_factory
     con.row_factory = sqlite3.Row
@@ -219,9 +252,11 @@ def extract_existing_contexts(con, *, dry_run: bool, force: bool) -> dict[str, i
               {", ".join(select_fields)}
             FROM links l
             {join_sql}
-            {where_sql}
+            WHERE {" AND ".join(where_clauses)}
             ORDER BY l.id
-            """
+            LIMIT ?
+            """,
+            (after_id, limit),
         ).fetchall()
     finally:
         con.row_factory = previous_factory
@@ -231,11 +266,18 @@ def extract_existing_contexts(con, *, dry_run: bool, force: bool) -> dict[str, i
         "extracted_contexts": 0,
         "failed_contexts": 0,
         "body_only_contexts": 0,
+        "deferred_contexts": 0,
+        "next_extract_after_id": None,
     }
     if dry_run:
         return stats
 
-    for row in rows:
+    deadline = time.monotonic() + budget_seconds
+    for index, row in enumerate(rows):
+        if time.monotonic() >= deadline:
+            stats["deferred_contexts"] = len(rows) - index
+            stats["next_extract_after_id"] = after_id if index == 0 else rows[index - 1]["link_id"]
+            break
         link_id = row["link_id"]
         url = row["link_url"]
         link_context = row["link_context"]
@@ -258,7 +300,7 @@ def extract_existing_contexts(con, *, dry_run: bool, force: bool) -> dict[str, i
         error = None
 
         try:
-            result = extract_url_context(url, timeout=5)
+            result = extract_url_context(url, timeout=min(5, max(1, int(deadline - time.monotonic()))))
             extractor = result.get("extractor") if isinstance(result.get("extractor"), str) else extractor
             error = result.get("error") if isinstance(result.get("error"), str) else None
             status = str(result.get("context_status", "failed"))
@@ -304,6 +346,7 @@ def extract_existing_contexts(con, *, dry_run: bool, force: bool) -> dict[str, i
             error=error,
             now=now_iso(),
         )
+        stats["next_extract_after_id"] = link_id
 
     return stats
 
@@ -377,7 +420,14 @@ def _estimate_from_markdown(vault: Path) -> tuple[int, int, int]:
     return item_count, link_count, link_count
 
 
-def run_backfill(dry_run: bool, extract_existing: bool = False, force: bool = False) -> dict[str, object]:
+def run_backfill(
+    dry_run: bool,
+    extract_existing: bool = False,
+    force: bool = False,
+    extract_limit: int = DEFAULT_EXTRACT_LIMIT,
+    extract_after_id: int = 0,
+    extract_budget_seconds: int = DEFAULT_EXTRACT_BUDGET_SECONDS,
+) -> dict[str, object]:
     added_items = 0
     added_links = 0
     added_contexts = 0
@@ -386,6 +436,8 @@ def run_backfill(dry_run: bool, extract_existing: bool = False, force: bool = Fa
         "extracted_contexts": 0,
         "failed_contexts": 0,
         "body_only_contexts": 0,
+        "deferred_contexts": 0,
+        "next_extract_after_id": None,
     }
     backup_path: str | None = None
 
@@ -407,13 +459,22 @@ def run_backfill(dry_run: bool, extract_existing: bool = False, force: bool = Fa
         if DB.exists():
             try:
                 con = connect_readonly(DB)
-                extraction_stats = extract_existing_contexts(con, dry_run=True, force=force)
+                extraction_stats = extract_existing_contexts(
+                    con,
+                    dry_run=True,
+                    force=force,
+                    limit=extract_limit,
+                    after_id=extract_after_id,
+                    budget_seconds=extract_budget_seconds,
+                )
             except sqlite3.OperationalError:
                 extraction_stats = {
                     "extract_candidates": 0,
                     "extracted_contexts": 0,
                     "failed_contexts": 0,
                     "body_only_contexts": 0,
+                    "deferred_contexts": 0,
+                    "next_extract_after_id": None,
                 }
             finally:
                 if con is not None:
@@ -477,7 +538,14 @@ def run_backfill(dry_run: bool, extract_existing: bool = False, force: bool = Fa
             added_contexts += 1
 
     if extract_existing:
-        extraction_stats = extract_existing_contexts(con, dry_run=False, force=force)
+        extraction_stats = extract_existing_contexts(
+            con,
+            dry_run=False,
+            force=force,
+            limit=extract_limit,
+            after_id=extract_after_id,
+            budget_seconds=extract_budget_seconds,
+        )
 
     con.commit()
     con.close()
@@ -499,10 +567,23 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true", help="Conta alterações sem alterar o banco")
     parser.add_argument("--extract-existing", action="store_true", help="Reprocessa links existentes com extração de contexto atual")
     parser.add_argument("--force", action="store_true", help="Com --extract-existing, reprocessa todos os links existentes")
+    parser.add_argument("--extract-limit", type=int, default=DEFAULT_EXTRACT_LIMIT, help="Máximo de links extraídos por execução")
+    parser.add_argument("--extract-after-id", type=int, default=0, help="Continua a extração após este ID de link")
+    parser.add_argument("--extract-budget-seconds", type=int, default=DEFAULT_EXTRACT_BUDGET_SECONDS, help="Orçamento total de tempo para extração")
     parser.add_argument("--json", action="store_true", help="Exibe saída JSON")
     args = parser.parse_args()
 
-    payload = run_backfill(dry_run=args.dry_run, extract_existing=args.extract_existing, force=args.force)
+    try:
+        payload = run_backfill(
+            dry_run=args.dry_run,
+            extract_existing=args.extract_existing,
+            force=args.force,
+            extract_limit=args.extract_limit,
+            extract_after_id=args.extract_after_id,
+            extract_budget_seconds=args.extract_budget_seconds,
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
     if args.json:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0
@@ -510,6 +591,7 @@ def main() -> int:
     print(f"Itens adicionados: {payload['added_items']}")
     print(f"Links adicionados: {payload['added_links']}")
     print(f"Contextos adicionados: {payload['added_contexts']}")
+    print(f"Contextos adiados: {payload['deferred_contexts']}")
     print(f"Candidatos para extração: {payload['extract_candidates']}")
     print(f"Contextos extraídos: {payload['extracted_contexts']}")
     print(f"Falhas de extração: {payload['failed_contexts']}")

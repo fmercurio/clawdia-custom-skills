@@ -141,16 +141,17 @@ docs-mcp-server server \
   --port 6280 \
   --store-path /data \
   --resume \
+  --read-only \
   --telemetry=false
 ```
 
-For a public endpoint without validated auth, add:
+The container and minimum HTTP command are read-only by default. Do not remove:
 
 ```bash
 --read-only
 ```
 
-Use a private admin route, job, or shell session for `scrape`, `refresh`, and `remove` operations.
+Run `scrape`, `refresh`, and `remove` only from a separate private admin job or shell session that does not expose the administrative HTTP surface.
 
 ### 3. Decide embeddings before indexing
 

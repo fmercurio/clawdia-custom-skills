@@ -36,8 +36,10 @@ import importlib.util
 import json
 import os
 import re
+import secrets
 import stat
 import sys
+import zipfile
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Optional
@@ -46,6 +48,10 @@ from typing import Any, Optional
 # user-local dependency installs for third-party packages.
 HERE = Path(__file__).resolve().parent
 MAX_XLSX_BYTES = 25 * 1024 * 1024
+MAX_XLSX_MEMBERS = 10_000
+MAX_XLSX_MEMBER_UNCOMPRESSED_BYTES = 64 * 1024 * 1024
+MAX_XLSX_TOTAL_UNCOMPRESSED_BYTES = 256 * 1024 * 1024
+MAX_XLSX_COMPRESSION_RATIO = 100.0
 MAX_SHEET_ROWS = 100_000
 MAX_SHEET_COLUMNS = 64
 MAX_CELL_TEXT_BYTES = 64 * 1024
@@ -79,34 +85,98 @@ import requests  # noqa: E402
 
 # ─── Secure output helpers ────────────────────────────────────────────────────
 
+def _canonical_system_temp_alias(path: Path) -> Path:
+    """Normalize only macOS's built-in /var and /tmp aliases before fd traversal."""
+    candidate = path.expanduser()
+    for alias, target in ((Path("/var"), Path("/private/var")), (Path("/tmp"), Path("/private/tmp"))):
+        if candidate.is_absolute() and (candidate == alias or alias in candidate.parents):
+            try:
+                if alias.is_symlink() and alias.resolve(strict=True) == target:
+                    return target.joinpath(*candidate.relative_to(alias).parts)
+            except OSError:
+                pass
+            break
+    return candidate
+
+
+def _open_private_dir(path: Path) -> int:
+    """Create and pin every output-directory component without following links."""
+    candidate = _canonical_system_temp_alias(path)
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    if candidate.is_absolute():
+        descriptor = os.open("/", flags)
+        parts = candidate.parts[1:]
+    else:
+        descriptor = os.open(".", flags)
+        parts = candidate.parts
+    try:
+        for part in parts:
+            try:
+                next_descriptor = os.open(part, flags, dir_fd=descriptor)
+            except FileNotFoundError:
+                os.mkdir(part, mode=0o700, dir_fd=descriptor)
+                next_descriptor = os.open(part, flags, dir_fd=descriptor)
+            except OSError as exc:
+                raise OSError(f"output directory must not contain symlinks: {path}") from exc
+            os.close(descriptor)
+            descriptor = next_descriptor
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != os.geteuid():
+            raise OSError(f"output directory must be owner-owned: {path}")
+        os.fchmod(descriptor, stat.S_IRWXU)
+        return descriptor
+    except Exception:
+        os.close(descriptor)
+        raise
+
+
 def ensure_private_dir(path: Path) -> Path:
-    """Create or validate a user-only output directory."""
-    path = path.expanduser()
-    if path.exists() and path.is_symlink():
-        raise OSError(f"output directory must not be a symlink: {path}")
-    path.mkdir(parents=True, exist_ok=True, mode=0o700)
-    os.chmod(path, stat.S_IRWXU)
-    return path
+    """Create or validate a user-only output directory without symlink ancestors."""
+    descriptor = _open_private_dir(path)
+    os.close(descriptor)
+    return path.expanduser()
 
 
 def write_secure(path: Path, data: str | bytes, *, mode: str = "text") -> None:
-    """Write audit artefacts with user-only permissions (0600)."""
-    path = path.expanduser()
-    ensure_private_dir(path.parent)
-    if path.exists() and path.is_symlink():
-        raise OSError(f"refusing to overwrite symlink: {path}")
-    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
-    fd = os.open(path, flags, 0o600)
+    """Atomically write audit artefacts through a pinned private directory."""
+    destination = path.expanduser()
+    payload = data if isinstance(data, bytes) or mode == "bytes" else data.encode("utf-8")
+    if isinstance(payload, str):
+        payload = payload.encode("utf-8")
+    directory_fd = _open_private_dir(destination.parent)
+    temporary: str | None = None
     try:
-        if mode == "bytes":
-            os.write(fd, data if isinstance(data, bytes) else data.encode("utf-8"))
-        else:
-            os.write(fd, data.encode("utf-8") if isinstance(data, str) else data)
+        try:
+            existing = os.stat(destination.name, dir_fd=directory_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            existing = None
+        if existing is not None and not stat.S_ISREG(existing.st_mode):
+            raise OSError(f"refusing to overwrite non-regular output: {destination}")
+        temporary = f".{destination.name}.{secrets.token_hex(16)}.tmp"
+        file_fd = os.open(
+            temporary,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+            dir_fd=directory_fd,
+        )
+        try:
+            offset = 0
+            while offset < len(payload):
+                offset += os.write(file_fd, payload[offset:])
+            os.fchmod(file_fd, stat.S_IRUSR | stat.S_IWUSR)
+            os.fsync(file_fd)
+        finally:
+            os.close(file_fd)
+        os.replace(temporary, destination.name, src_dir_fd=directory_fd, dst_dir_fd=directory_fd)
+        temporary = None
+        os.fsync(directory_fd)
     finally:
-        os.close(fd)
-    os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+        if temporary is not None:
+            try:
+                os.unlink(temporary, dir_fd=directory_fd)
+            except FileNotFoundError:
+                pass
+        os.close(directory_fd)
 
 
 def dumps_json(data: Any, **kwargs: Any) -> str:
@@ -122,12 +192,12 @@ def mask_cnpj(cnpj: str) -> str:
 
 def request_json_with_reauth(session: requests.Session, cfg: dict, url: str, headers: dict, *, timeout: int) -> tuple[int, Any]:
     """GET JSON; on token expiry, re-authenticate once and retry."""
-    resp = session.get(url, headers=headers, timeout=timeout)
+    resp = session.get(url, headers=headers, timeout=timeout, allow_redirects=False)
     if resp.status_code == 401:
         token = A.login(cfg, A.DEFAULT_CLIENT_ID, A.DEFAULT_REDIRECT_URI, 30,
                         "Mozilla/5.0 Chrome/124.0 Safari/537.36")
         headers["Authorization"] = f"Bearer {token.access_token}"
-        resp = session.get(url, headers=headers, timeout=timeout)
+        resp = session.get(url, headers=headers, timeout=timeout, allow_redirects=False)
     if resp.status_code != 200:
         return resp.status_code, None
     return resp.status_code, resp.json()
@@ -165,10 +235,53 @@ def get_month(t: dict) -> str:
 
 # ─── Sheet parsing ────────────────────────────────────────────────────────────
 
+def validate_xlsx_archive(source: Path) -> None:
+    """Inspect the XLSX ZIP central directory before openpyxl expands members."""
+    try:
+        with zipfile.ZipFile(source) as archive:
+            members = archive.infolist()
+            if len(members) > MAX_XLSX_MEMBERS:
+                raise ValueError(f"XLSX exceeds the {MAX_XLSX_MEMBERS}-member count limit")
+            member_names: set[str] = set()
+            for member in members:
+                member_name = member.filename.replace("\\", "/")
+                if member_name in member_names:
+                    raise ValueError(f"XLSX archive contains duplicate member: {member.filename}")
+                member_names.add(member_name)
+                if (
+                    member_name.startswith("/")
+                    or re.match(r"^[A-Za-z]:", member_name)
+                    or ".." in member_name.split("/")
+                ):
+                    raise ValueError(f"XLSX archive contains unsafe member path: {member.filename}")
+            total_uncompressed = sum(member.file_size for member in members)
+            if total_uncompressed > MAX_XLSX_TOTAL_UNCOMPRESSED_BYTES:
+                raise ValueError(
+                    "XLSX archive exceeds total uncompressed limit "
+                    f"({MAX_XLSX_TOTAL_UNCOMPRESSED_BYTES} bytes)"
+                )
+            for member in members:
+                if member.file_size > MAX_XLSX_MEMBER_UNCOMPRESSED_BYTES:
+                    raise ValueError(
+                        "XLSX member exceeds uncompressed member limit "
+                        f"({MAX_XLSX_MEMBER_UNCOMPRESSED_BYTES} bytes): {member.filename}"
+                    )
+                if member.is_dir() or member.file_size == 0:
+                    continue
+                if member.compress_size == 0:
+                    raise ValueError(f"XLSX member exceeds compression ratio limit: {member.filename}")
+                ratio = member.file_size / member.compress_size
+                if ratio > MAX_XLSX_COMPRESSION_RATIO:
+                    raise ValueError(f"XLSX member exceeds compression ratio limit: {member.filename}")
+    except zipfile.BadZipFile as exc:
+        raise ValueError("XLSX is not a valid ZIP archive") from exc
+
+
 def parse_sheet(xlsx_path: str, sheet_name: Optional[str] = None) -> list[dict]:
     source = Path(xlsx_path).expanduser()
     if source.stat().st_size > MAX_XLSX_BYTES:
         raise ValueError(f"XLSX exceeds the {MAX_XLSX_BYTES}-byte input limit")
+    validate_xlsx_archive(source)
     wb = openpyxl.load_workbook(xlsx_path, data_only=True, read_only=True)
     # Auto-pick sheet
     if sheet_name and sheet_name in wb.sheetnames:

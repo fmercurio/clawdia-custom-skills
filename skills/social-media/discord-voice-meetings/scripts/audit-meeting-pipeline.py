@@ -9,14 +9,16 @@ Usage:
     python3 scripts/audit-meeting-pipeline.py
 """
 import os
-import json
-import re
-import stat
 import subprocess
 import sys
-import urllib.error
-import urllib.request
 from pathlib import Path
+
+from audit_helpers import (
+    load_private_env_value,
+    probe_zai_endpoint,
+    process_has_env_value,
+    summarize_log_line,
+)
 
 GATEWAY_LOG = Path.home() / ".hermes" / "logs" / "gateway.log"
 MEETINGS_DIR = Path.home() / ".hermes" / "meetings" / "discord"
@@ -25,11 +27,7 @@ SYSTEMD_UNIT = Path.home() / ".config" / "systemd" / "user" / "hermes-gateway.se
 SYSTEMD_DROPIN = Path.home() / ".config" / "systemd" / "user" / "hermes-gateway.service.d" / "override.conf"
 ENV_FILE = Path.home() / ".hermes" / ".env"
 WRAPPER_SCRIPT = Path.home() / ".hermes" / "scripts" / "hermes-gateway-with-1password.sh"
-
 CHECKS = []
-SECRET_ASSIGNMENT_RE = re.compile(
-    r"(?i)\b(token|secret|password|passwd|api[_-]?key|authorization|cookie)\b\s*[:=]\s*\S+"
-)
 
 
 def ok(msg):
@@ -51,78 +49,6 @@ def header(title):
     print(f"\n{'='*60}")
     print(f"  {title}")
     print(f"{'='*60}")
-
-
-def summarize_log_line(line):
-    """Summarize a log line without printing transcript text or secret values."""
-    redacted = SECRET_ASSIGNMENT_RE.sub(r"\1=<redacted>", line.strip())
-    lower = redacted.lower()
-    tags = [tag for tag in ("voice", "meeting", "opus", "flush", "ssrc") if tag in lower]
-    timestamp = redacted.split(maxsplit=1)[0] if redacted else "log"
-    return f"{timestamp} {'/'.join(tags) or 'voice/meeting'} log line (chars={len(line)})"
-
-
-def process_has_env_value(pid, key, expected_value):
-    """Check one process env var without shelling out or printing the environment."""
-    env_path = Path("/proc") / str(pid) / "environ"
-    try:
-        data = env_path.read_bytes()
-    except OSError:
-        return None
-
-    target = key.encode("utf-8")
-    expected = expected_value.encode("utf-8")
-    for entry in data.split(b"\0"):
-        name, sep, value = entry.partition(b"=")
-        if sep and name == target:
-            return value == expected
-    return False
-
-
-def load_private_env_value(env_path, key):
-    """Read one env-file value only when the file is private to the user."""
-    if not env_path.exists():
-        return None, "missing"
-    try:
-        mode = stat.S_IMODE(env_path.stat().st_mode)
-    except OSError:
-        return None, "unreadable"
-    if mode & (stat.S_IRWXG | stat.S_IRWXO):
-        return None, "broad_permissions"
-
-    try:
-        lines = env_path.read_text().splitlines()
-    except OSError:
-        return None, "unreadable"
-    for line in lines:
-        if line.startswith(f"{key}=") and not line.startswith("#"):
-            return line.split("=", 1)[1].strip().strip('"').strip("'"), "ok"
-    return None, "missing"
-
-
-def probe_zai_endpoint(endpoint_url, glm_key, timeout=10):
-    """Probe Z.AI without putting the bearer token in process arguments."""
-    payload = json.dumps({
-        "model": "glm-4.6",
-        "messages": [{"role": "user", "content": "ok"}],
-        "max_tokens": 5,
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        endpoint_url,
-        data=payload,
-        headers={
-            "Authorization": f"Bearer {glm_key}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return resp.read().decode("utf-8", errors="replace")
-    except urllib.error.HTTPError as exc:
-        return exc.read().decode("utf-8", errors="replace")
-    except Exception as exc:
-        return json.dumps({"error": str(exc)})
 
 
 # --- 1. Meetings directory ---

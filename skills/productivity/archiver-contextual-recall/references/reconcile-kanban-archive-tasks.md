@@ -36,7 +36,7 @@ If the exact task id is unknown, inspect nearby tasks on the configured board an
 
 ```bash
 python3 .../scripts/backfill_link_contexts.py --dry-run --json
-python3 .../scripts/backfill_link_contexts.py --extract-existing --json
+python3 .../scripts/backfill_link_contexts.py --extract-existing --extract-limit 50 --extract-budget-seconds 300 --json
 ```
 
 - Use `--dry-run` first to inspect counts and candidate IDs before writing.

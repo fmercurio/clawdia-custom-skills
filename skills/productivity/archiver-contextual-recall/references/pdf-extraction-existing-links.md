@@ -19,9 +19,11 @@ The first contextual backfill populated `link_contexts` from existing Markdown/b
    - `error='pymupdf_not_installed'`
 5. Re-run existing links through:
    ```bash
-   python3 scripts/backfill_link_contexts.py --dry-run --extract-existing --json
-   python3 scripts/backfill_link_contexts.py --extract-existing --json
+   python3 scripts/backfill_link_contexts.py --dry-run --extract-existing --extract-limit 50 --extract-budget-seconds 300 --json
+   python3 scripts/backfill_link_contexts.py --extract-existing --extract-limit 50 --extract-budget-seconds 300 --json
    ```
+
+   Cada execução processa no máximo 50 links e tem orçamento total de cinco minutos. Se houver pendências, retome com o valor de `next_extract_after_id` retornado no JSON usando `--extract-after-id`.
 6. Do not use `--force` unless intentionally re-fetching rows already marked `extracted`.
 
 ## PDF extractor implementation shape

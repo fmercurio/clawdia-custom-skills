@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -40,6 +42,12 @@ def test_scripts_compile():
     subprocess.run([sys.executable, "-m", "py_compile", *map(str, scripts)], check=True)
 
 
+def test_container_defaults_to_read_only_http_api():
+    dockerfile = (ROOT / "templates" / "Dockerfile").read_text(encoding="utf-8")
+
+    assert '"--read-only"' in dockerfile
+
+
 def test_staleness_script_accepts_list_json(tmp_path):
     sample = [
         {
@@ -64,6 +72,44 @@ def test_staleness_script_accepts_list_json(tmp_path):
     assert "low-document-count" in rows[0]["quality_flags"]
     assert "single-source-url" in rows[0]["quality_flags"]
     assert "package-registry-source" in rows[0]["quality_flags"]
+
+
+def test_staleness_script_rejects_unapproved_npx_package_before_execution():
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts" / "check_docs_staleness.py"),
+            "--docs-mcp-package",
+            "untrusted-package@1.0.0",
+        ],
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 2
+    assert "approved pinned package" in result.stderr
+
+
+def test_staleness_npx_uses_an_isolated_canonical_registry(monkeypatch):
+    script = ROOT / "scripts" / "check_docs_staleness.py"
+    spec = importlib.util.spec_from_file_location("check_docs_staleness_test", script)
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(module)
+    captured = {}
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        captured.update(kwargs)
+        return type("Result", (), {"returncode": 0, "stdout": "[]"})()
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    assert module.load_indexed_libraries("http://127.0.0.1:6280", module.DEFAULT_PACKAGE, None) == []
+
+    assert captured["cwd"] != os.getcwd()
+    assert captured["env"]["NPM_CONFIG_REGISTRY"] == "https://registry.npmjs.org/"
+    assert captured["env"]["NPM_CONFIG_USERCONFIG"] == os.devnull
+    assert "--registry" in captured["command"]
 
 
 SCAN_SCRIPT = ROOT / "scripts" / "scan_repo_packages.py"
@@ -123,3 +169,42 @@ ruff = "^0.5"
 
 def test_parse_pyproject_invalid_toml_is_safe():
     assert parse_pyproject("[project\nname = 'broken'") == []
+
+
+def test_dependency_reports_are_owner_only_and_reject_symlink_targets(tmp_path):
+    outdir = tmp_path / "reports"
+    written = SCAN_MODULE.write_private_report(outdir, "dependency-scan.json", "{}")
+
+    assert written.read_text(encoding="utf-8") == "{}\n"
+    assert stat.S_IMODE(outdir.stat().st_mode) == 0o700
+    assert stat.S_IMODE(written.stat().st_mode) == 0o600
+
+    target = tmp_path / "target.json"
+    target.write_text("sentinel\n", encoding="utf-8")
+    (outdir / "dependency-scan.md").symlink_to(target)
+    try:
+        SCAN_MODULE.write_private_report(outdir, "dependency-scan.md", "report")
+    except ValueError as exc:
+        assert "regular file" in str(exc)
+    else:
+        raise AssertionError("symlink report target must be rejected")
+    assert target.read_text(encoding="utf-8") == "sentinel\n"
+
+
+def test_dependency_reports_reject_symlinked_output_ancestor_without_writing(tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    sentinel = outside / "sentinel.txt"
+    sentinel.write_text("keep\n", encoding="utf-8")
+    linked_parent = tmp_path / "linked-parent"
+    linked_parent.symlink_to(outside, target_is_directory=True)
+
+    try:
+        SCAN_MODULE.write_private_report(linked_parent / "reports", "dependency-scan.json", "{}")
+    except ValueError as exc:
+        assert "symlink" in str(exc)
+    else:
+        raise AssertionError("symlinked report ancestor must be rejected")
+
+    assert sentinel.read_text(encoding="utf-8") == "keep\n"
+    assert not (outside / "reports" / "dependency-scan.json").exists()

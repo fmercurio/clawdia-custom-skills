@@ -287,11 +287,11 @@ Create `~/.hermes/skills/note-taking/push-brain/SKILL.md`.
 
 ### Workflow
 
-1. Read current state → 2. Choose destination → 3. Write concisely → 4. Update status → 5. Health-check → 6. Commit → 7. Push to remote → 8. Rebuild search index
+1. Read current state → 2. Choose destination → 3. Obtain explicit write confirmation → 4. Write concisely → 5. Health-check. Treat commit, push, and index rebuild as separate authorization gates.
 
 ### Git push to remote
 
-After committing, always push so the vault stays in sync:
+Commit is distinct from writing, and push is distinct from commit. Push only after explicit confirmation to publish remotely:
 
 ```bash
 cd /path/to/vault
@@ -314,7 +314,7 @@ BRAIN_EMBED_MODEL="text-embedding-nomic-embed-text-v1.5" \
 
 ### URL archiving (optional quick-archive)
 
-When the user sends a URL with no other instruction, it's a quick-archive request — fetch, extract, write a structured note to `40_Archives/` or a dedicated archive area. This is lighter than a full push-brain consolidation.
+A bare URL is not authorization to fetch, archive, write, commit, or push. Ask what operation is wanted before mutating the vault or contacting the URL.
 
 Archive note structure:
 - Source URL and fetch date
