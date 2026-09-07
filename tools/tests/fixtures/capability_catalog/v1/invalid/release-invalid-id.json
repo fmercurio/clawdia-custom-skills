@@ -1,0 +1,14 @@
+{
+  "schema_version": "clawdia-catalog-release/v1",
+  "release_id": "release-latest",
+  "created_at": "2026-09-04T12:00:00Z",
+  "source_revision": "0123456789abcdef0123456789abcdef01234567",
+  "channels": {
+    "stable": {"capabilities": ["source-review"], "artifacts": [], "bundles": []},
+    "preview": {"capabilities": ["source-review"], "artifacts": [], "bundles": []}
+  },
+  "checksums": {
+    "stable": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "preview": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  }
+}

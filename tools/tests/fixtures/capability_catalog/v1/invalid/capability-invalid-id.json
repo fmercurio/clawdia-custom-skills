@@ -1,0 +1,12 @@
+{
+  "schema_version": "clawdia-capability/v1",
+  "id": "Source Review",
+  "label": "Source review",
+  "description": "Synthetic capability with an invalid identifier.",
+  "domain": "research",
+  "risk_level": "low",
+  "data_classes": [
+    "public"
+  ],
+  "requires_approval": false
+}

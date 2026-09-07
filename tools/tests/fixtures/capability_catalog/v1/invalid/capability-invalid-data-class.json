@@ -1,0 +1,12 @@
+{
+  "schema_version": "clawdia-capability/v1",
+  "id": "source-review",
+  "label": "Source review",
+  "description": "Synthetic capability with an unknown data classification.",
+  "domain": "research",
+  "risk_level": "low",
+  "data_classes": [
+    "unclassified"
+  ],
+  "requires_approval": false
+}

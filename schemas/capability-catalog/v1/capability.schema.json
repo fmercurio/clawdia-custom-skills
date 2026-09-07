@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:clawdia:capability-catalog:v1:capability",
+  "title": "ClawdIA Capability v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "id",
+    "label",
+    "description",
+    "domain",
+    "risk_level",
+    "data_classes",
+    "requires_approval"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "clawdia-capability/v1"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+      "maxLength": 64
+    },
+    "label": {
+      "type": "string",
+      "pattern": "\\S",
+      "maxLength": 120
+    },
+    "description": {
+      "type": "string",
+      "pattern": "\\S",
+      "maxLength": 1024
+    },
+    "domain": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+      "maxLength": 64
+    },
+    "risk_level": {
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    "data_classes": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "public",
+          "internal",
+          "confidential",
+          "restricted",
+          "personal",
+          "financial",
+          "health",
+          "credentials"
+        ]
+      }
+    },
+    "requires_approval": {
+      "type": "boolean"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "risk_level": {
+            "enum": [
+              "medium",
+              "high"
+            ]
+          }
+        },
+        "required": [
+          "risk_level"
+        ]
+      },
+      "then": {
+        "properties": {
+          "requires_approval": {
+            "const": true
+          }
+        }
+      }
+    }
+  ]
+}

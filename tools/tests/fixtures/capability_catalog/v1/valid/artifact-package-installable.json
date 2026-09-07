@@ -1,0 +1,25 @@
+{
+  "schema_version": "clawdia-artifact/v1",
+  "id": "research-foundation-package",
+  "label": "Research foundation package",
+  "description": "Synthetic package grouping a public-source review workflow.",
+  "kind": "package",
+  "delivery_mode": "installable",
+  "status": "candidate",
+  "version": "1.0.0-rc.1",
+  "provides": ["source-review"],
+  "requires": {
+    "capabilities": [],
+    "artifacts": ["source-review-skill"],
+    "runtime_features": []
+  },
+  "conflicts": {
+    "capabilities": [],
+    "artifacts": []
+  },
+  "runtime_compatibility": [
+    {"runtime": "hermes", "min_version": "1.0.0"}
+  ],
+  "risk_level": "low",
+  "requires_approval": false
+}

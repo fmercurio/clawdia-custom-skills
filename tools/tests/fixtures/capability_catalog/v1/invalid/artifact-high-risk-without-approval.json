@@ -1,0 +1,16 @@
+{
+  "schema_version": "clawdia-artifact/v1",
+  "id": "restricted-operation-tool",
+  "label": "Restricted operation tool",
+  "description": "Synthetic high-risk artifact without approval.",
+  "kind": "tool",
+  "delivery_mode": "managed",
+  "status": "approved",
+  "version": "1.0.0",
+  "provides": ["account-change"],
+  "requires": {"capabilities": [], "artifacts": [], "runtime_features": []},
+  "conflicts": {"capabilities": [], "artifacts": []},
+  "runtime_compatibility": [{"runtime": "hermes", "min_version": "1.0.0"}],
+  "risk_level": "high",
+  "requires_approval": false
+}

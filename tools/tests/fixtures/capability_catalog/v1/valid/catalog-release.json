@@ -1,0 +1,33 @@
+{
+  "schema_version": "clawdia-catalog-release/v1",
+  "release_id": "2026.9.0",
+  "created_at": "2026-09-04T12:00:00Z",
+  "source_revision": "0123456789abcdef0123456789abcdef01234567",
+  "channels": {
+    "stable": {
+      "capabilities": ["source-review"],
+      "artifacts": [
+        {"artifact_id": "source-review-skill", "version": "1.0.0", "status": "approved"},
+        {"artifact_id": "summary-draft-template", "version": "1.0.0", "status": "approved"}
+      ],
+      "bundles": [
+        {"bundle_id": "research-foundation", "version": "1.0.0", "status": "approved"}
+      ]
+    },
+    "preview": {
+      "capabilities": ["source-review"],
+      "artifacts": [
+        {"artifact_id": "public-source-integration", "version": "1.0.0", "status": "candidate"},
+        {"artifact_id": "source-review-skill", "version": "1.0.0", "status": "approved"},
+        {"artifact_id": "summary-draft-template", "version": "1.0.0", "status": "approved"}
+      ],
+      "bundles": [
+        {"bundle_id": "research-foundation", "version": "1.0.0", "status": "approved"}
+      ]
+    }
+  },
+  "checksums": {
+    "stable": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "preview": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  }
+}

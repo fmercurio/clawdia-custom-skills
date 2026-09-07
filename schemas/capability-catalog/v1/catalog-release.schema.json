@@ -1,0 +1,202 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:clawdia:capability-catalog:v1:release",
+  "title": "ClawdIA Catalog Release v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "release_id",
+    "created_at",
+    "source_revision",
+    "channels",
+    "checksums"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "clawdia-catalog-release/v1"
+    },
+    "release_id": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:[.](?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?(?![\\s\\S])"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z(?![\\s\\S])"
+    },
+    "source_revision": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}(?![\\s\\S])"
+    },
+    "channels": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stable",
+        "preview"
+      ],
+      "properties": {
+        "stable": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/channel"
+            },
+            {
+              "properties": {
+                "artifacts": {
+                  "items": {
+                    "$ref": "#/$defs/stable_artifact_reference"
+                  }
+                },
+                "bundles": {
+                  "items": {
+                    "$ref": "#/$defs/stable_bundle_reference"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "preview": {
+          "$ref": "#/$defs/channel"
+        }
+      }
+    },
+    "checksums": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stable",
+        "preview"
+      ],
+      "properties": {
+        "stable": {
+          "$ref": "#/$defs/checksum"
+        },
+        "preview": {
+          "$ref": "#/$defs/checksum"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+      "maxLength": 64
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:[.](?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:[+][0-9A-Za-z-]+(?:[.][0-9A-Za-z-]+)*)?(?![\\s\\S])"
+    },
+    "artifact_reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_id",
+        "version",
+        "status"
+      ],
+      "properties": {
+        "artifact_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "version": {
+          "$ref": "#/$defs/version"
+        },
+        "status": {
+          "enum": [
+            "approved",
+            "candidate"
+          ]
+        }
+      }
+    },
+    "stable_artifact_reference": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/artifact_reference"
+        },
+        {
+          "properties": {
+            "status": {
+              "const": "approved"
+            }
+          }
+        }
+      ]
+    },
+    "bundle_reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bundle_id",
+        "version",
+        "status"
+      ],
+      "properties": {
+        "bundle_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "version": {
+          "$ref": "#/$defs/version"
+        },
+        "status": {
+          "enum": [
+            "approved",
+            "candidate"
+          ]
+        }
+      }
+    },
+    "stable_bundle_reference": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/bundle_reference"
+        },
+        {
+          "properties": {
+            "status": {
+              "const": "approved"
+            }
+          }
+        }
+      ]
+    },
+    "channel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "capabilities",
+        "artifacts",
+        "bundles"
+      ],
+      "properties": {
+        "capabilities": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/identifier"
+          }
+        },
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/artifact_reference"
+          }
+        },
+        "bundles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/bundle_reference"
+          }
+        }
+      }
+    },
+    "checksum": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}(?![\\s\\S])"
+    }
+  }
+}

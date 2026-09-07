@@ -1,0 +1,11 @@
+{
+  "schema_version": "clawdia-capability/v1",
+  "id": "source-review",
+  "label": "Source review",
+  "description": "Synthetic capability missing its approval contract.",
+  "domain": "research",
+  "risk_level": "low",
+  "data_classes": [
+    "public"
+  ]
+}
