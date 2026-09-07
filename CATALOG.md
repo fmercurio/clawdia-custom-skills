@@ -59,3 +59,37 @@ Nenhuma skill com outro status encontrada.
 | Categoria | Nome | Status | Descrição pública | Link |
 | --- | --- | --- | --- | --- |
 | note-taking | second-brain-kit | candidate | Hermes-native installable suite for bootstrapping a new Second Brain or connecting an existing Markdown vault, with profile-aware skills, FTS5, health checks, deterministic lifecycle scripts, rollback and optional OKF. | [second-brain-kit](packages/second-brain-kit/README.md) |
+
+## Projeções v1
+
+> Cobertura parcial: somente capability_catalog alimenta as projeções. A migração dos metadados legados pertence à issue #46.
+
+Elegibilidade no catálogo não concede permissão de instalação.
+
+### stable
+
+#### capabilities
+
+Nenhum registro.
+
+#### artifacts
+
+Nenhum registro.
+
+#### bundles
+
+Nenhum registro.
+
+### preview
+
+#### capabilities
+
+Nenhum registro.
+
+#### artifacts
+
+Nenhum registro.
+
+#### bundles
+
+Nenhum registro.
