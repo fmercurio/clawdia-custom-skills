@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -27,6 +28,10 @@ def write_registry(root: Path, entries: list[dict[str, str]]) -> None:
             lines.append(f"      {line}")
         lines.append("    installation:")
         lines.append(f"      repo_path: \"{entry['repo_path']}\"")
+    lines.extend(["capability_catalog:", "  schema_version: clawdia-capability-source/v1",
+                  "  capabilities: []", "  artifacts: []", "  bundles: []"])
+    if not (root / "schemas").exists():
+        shutil.copytree(REPO_ROOT / "schemas", root / "schemas")
     (root / "registry").mkdir(parents=True, exist_ok=True)
     (root / "registry" / "skills-registry.yaml").write_text("\n".join(lines) + "\n", encoding="utf-8")
 

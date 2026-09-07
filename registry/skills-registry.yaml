@@ -1343,3 +1343,10 @@ skills:
           installers, provider/OAuth/credit dependencies, automatic uploads,
           identity training, deploy and publication behavior. Approved by Felippe M.
           for global canonical installation with matrix-controlled profile use.
+
+# Explicit v1 metadata; entity migration is tracked separately.
+capability_catalog:
+  schema_version: clawdia-capability-source/v1
+  capabilities: []
+  artifacts: []
+  bundles: []

@@ -99,7 +99,7 @@ python3 tools/validate_capability_contract.py \
   tools/tests/fixtures/capability_catalog/v1/valid/capability.json
 ```
 
-Tipos aceitos: `capability`, `artifact`, `bundle` e `release`. O comando aceita
+Tipos aceitos: `capability`, `artifact`, `bundle`, `release` e `projection`. O comando aceita
 vários paths do mesmo tipo, imprime cada resultado e retorna código diferente de
 zero se qualquer documento ou schema for inválido. JSON com chaves duplicadas ou
 números não finitos também é recusado para evitar interpretações ambíguas.
@@ -120,3 +120,23 @@ Mudanças incompatíveis criam um novo diretório (`v2`, por exemplo), novas
 constantes de `schema_version` e novos `$id`. IDs de entidades não devem ser
 reaproveitados com outro significado. A publicação de conteúdo real e sua
 migração para estes contratos não fazem parte desta fundação.
+
+## `CatalogProjection`
+
+`catalog-projection.schema.json` é a quinta interface pública v1, gerada por
+`tools/generate_catalog.py`. Seu envelope fechado contém `schema_version:
+clawdia-catalog-projection/v1`, `channel`, `capabilities`, `artifacts`, `bundles`
+e `default_installable_artifacts`. As definições de entidades são cópias
+mecanicamente derivadas dos contratos canônicos, com referências locais e sem
+IDs embutidos. `generate_catalog.py --check` detecta deriva dessas cópias.
+
+```bash
+python3 tools/validate_capability_contract.py --schema projection dist/catalog.v1.json dist/catalog.preview.v1.json
+```
+
+A CLI aplica também as relações semânticas, sem resolver ou autorizar instalação.
+Stable contém apenas approved; preview permite também candidate, sem torná-lo
+instalável por padrão. As projeções reais estão vazias até a migração #46.
+Os sidecars verificam integridade de bytes; não autenticam publicadores nem
+substituem o manifesto CatalogRelease, cuja publicação pertence à issue #47.
+Veja [fonte, fechamento, elegibilidade e limites](../../../docs/catalog-projections.md).

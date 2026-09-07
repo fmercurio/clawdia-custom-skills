@@ -1,0 +1,638 @@
+{
+  "$defs": {
+    "artifact": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "risk_level": {
+                "enum": [
+                  "medium",
+                  "high"
+                ]
+              }
+            },
+            "required": [
+              "risk_level"
+            ]
+          },
+          "then": {
+            "properties": {
+              "requires_approval": {
+                "const": true
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "framework"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "delivery_mode": {
+                "const": "reference"
+              }
+            }
+          }
+        }
+      ],
+      "properties": {
+        "conflicts": {
+          "additionalProperties": false,
+          "properties": {
+            "artifacts": {
+              "items": {
+                "maxLength": 64,
+                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+                "type": "string"
+              },
+              "type": "array",
+              "uniqueItems": true
+            },
+            "capabilities": {
+              "items": {
+                "maxLength": 64,
+                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+                "type": "string"
+              },
+              "type": "array",
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "capabilities",
+            "artifacts"
+          ],
+          "type": "object"
+        },
+        "delivery_mode": {
+          "enum": [
+            "installable",
+            "managed",
+            "external",
+            "reference"
+          ]
+        },
+        "description": {
+          "maxLength": 1024,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 64,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "skill",
+            "package",
+            "tool",
+            "framework",
+            "template",
+            "integration"
+          ]
+        },
+        "label": {
+          "maxLength": 120,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "provides": {
+          "items": {
+            "maxLength": 64,
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "requires": {
+          "additionalProperties": false,
+          "properties": {
+            "artifacts": {
+              "items": {
+                "maxLength": 64,
+                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+                "type": "string"
+              },
+              "type": "array",
+              "uniqueItems": true
+            },
+            "capabilities": {
+              "items": {
+                "maxLength": 64,
+                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+                "type": "string"
+              },
+              "type": "array",
+              "uniqueItems": true
+            },
+            "runtime_features": {
+              "items": {
+                "maxLength": 64,
+                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+                "type": "string"
+              },
+              "type": "array",
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "capabilities",
+            "artifacts",
+            "runtime_features"
+          ],
+          "type": "object"
+        },
+        "requires_approval": {
+          "type": "boolean"
+        },
+        "risk_level": {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "runtime_compatibility": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "max_version_exclusive": {
+                "pattern": "^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:[.](?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:[+][0-9A-Za-z-]+(?:[.][0-9A-Za-z-]+)*)?(?![\\s\\S])",
+                "type": "string"
+              },
+              "min_version": {
+                "pattern": "^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:[.](?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:[+][0-9A-Za-z-]+(?:[.][0-9A-Za-z-]+)*)?(?![\\s\\S])",
+                "type": "string"
+              },
+              "runtime": {
+                "maxLength": 64,
+                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+                "type": "string"
+              }
+            },
+            "required": [
+              "runtime",
+              "min_version"
+            ],
+            "type": "object"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "schema_version": {
+          "const": "clawdia-artifact/v1"
+        },
+        "status": {
+          "enum": [
+            "draft",
+            "candidate",
+            "approved",
+            "profile-overlay",
+            "deprecated",
+            "rejected"
+          ]
+        },
+        "version": {
+          "pattern": "^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:[.](?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:[+][0-9A-Za-z-]+(?:[.][0-9A-Za-z-]+)*)?(?![\\s\\S])",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema_version",
+        "id",
+        "label",
+        "description",
+        "kind",
+        "delivery_mode",
+        "status",
+        "version",
+        "provides",
+        "requires",
+        "conflicts",
+        "runtime_compatibility",
+        "risk_level",
+        "requires_approval"
+      ],
+      "title": "ClawdIA Artifact v1",
+      "type": "object"
+    },
+    "bundle": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "risk_level": {
+                "enum": [
+                  "medium",
+                  "high"
+                ]
+              }
+            },
+            "required": [
+              "risk_level"
+            ]
+          },
+          "then": {
+            "properties": {
+              "requires_approval": {
+                "const": true
+              }
+            }
+          }
+        }
+      ],
+      "properties": {
+        "artifacts": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "artifact_id": {
+                "maxLength": 64,
+                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+                "type": "string"
+              },
+              "required": {
+                "type": "boolean"
+              },
+              "version": {
+                "pattern": "^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:[.](?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:[+][0-9A-Za-z-]+(?:[.][0-9A-Za-z-]+)*)?(?![\\s\\S])",
+                "type": "string"
+              }
+            },
+            "required": [
+              "artifact_id",
+              "version",
+              "required"
+            ],
+            "type": "object"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "capabilities": {
+          "items": {
+            "maxLength": 64,
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "conflicts": {
+          "additionalProperties": false,
+          "properties": {
+            "bundles": {
+              "items": {
+                "maxLength": 64,
+                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+                "type": "string"
+              },
+              "type": "array",
+              "uniqueItems": true
+            },
+            "capabilities": {
+              "items": {
+                "maxLength": 64,
+                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+                "type": "string"
+              },
+              "type": "array",
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "capabilities",
+            "bundles"
+          ],
+          "type": "object"
+        },
+        "description": {
+          "maxLength": 1024,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 64,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 120,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "requires": {
+          "additionalProperties": false,
+          "properties": {
+            "bundles": {
+              "items": {
+                "maxLength": 64,
+                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+                "type": "string"
+              },
+              "type": "array",
+              "uniqueItems": true
+            },
+            "capabilities": {
+              "items": {
+                "maxLength": 64,
+                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+                "type": "string"
+              },
+              "type": "array",
+              "uniqueItems": true
+            },
+            "runtime_features": {
+              "items": {
+                "maxLength": 64,
+                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+                "type": "string"
+              },
+              "type": "array",
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "capabilities",
+            "bundles",
+            "runtime_features"
+          ],
+          "type": "object"
+        },
+        "requires_approval": {
+          "type": "boolean"
+        },
+        "risk_level": {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "schema_version": {
+          "const": "clawdia-bundle/v1"
+        },
+        "status": {
+          "enum": [
+            "draft",
+            "candidate",
+            "approved",
+            "deprecated",
+            "rejected"
+          ]
+        },
+        "version": {
+          "pattern": "^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:[.](?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:[+][0-9A-Za-z-]+(?:[.][0-9A-Za-z-]+)*)?(?![\\s\\S])",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema_version",
+        "id",
+        "label",
+        "description",
+        "version",
+        "status",
+        "artifacts",
+        "capabilities",
+        "requires",
+        "conflicts",
+        "risk_level",
+        "requires_approval"
+      ],
+      "title": "ClawdIA Bundle v1",
+      "type": "object"
+    },
+    "capability": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "risk_level": {
+                "enum": [
+                  "medium",
+                  "high"
+                ]
+              }
+            },
+            "required": [
+              "risk_level"
+            ]
+          },
+          "then": {
+            "properties": {
+              "requires_approval": {
+                "const": true
+              }
+            }
+          }
+        }
+      ],
+      "properties": {
+        "data_classes": {
+          "items": {
+            "enum": [
+              "public",
+              "internal",
+              "confidential",
+              "restricted",
+              "personal",
+              "financial",
+              "health",
+              "credentials"
+            ]
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "description": {
+          "maxLength": 1024,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "domain": {
+          "maxLength": 64,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 64,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 120,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "requires_approval": {
+          "type": "boolean"
+        },
+        "risk_level": {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "schema_version": {
+          "const": "clawdia-capability/v1"
+        }
+      },
+      "required": [
+        "schema_version",
+        "id",
+        "label",
+        "description",
+        "domain",
+        "risk_level",
+        "data_classes",
+        "requires_approval"
+      ],
+      "title": "ClawdIA Capability v1",
+      "type": "object"
+    }
+  },
+  "$id": "urn:clawdia:capability-catalog:v1:projection",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "channel": {
+            "const": "stable"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "artifacts": {
+            "items": {
+              "properties": {
+                "status": {
+                  "enum": [
+                    "approved"
+                  ]
+                }
+              }
+            }
+          },
+          "bundles": {
+            "items": {
+              "properties": {
+                "status": {
+                  "enum": [
+                    "approved"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "channel": {
+            "const": "preview"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "artifacts": {
+            "items": {
+              "properties": {
+                "status": {
+                  "enum": [
+                    "approved",
+                    "candidate"
+                  ]
+                }
+              }
+            }
+          },
+          "bundles": {
+            "items": {
+              "properties": {
+                "status": {
+                  "enum": [
+                    "approved",
+                    "candidate"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "properties": {
+    "artifacts": {
+      "items": {
+        "$ref": "#/$defs/artifact"
+      },
+      "type": "array"
+    },
+    "bundles": {
+      "items": {
+        "$ref": "#/$defs/bundle"
+      },
+      "type": "array"
+    },
+    "capabilities": {
+      "items": {
+        "$ref": "#/$defs/capability"
+      },
+      "type": "array"
+    },
+    "channel": {
+      "enum": [
+        "stable",
+        "preview"
+      ]
+    },
+    "default_installable_artifacts": {
+      "items": {
+        "maxLength": 64,
+        "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+        "type": "string"
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
+    "schema_version": {
+      "const": "clawdia-catalog-projection/v1"
+    }
+  },
+  "required": [
+    "schema_version",
+    "channel",
+    "capabilities",
+    "artifacts",
+    "bundles",
+    "default_installable_artifacts"
+  ],
+  "type": "object"
+}

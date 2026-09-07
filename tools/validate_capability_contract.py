@@ -21,6 +21,7 @@ SCHEMA_FILES = {
     "bundle": "bundle.schema.json",
     "capability": "capability.schema.json",
     "release": "catalog-release.schema.json",
+    "projection": "catalog-projection.schema.json",
 }
 
 
@@ -71,21 +72,32 @@ def reject_external_schema_references(schema: Any, path: tuple[object, ...] = ()
 
 
 def validate_file(document_path: Path, schema_path: Path) -> list[str]:
-    schema = load_json(schema_path)
+    return validate_document(load_json(document_path), load_json(schema_path),
+                             schema_path.name, document_path)
+
+
+def validate_document(document: Any, schema: Any, schema_name: str,
+                      document_path: Path = Path('<memory>')) -> list[str]:
+    """Reuse structural and entity semantic validation without temporary files."""
     reject_external_schema_references(schema)
     Draft202012Validator.check_schema(schema)
-    document = load_json(document_path)
     validator = Draft202012Validator(schema, format_checker=FormatChecker())
     errors = [
         format_error(document_path, error.absolute_path, error.message)
         for error in sorted(validator.iter_errors(document), key=lambda item: list(item.absolute_path))
     ]
-    if not errors and schema_path.name == "artifact.schema.json":
+    if not errors and schema_name == "artifact.schema.json":
         errors.extend(validate_artifact_relations(document_path, document))
-    if not errors and schema_path.name == "bundle.schema.json":
+    if not errors and schema_name == "bundle.schema.json":
         errors.extend(validate_bundle_relations(document_path, document))
-    if not errors and schema_path.name == "catalog-release.schema.json":
+    if not errors and schema_name == "catalog-release.schema.json":
         errors.extend(validate_release_relations(document_path, document))
+    if not errors and schema_name == "catalog-projection.schema.json":
+        if __package__:
+            from .catalog_projection import validate_projection
+        else:
+            from catalog_projection import validate_projection
+        errors.extend(validate_projection(document))
     return errors
 
 

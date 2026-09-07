@@ -15,6 +15,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Sequence, Tuple
 
+if __package__:
+    from .catalog_source import SourceError, load_source
+else:
+    from catalog_source import SourceError, load_source
+
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 LINE_TERM = "\n"
@@ -48,162 +53,20 @@ class CatalogEntry:
     kind: str  # "skill" | "package"
 
 
-def _count_indent(line: str) -> int:
-    return len(line) - len(line.lstrip(" "))
-
-
 def _strip_quotes(value: str) -> str:
     text = value.strip()
-    if (text.startswith('"') and text.endswith('"')) or (
-        text.startswith("'") and text.endswith("'")
-    ):
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in "\"'":
         return text[1:-1]
     return text
 
 
-def _unfold_scalar(lines: Sequence[str], start_idx: int, indent: int) -> Tuple[str, int]:
-    i = start_idx + 1
-    content = []
-    while i < len(lines):
-        line = lines[i]
-        line_indent = _count_indent(line)
-        if line_indent < indent + 2:
-            break
-        if line.strip() == "":
-            content.append("")
-        else:
-            content.append(line[indent + 2 :].rstrip())
-        i += 1
-    folded = "\n".join(content)
-    return folded.strip(), i
-
-
-def _scalar_value(raw_value: str) -> str:
-    return _strip_quotes(raw_value.strip())
-
-def _consume_nested_block(lines: Sequence[str], start_idx: int, indent: int) -> int:
-    i = start_idx
-    while i < len(lines):
-        if lines[i].strip() == "":
-            i += 1
-            continue
-        if _count_indent(lines[i]) <= indent:
-            break
-        i += 1
-    return i
-
-
-def _parse_installation_repo_path(
-    lines: Sequence[str],
-    start_idx: int,
-    parent_indent: int,
-) -> Tuple[str | None, int]:
-    i = start_idx
-    repo_path = None
-
-    while i < len(lines):
-        line = lines[i]
-        if line.strip() == "":
-            i += 1
-            continue
-
-        indent = _count_indent(line)
-        if indent <= parent_indent:
-            break
-
-        install_key = re.match(r"^\s+repo_path:\s*(.*)$", line)
-        if indent == parent_indent + 2 and install_key:
-            repo_path = _scalar_value(install_key.group(1))
-            i = _consume_nested_block(lines, i + 1, indent)
-            break
-
-        i += 1
-
-    return repo_path, i
-
-
 def parse_registry_entries(registry_path: Path) -> Tuple[List[dict], List[str]]:
-    if not registry_path.exists():
-        return [], [f"registry not found: {registry_path}"]
-
-    raw_lines = registry_path.read_text(encoding="utf-8").splitlines()
-    errors: List[str] = []
-    entries: List[dict] = []
-
-    i = 0
-    while i < len(raw_lines) and raw_lines[i].strip() != "skills:":
-        i += 1
-    if i >= len(raw_lines):
-        return [], ["registry missing required top-level `skills:` key"]
-    i += 1
-
-    while i < len(raw_lines):
-        line = raw_lines[i]
-        if line.strip() == "":
-            i += 1
-            continue
-        if _count_indent(line) < 2:
-            i += 1
-            continue
-
-        item_match = re.match(r"^\s{2}-\s+name:\s*(.*)$", line)
-        if not item_match:
-            i += 1
-            continue
-
-        name = _strip_quotes(item_match.group(1))
-        entry: dict[str, object] = {"name": name}
-        i += 1
-
-        while i < len(raw_lines):
-            current = raw_lines[i]
-            if current.strip() == "":
-                i += 1
-                continue
-            indent = _count_indent(current)
-            if indent < 2:
-                break
-            if indent < 4:
-                break
-
-            if indent == 4:
-                field = re.match(r"^\s+([A-Za-z0-9_]+):\s*(.*)$", current)
-                if not field:
-                    i += 1
-                    continue
-
-                key = field.group(1)
-                value = field.group(2)
-                if value.strip() == "":
-                    if key == "installation":
-                        repo_path, i = _parse_installation_repo_path(raw_lines, i + 1, 4)
-                        if repo_path:
-                            entry["repo_path"] = repo_path
-                        else:
-                            errors.append(
-                                f"{name}: installation.repo_path missing or malformed"
-                            )
-                    else:
-                        i = _consume_nested_block(raw_lines, i + 1, 4)
-                    continue
-
-                if value.lstrip().startswith(">"):
-                    parsed, next_idx = _unfold_scalar(raw_lines, i, 4)
-                    entry[key] = parsed
-                    i = next_idx
-                    continue
-
-                entry[key] = _scalar_value(value)
-                i += 1
-                continue
-
-            i += 1
-
-        entries.append(entry)
-
-    if not entries:
-        errors.append("registry had no entries under `skills:`")
-    return entries, errors
+    try:
+        document = load_source(registry_path, require_capability_catalog=False)
+    except SourceError as exc:
+        return [], [str(exc)]
+    return [dict(entry, repo_path=entry['installation']['repo_path'])
+            for entry in document['skills']], []
 
 
 def parse_frontmatter_name(skill_file: Path) -> Tuple[str | None, List[str]]:
@@ -504,37 +367,87 @@ def generate_catalog_text(
     return render_catalog(entries), []
 
 
+def validate_output_paths(root, registry_path, markdown, generated):
+    """Preflight static paths in a trusted checkout, before creating directories."""
+    destinations = [markdown, *generated]
+    resolved = [path.resolve() for path in destinations]
+    if len(set(resolved)) != len(resolved):
+        raise SourceError('output collision')
+    for path in destinations:
+        # Normalize system-level aliases above the trusted checkout only.
+        relative = path.absolute().relative_to(root)
+        if '..' in relative.parts:
+            raise SourceError('output traversal')
+        for current in [path, *path.parents]:
+            if current == root:
+                break
+            if current.is_symlink():
+                raise SourceError('symlink output or ancestor')
+            if current != path and current.exists() and not current.is_dir():
+                raise SourceError('output ancestor is not a directory')
+        if path.exists() and (not path.is_file() or path.stat().st_nlink != 1):
+            raise SourceError('output is not an unaliased regular file')
+        if path.resolve() == registry_path.resolve():
+            raise SourceError('output aliases registry')
+    relative = markdown.relative_to(root)
+    if (markdown.suffix != '.md' or relative.parts[0] in {
+            'registry', 'schemas', 'tools', 'skills', 'packages', '.git', '.agents', '.codex', 'dist'}):
+        raise SourceError('Markdown output collides with source area')
+    if markdown.exists() and markdown != root / 'CATALOG.md':
+        if b'> **Arquivo gerado' not in markdown.read_bytes():
+            raise SourceError('Markdown output would replace a source file')
+
+
 def run_generation(
     root: Path,
     registry_path: Path,
     output_path: Path,
     check: bool,
 ) -> int:
+    # Inventory consumers import the parser without loading projection tooling.
+    from jsonschema.exceptions import SchemaError
+    if __package__:
+        from .catalog_projection import human_sections, projection_outputs, validate_source_entities
+    else:
+        from catalog_projection import human_sections, projection_outputs, validate_source_entities
+
     catalog_text, errors = generate_catalog_text(root, registry_path)
     if errors:
+        # Retain actionable categories without echoing arbitrary source values.
+        categories = (
+            "filesystem skill without registry entry", "missing SKILL.md",
+            "missing README.md", "frontmatter name mismatch",
+            "must be `skills/<category>/<name>`", "must be `packages/<name>`",
+        )
         for err in errors:
-            print(f"ERROR: {err}", file=sys.stderr)
+            reason = next((category for category in categories if category in err),
+                          "invalid registry metadata or source")
+            print(f"ERROR: {reason}", file=sys.stderr)
         return 1
 
+    try:
+        document = load_source(registry_path)
+        source = document['capability_catalog']
+        validate_source_entities(source, document['skills'], root / 'schemas/capability-catalog/v1')
+        catalog_text += human_sections(source)
+        generated = projection_outputs(root, source)
+        validate_output_paths(root, registry_path, output_path, generated)
+        outputs = {output_path: catalog_text.encode('utf-8'), **generated}
+    except (ValueError, OSError, RecursionError, SchemaError):
+        print("ERROR: invalid catalog input or schema", file=sys.stderr)
+        return 1
     if check:
-        if not output_path.exists():
-            print(
-                f"ERROR: --check failed because {output_path} is missing",
-                file=sys.stderr,
-            )
+        stale = [path for path, data in outputs.items()
+                 if not path.exists() or path.read_bytes() != data]
+        if stale:
+            print("ERROR: generated output missing or stale", file=sys.stderr)
             return 1
-        existing = output_path.read_text(encoding="utf-8")
-        if existing != catalog_text:
-            print(
-                f"ERROR: {output_path} is stale. Re-run `python3 tools/generate_catalog.py`.",
-                file=sys.stderr,
-            )
-            return 1
-        print(f"{output_path} is up to date.")
+        print("Generated outputs are up to date.")
         return 0
-
-    output_path.write_text(catalog_text, encoding="utf-8")
-    print(f"Generated {output_path}")
+    for path, data in outputs.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+    print("Generated catalog outputs.")
     return 0
 
 
@@ -563,6 +476,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
+    original_root = args.root.absolute()
+    args.root = args.root.resolve()
+    if args.output is not None:
+        try:
+            args.output = args.root / args.output.absolute().relative_to(original_root)
+        except ValueError:
+            args.output = args.output.absolute()
     if args.registry is None:
         args.registry = args.root / "registry" / "skills-registry.yaml"
     if args.output is None:

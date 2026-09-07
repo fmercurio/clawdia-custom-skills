@@ -80,3 +80,22 @@ de um PR não instala nem habilita automaticamente uma skill no runtime Hermes.
 - **Segurança primeiro**: scripts read-only por padrão, sem hardcoded secrets
 - **Company-agnostic**: valores específicos via config, nunca hardcoded
 - **Pacotes permanecem candidates** até que clean-room E2E, checksums e revisão humana passem
+
+## Projeções do catálogo v1
+
+`registry/skills-registry.yaml` continua sendo a única fonte de metadados.
+O bloco explícito `capability_catalog` alimenta os JSONs stable/preview e as
+seções v1 de `CATALOG.md`. As projeções reais permanecem vazias até a migração
+planejada na issue #46; os registros legados continuam no catálogo humano.
+
+```bash
+python3 tools/generate_catalog.py
+python3 tools/generate_catalog.py --check
+python3 tools/validate_capability_contract.py --schema projection dist/catalog.v1.json dist/catalog.preview.v1.json
+(cd dist && shasum -a 256 -c catalog.v1.json.sha256 catalog.preview.v1.json.sha256)
+```
+
+As dependências estão fixadas em `requirements-dev.txt`. O pipeline é local,
+sem rede, relógio ou consulta à branch Git. Elegibilidade de catálogo não
+concede autorização de instalação. Veja [fonte, canais e limites](docs/catalog-projections.md)
+e o [contrato público v1](schemas/capability-catalog/v1/README.md).

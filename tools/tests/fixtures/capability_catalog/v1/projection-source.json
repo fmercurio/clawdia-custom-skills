@@ -1,0 +1,243 @@
+{
+  "schema_version": "clawdia-capability-source/v1",
+  "capabilities": [
+    {
+      "schema_version": "clawdia-capability/v1",
+      "id": "source-review",
+      "label": "Source review",
+      "description": "Review synthetic public source material and produce a traceable summary.",
+      "domain": "research",
+      "risk_level": "low",
+      "data_classes": [
+        "public"
+      ],
+      "requires_approval": false
+    }
+  ],
+  "artifacts": [
+    {
+      "schema_version": "clawdia-artifact/v1",
+      "id": "review-method-framework",
+      "label": "Review method framework",
+      "description": "Synthetic reference framework for organizing source reviews.",
+      "kind": "framework",
+      "delivery_mode": "reference",
+      "status": "approved",
+      "version": "1.0.0",
+      "provides": [
+        "source-review"
+      ],
+      "requires": {
+        "capabilities": [],
+        "artifacts": [],
+        "runtime_features": []
+      },
+      "conflicts": {
+        "capabilities": [],
+        "artifacts": []
+      },
+      "runtime_compatibility": [
+        {
+          "runtime": "hermes",
+          "min_version": "1.0.0"
+        }
+      ],
+      "risk_level": "low",
+      "requires_approval": false
+    },
+    {
+      "schema_version": "clawdia-artifact/v1",
+      "id": "public-source-integration",
+      "label": "Public source integration",
+      "description": "Synthetic external integration that supplies public source material.",
+      "kind": "integration",
+      "delivery_mode": "external",
+      "status": "approved",
+      "version": "1.0.0",
+      "provides": [
+        "source-review"
+      ],
+      "requires": {
+        "capabilities": [],
+        "artifacts": [],
+        "runtime_features": [
+          "outbound-https"
+        ]
+      },
+      "conflicts": {
+        "capabilities": [],
+        "artifacts": []
+      },
+      "runtime_compatibility": [
+        {
+          "runtime": "hermes",
+          "min_version": "1.0.0"
+        }
+      ],
+      "risk_level": "low",
+      "requires_approval": false
+    },
+    {
+      "schema_version": "clawdia-artifact/v1",
+      "id": "research-foundation-package",
+      "label": "Research foundation package",
+      "description": "Synthetic package grouping a public-source review workflow.",
+      "kind": "package",
+      "delivery_mode": "installable",
+      "status": "approved",
+      "version": "1.0.0-rc.1",
+      "provides": [
+        "source-review"
+      ],
+      "requires": {
+        "capabilities": [],
+        "artifacts": [
+          "source-review-skill"
+        ],
+        "runtime_features": []
+      },
+      "conflicts": {
+        "capabilities": [],
+        "artifacts": []
+      },
+      "runtime_compatibility": [
+        {
+          "runtime": "hermes",
+          "min_version": "1.0.0"
+        }
+      ],
+      "risk_level": "low",
+      "requires_approval": false
+    },
+    {
+      "schema_version": "clawdia-artifact/v1",
+      "id": "source-review-skill",
+      "label": "Source review skill",
+      "description": "Synthetic installable skill for reviewing public source material.",
+      "kind": "skill",
+      "delivery_mode": "installable",
+      "status": "approved",
+      "version": "1.0.0",
+      "provides": [
+        "source-review"
+      ],
+      "requires": {
+        "capabilities": [],
+        "artifacts": [],
+        "runtime_features": [
+          "public-web-read"
+        ]
+      },
+      "conflicts": {
+        "capabilities": [],
+        "artifacts": []
+      },
+      "runtime_compatibility": [
+        {
+          "runtime": "hermes",
+          "min_version": "1.0.0"
+        }
+      ],
+      "risk_level": "low",
+      "requires_approval": false
+    },
+    {
+      "schema_version": "clawdia-artifact/v1",
+      "id": "summary-draft-template",
+      "label": "Summary draft template",
+      "description": "Synthetic installable template for a traceable review summary.",
+      "kind": "template",
+      "delivery_mode": "installable",
+      "status": "approved",
+      "version": "1.0.0-rc.1",
+      "provides": [
+        "source-review"
+      ],
+      "requires": {
+        "capabilities": [],
+        "artifacts": [],
+        "runtime_features": []
+      },
+      "conflicts": {
+        "capabilities": [],
+        "artifacts": []
+      },
+      "runtime_compatibility": [
+        {
+          "runtime": "hermes",
+          "min_version": "1.0.0"
+        }
+      ],
+      "risk_level": "low",
+      "requires_approval": false
+    },
+    {
+      "schema_version": "clawdia-artifact/v1",
+      "id": "source-index-tool",
+      "label": "Source index tool",
+      "description": "Synthetic managed tool that indexes public source metadata.",
+      "kind": "tool",
+      "delivery_mode": "managed",
+      "status": "approved",
+      "version": "1.0.0",
+      "provides": [
+        "source-review"
+      ],
+      "requires": {
+        "capabilities": [],
+        "artifacts": [],
+        "runtime_features": [
+          "managed-index"
+        ]
+      },
+      "conflicts": {
+        "capabilities": [],
+        "artifacts": []
+      },
+      "runtime_compatibility": [
+        {
+          "runtime": "hermes",
+          "min_version": "1.0.0"
+        }
+      ],
+      "risk_level": "low",
+      "requires_approval": false
+    }
+  ],
+  "bundles": [
+    {
+      "schema_version": "clawdia-bundle/v1",
+      "id": "research-foundation",
+      "label": "Research foundation",
+      "description": "Synthetic bundle that composes public-source review artifacts.",
+      "version": "1.0.0",
+      "status": "approved",
+      "artifacts": [
+        {
+          "artifact_id": "source-review-skill",
+          "version": "1.0.0",
+          "required": true
+        },
+        {
+          "artifact_id": "summary-draft-template",
+          "version": "1.0.0-rc.1",
+          "required": true
+        }
+      ],
+      "capabilities": [
+        "source-review"
+      ],
+      "requires": {
+        "capabilities": [],
+        "bundles": [],
+        "runtime_features": []
+      },
+      "conflicts": {
+        "capabilities": [],
+        "bundles": []
+      },
+      "risk_level": "low",
+      "requires_approval": false
+    }
+  ]
+}
