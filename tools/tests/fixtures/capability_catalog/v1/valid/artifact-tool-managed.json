@@ -1,0 +1,25 @@
+{
+  "schema_version": "clawdia-artifact/v1",
+  "id": "source-index-tool",
+  "label": "Source index tool",
+  "description": "Synthetic managed tool that indexes public source metadata.",
+  "kind": "tool",
+  "delivery_mode": "managed",
+  "status": "approved",
+  "version": "1.0.0",
+  "provides": ["source-review"],
+  "requires": {
+    "capabilities": [],
+    "artifacts": [],
+    "runtime_features": ["managed-index"]
+  },
+  "conflicts": {
+    "capabilities": [],
+    "artifacts": []
+  },
+  "runtime_compatibility": [
+    {"runtime": "hermes", "min_version": "1.0.0"}
+  ],
+  "risk_level": "low",
+  "requires_approval": false
+}

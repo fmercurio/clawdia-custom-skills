@@ -1,0 +1,17 @@
+{
+  "schema_version": "clawdia-bundle/v1",
+  "id": "research-foundation",
+  "label": "Research foundation",
+  "description": "Synthetic bundle with an undeclared activation field.",
+  "version": "1.0.0",
+  "status": "approved",
+  "artifacts": [
+    {"artifact_id": "source-review-skill", "version": "1.0.0", "required": true}
+  ],
+  "capabilities": ["source-review"],
+  "requires": {"capabilities": [], "bundles": [], "runtime_features": []},
+  "conflicts": {"capabilities": [], "bundles": []},
+  "risk_level": "low",
+  "requires_approval": false,
+  "auto_apply": true
+}

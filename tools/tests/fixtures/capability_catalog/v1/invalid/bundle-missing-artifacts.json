@@ -1,0 +1,13 @@
+{
+  "schema_version": "clawdia-bundle/v1",
+  "id": "research-foundation",
+  "label": "Research foundation",
+  "description": "Synthetic bundle missing its artifact composition.",
+  "version": "1.0.0",
+  "status": "approved",
+  "capabilities": ["source-review"],
+  "requires": {"capabilities": [], "bundles": [], "runtime_features": []},
+  "conflicts": {"capabilities": [], "bundles": []},
+  "risk_level": "low",
+  "requires_approval": false
+}

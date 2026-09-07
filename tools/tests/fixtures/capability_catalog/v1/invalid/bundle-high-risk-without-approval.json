@@ -1,0 +1,16 @@
+{
+  "schema_version": "clawdia-bundle/v1",
+  "id": "restricted-foundation",
+  "label": "Restricted foundation",
+  "description": "Synthetic high-risk bundle without approval.",
+  "version": "1.0.0",
+  "status": "approved",
+  "artifacts": [
+    {"artifact_id": "restricted-operation-tool", "version": "1.0.0", "required": true}
+  ],
+  "capabilities": ["account-change"],
+  "requires": {"capabilities": [], "bundles": [], "runtime_features": []},
+  "conflicts": {"capabilities": [], "bundles": []},
+  "risk_level": "high",
+  "requires_approval": false
+}

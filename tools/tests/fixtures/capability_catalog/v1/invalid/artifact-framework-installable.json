@@ -1,0 +1,16 @@
+{
+  "schema_version": "clawdia-artifact/v1",
+  "id": "review-method-framework",
+  "label": "Review method framework",
+  "description": "Synthetic framework incorrectly marked as installable.",
+  "kind": "framework",
+  "delivery_mode": "installable",
+  "status": "approved",
+  "version": "1.0.0",
+  "provides": ["source-review"],
+  "requires": {"capabilities": [], "artifacts": [], "runtime_features": []},
+  "conflicts": {"capabilities": [], "artifacts": []},
+  "runtime_compatibility": [{"runtime": "hermes", "min_version": "1.0.0"}],
+  "risk_level": "low",
+  "requires_approval": false
+}

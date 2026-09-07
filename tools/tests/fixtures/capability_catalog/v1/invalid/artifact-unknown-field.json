@@ -1,0 +1,17 @@
+{
+  "schema_version": "clawdia-artifact/v1",
+  "id": "source-review-skill",
+  "label": "Source review skill",
+  "description": "Synthetic artifact with an undeclared activation field.",
+  "kind": "skill",
+  "delivery_mode": "installable",
+  "status": "approved",
+  "version": "1.0.0",
+  "provides": ["source-review"],
+  "requires": {"capabilities": [], "artifacts": [], "runtime_features": []},
+  "conflicts": {"capabilities": [], "artifacts": []},
+  "runtime_compatibility": [{"runtime": "hermes", "min_version": "1.0.0"}],
+  "risk_level": "low",
+  "requires_approval": false,
+  "active": true
+}

@@ -1,0 +1,11 @@
+{
+  "schema_version": "clawdia-capability/v1",
+  "id": "source-review",
+  "label": "Source review",
+  "description": "First synthetic description.",
+  "description": "Second synthetic description.",
+  "domain": "research",
+  "risk_level": "low",
+  "data_classes": ["public"],
+  "requires_approval": false
+}

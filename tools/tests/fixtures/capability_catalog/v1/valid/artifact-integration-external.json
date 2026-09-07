@@ -1,0 +1,25 @@
+{
+  "schema_version": "clawdia-artifact/v1",
+  "id": "public-source-integration",
+  "label": "Public source integration",
+  "description": "Synthetic external integration that supplies public source material.",
+  "kind": "integration",
+  "delivery_mode": "external",
+  "status": "approved",
+  "version": "1.0.0",
+  "provides": ["source-review"],
+  "requires": {
+    "capabilities": [],
+    "artifacts": [],
+    "runtime_features": ["outbound-https"]
+  },
+  "conflicts": {
+    "capabilities": [],
+    "artifacts": []
+  },
+  "runtime_compatibility": [
+    {"runtime": "hermes", "min_version": "1.0.0"}
+  ],
+  "risk_level": "low",
+  "requires_approval": false
+}

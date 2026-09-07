@@ -6,6 +6,9 @@ Consulte o [Catálogo de skills e packages](CATALOG.md) para o inventário públ
 os status de governança e as descrições atualizadas. O catálogo é gerado a partir
 da fonte canônica `registry/skills-registry.yaml`.
 
+Os contratos machine-readable de capabilities, artifacts, bundles e releases
+estão documentados em [`schemas/capability-catalog/v1/`](schemas/capability-catalog/v1/README.md).
+
 ## Visão geral
 
 Este repo é a **fonte canônica** das skills desenvolvidas, melhoradas ou validadas pela equipe. Skills aqui passaram por auditoria de segurança, conformidade de frontmatter e aprovação humana antes de serem instaladas no runtime Hermes.
@@ -31,10 +34,13 @@ custom-skills/
 │       └── tests/                    # Unitários e clean-room E2E
 ├── registry/
 │   └── skills-registry.yaml         # Registro de todas as skills (status, proveniência, decisão)
+├── schemas/
+│   └── capability-catalog/v1/       # Contratos públicos de capability, artifact, bundle e release
 ├── docs/
 │   └── governance.md                # Política de governança
 └── tools/
-    └── validate_skill.py            # Validador de frontmatter e estrutura
+    ├── validate_skill.py            # Validador de frontmatter e estrutura
+    └── validate_capability_contract.py # Validador fail-closed dos contratos do catálogo
 ```
 
 ## Fluxo de trabalho

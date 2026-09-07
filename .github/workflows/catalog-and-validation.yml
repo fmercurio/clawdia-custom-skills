@@ -22,11 +22,11 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install declarative planner test dependency
-        run: python3 -m pip install --disable-pip-version-check "PyYAML==6.0.2"
+      - name: Install test dependencies
+        run: python3 -m pip install --disable-pip-version-check -r requirements-dev.txt
 
-      - name: Run catalog-focused unit tests
-        run: python3 -m unittest discover -s tools/tests -p "test_generate_catalog.py"
+      - name: Run repository tooling unit tests
+        run: python3 -m unittest discover -s tools/tests -p "test_*.py" -v
 
       - name: Run llm-wiki staging validator tests
         run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest skills/research/llm-wiki/tests/test_validate_staging.py -v

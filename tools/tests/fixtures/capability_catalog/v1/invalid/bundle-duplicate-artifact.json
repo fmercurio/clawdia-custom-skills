@@ -1,0 +1,17 @@
+{
+  "schema_version": "clawdia-bundle/v1",
+  "id": "research-foundation",
+  "label": "Research foundation",
+  "description": "Synthetic bundle whose artifact reference is duplicated.",
+  "version": "1.0.0",
+  "status": "approved",
+  "artifacts": [
+    {"artifact_id": "source-review-skill", "version": "1.0.0", "required": true},
+    {"artifact_id": "source-review-skill", "version": "1.0.0", "required": false}
+  ],
+  "capabilities": ["source-review"],
+  "requires": {"capabilities": [], "bundles": [], "runtime_features": []},
+  "conflicts": {"capabilities": [], "bundles": []},
+  "risk_level": "low",
+  "requires_approval": false
+}

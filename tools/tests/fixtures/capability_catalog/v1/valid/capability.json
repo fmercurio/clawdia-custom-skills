@@ -1,0 +1,12 @@
+{
+  "schema_version": "clawdia-capability/v1",
+  "id": "source-review",
+  "label": "Source review",
+  "description": "Review synthetic public source material and produce a traceable summary.",
+  "domain": "research",
+  "risk_level": "low",
+  "data_classes": [
+    "public"
+  ],
+  "requires_approval": false
+}

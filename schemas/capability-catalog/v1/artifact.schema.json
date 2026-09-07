@@ -1,0 +1,232 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:clawdia:capability-catalog:v1:artifact",
+  "title": "ClawdIA Artifact v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "id",
+    "label",
+    "description",
+    "kind",
+    "delivery_mode",
+    "status",
+    "version",
+    "provides",
+    "requires",
+    "conflicts",
+    "runtime_compatibility",
+    "risk_level",
+    "requires_approval"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "clawdia-artifact/v1"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+      "maxLength": 64
+    },
+    "label": {
+      "type": "string",
+      "pattern": "\\S",
+      "maxLength": 120
+    },
+    "description": {
+      "type": "string",
+      "pattern": "\\S",
+      "maxLength": 1024
+    },
+    "kind": {
+      "enum": [
+        "skill",
+        "package",
+        "tool",
+        "framework",
+        "template",
+        "integration"
+      ]
+    },
+    "delivery_mode": {
+      "enum": [
+        "installable",
+        "managed",
+        "external",
+        "reference"
+      ]
+    },
+    "status": {
+      "enum": [
+        "draft",
+        "candidate",
+        "approved",
+        "profile-overlay",
+        "deprecated",
+        "rejected"
+      ]
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:[.](?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:[+][0-9A-Za-z-]+(?:[.][0-9A-Za-z-]+)*)?(?![\\s\\S])"
+    },
+    "provides": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+        "maxLength": 64
+      }
+    },
+    "requires": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "capabilities",
+        "artifacts",
+        "runtime_features"
+      ],
+      "properties": {
+        "capabilities": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+            "maxLength": 64
+          }
+        },
+        "artifacts": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+            "maxLength": 64
+          }
+        },
+        "runtime_features": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+            "maxLength": 64
+          }
+        }
+      }
+    },
+    "conflicts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "capabilities",
+        "artifacts"
+      ],
+      "properties": {
+        "capabilities": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+            "maxLength": 64
+          }
+        },
+        "artifacts": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+            "maxLength": 64
+          }
+        }
+      }
+    },
+    "runtime_compatibility": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "runtime",
+          "min_version"
+        ],
+        "properties": {
+          "runtime": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+            "maxLength": 64
+          },
+          "min_version": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:[.](?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:[+][0-9A-Za-z-]+(?:[.][0-9A-Za-z-]+)*)?(?![\\s\\S])"
+          },
+          "max_version_exclusive": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:[.](?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:[+][0-9A-Za-z-]+(?:[.][0-9A-Za-z-]+)*)?(?![\\s\\S])"
+          }
+        }
+      }
+    },
+    "risk_level": {
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    "requires_approval": {
+      "type": "boolean"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "risk_level": {
+            "enum": [
+              "medium",
+              "high"
+            ]
+          }
+        },
+        "required": [
+          "risk_level"
+        ]
+      },
+      "then": {
+        "properties": {
+          "requires_approval": {
+            "const": true
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "framework"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "delivery_mode": {
+            "const": "reference"
+          }
+        }
+      }
+    }
+  ]
+}

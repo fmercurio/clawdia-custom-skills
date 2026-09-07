@@ -1,0 +1,12 @@
+{
+  "schema_version": "clawdia-capability/v1",
+  "id": "account-change",
+  "label": "Account change",
+  "description": "Synthetic high-risk capability without its required approval gate.",
+  "domain": "administration",
+  "risk_level": "high",
+  "data_classes": [
+    "restricted"
+  ],
+  "requires_approval": false
+}
