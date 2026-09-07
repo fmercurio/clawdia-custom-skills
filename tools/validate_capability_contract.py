@@ -89,6 +89,18 @@ def validate_file(document_path: Path, schema_path: Path) -> list[str]:
     return errors
 
 
+def semver_precedence_key(version: str) -> tuple:
+    """Order schema-validated SemVer values, ignoring build metadata."""
+    core, separator, prerelease = version.split("+", 1)[0].partition("-")
+    # Length + lexical order compares arbitrarily large integers without int().
+    core_key = tuple((len(part), part) for part in core.split("."))
+    prerelease_key = tuple(
+        (0, len(part), part) if part.isdigit() else (1, 0, part)
+        for part in prerelease.split(".")
+    ) if separator else ()
+    return core_key, not separator, prerelease_key
+
+
 def validate_artifact_relations(document_path: Path, document: Any) -> list[str]:
     if not isinstance(document, dict):
         return []
@@ -122,6 +134,15 @@ def validate_artifact_relations(document_path: Path, document: Any) -> list[str]
             f"{document_path}: capabilities cannot appear in both requires and conflicts: "
             f"{', '.join(capability_overlap)}"
         )
+    for index, compatibility in enumerate(document.get("runtime_compatibility", [])):
+        upper = compatibility.get("max_version_exclusive")
+        if upper is not None and semver_precedence_key(upper) <= semver_precedence_key(
+            compatibility["min_version"]
+        ):
+            errors.append(
+                f"{document_path}: runtime_compatibility.{index}.max_version_exclusive: "
+                "must be greater than min_version (SemVer precedence ignores build metadata)"
+            )
     return errors
 
 

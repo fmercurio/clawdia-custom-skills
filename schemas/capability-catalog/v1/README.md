@@ -37,7 +37,9 @@ capabilities.
 - `version`: SemVer exata;
 - `provides`, `requires` e `conflicts`: relações por ID estável;
 - `runtime_compatibility`: runtime e limite mínimo obrigatório, com limite
-  máximo exclusivo opcional;
+  máximo exclusivo opcional. Quando presente, o máximo deve ser estritamente
+  maior que o mínimo segundo a precedência SemVer: prereleases precedem a versão
+  final e metadados de build não alteram a ordem. A CLI verifica essa relação;
 - `risk_level` e `requires_approval`.
 
 Frameworks são sempre `reference`. O contrato não autoriza instalação: até um
@@ -55,7 +57,10 @@ requisitos, conflitos, risco e aprovação explícitos.
 Manifesto imutável de uma projeção do catálogo:
 
 - `release_id`: SemVer sem metadados de build (`+...`) nesta versão do contrato;
-- `created_at`: timestamp UTC terminado em `Z`;
+- `created_at`: perfil UTC de RFC 3339, `YYYY-MM-DDTHH:MM:SS[.fração]Z`, com
+  `T`/`Z` maiúsculos e segundos de `00` a `59` (sem leap seconds). O schema
+  exige a sintaxe exata; a CLI também valida calendário e horário, mesmo sem
+  dependências opcionais de `format` do jsonschema;
 - `source_revision`: SHA-1 completo do commit de origem;
 - canais `stable` e `preview`;
 - checksums SHA-256 de ambas as projeções.

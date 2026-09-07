@@ -164,10 +164,90 @@ class CapabilityContractValidationTests(unittest.TestCase):
                         invalid = version in invalid_versions or (
                             path == ("release_id",) and version in build_versions
                         )
+                        mutated = replace_field(document, path, version)
+                        if path == ("runtime_compatibility", 0, "max_version_exclusive"):
+                            # Keep the interval nonempty when probing only syntax.
+                            mutated["runtime_compatibility"][0]["min_version"] = "0.0.0-0"
                         self.assert_boundary_document(
-                            schema, replace_field(document, path, version),
-                            path if invalid else None,
+                            schema, mutated, path if invalid else None,
                         )
+
+    def test_runtime_compatibility_requires_increasing_semver_bounds(self) -> None:
+        ordered = (
+            ("1.0.0", "2.0.0"), ("1.9.0", "1.10.0"), ("1.0.9", "1.0.10"),
+            ("1.0.0-alpha", "1.0.0-alpha.1"),
+            ("1.0.0-alpha.1", "1.0.0-alpha.beta"),
+            ("1.0.0-beta.2", "1.0.0-beta.11"),
+            ("1.0.0-beta.11", "1.0.0-rc.1"), ("1.0.0-rc.1", "1.0.0"),
+            ("1.0.0-9", "1.0.0-10"), ("1.0.0-10", "1.0.0-2a"),
+            ("1.0.0+z", "1.0.1+a"), ("1.0.0-alpha+z", "1.0.0+a"),
+        )
+        invalid = tuple((high, low) for low, high in ordered) + (
+            ("1.0.0", "1.0.0"), ("1.0.0+a", "1.0.0+b"),
+            ("1.0.0-alpha+a", "1.0.0-alpha+b"),
+        )
+        contract = json.loads((SCHEMAS_DIR / "artifact.schema.json").read_text())
+        for index in (0, 1):
+            for low, high in ordered + invalid + (("1.0.0", None),):
+                with self.subTest(index=index, low=low, high=high), TemporaryDirectory() as td:
+                    document = boundary_fixture("artifact")
+                    if index:
+                        document["runtime_compatibility"].append({"runtime": "synthetic-runtime"})
+                    entry = document["runtime_compatibility"][index]
+                    entry["min_version"] = low
+                    if high is None:
+                        entry.pop("max_version_exclusive", None)
+                    else:
+                        entry["max_version_exclusive"] = high
+                    # Syntax is valid even when the relation is invalid.
+                    self.assertEqual(list(Draft202012Validator(contract).iter_errors(document)), [])
+                    fixture = Path(td) / "artifact.json"
+                    fixture.write_text(json.dumps(document), encoding="utf-8")
+                    result = run_validator("artifact", fixture)
+                    if (low, high) in invalid:
+                        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                        self.assertIn(
+                            f"runtime_compatibility.{index}.max_version_exclusive: "
+                            "must be greater than min_version", result.stderr,
+                        )
+                    else:
+                        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_release_timestamp_requires_exact_utc_syntax(self) -> None:
+        document = boundary_fixture("release")
+        for value in ("2026-09-07T12:00:00Z", "2024-02-29T23:59:59.1234567Z"):
+            with self.subTest(value=value):
+                self.assert_boundary_document(
+                    "release", replace_field(document, ("created_at",), value)
+                )
+        for value in (
+            "20260907T120000Z", "2026-W37-1T12:00:00Z",
+            "2026-09-07 12:00:00Z", "2026-09-07x12:00:00Z",
+            "2026-09-07T12:00Z", "2026-09-07T12:00:00,5Z",
+            "2026-09-07T12:00:00+00:00Z", "2026-09-07T12:00:00+01:00Z",
+            "2026-09-07t12:00:00Z", "2026-09-07T12:00:00z",
+            "2026-09-07T12:00:00Z\n",
+        ):
+            with self.subTest(value=value):
+                self.assert_boundary_document(
+                    "release", replace_field(document, ("created_at",), value),
+                    ("created_at",),
+                )
+
+    def test_release_timestamp_rejects_invalid_calendar_values(self) -> None:
+        for value in (
+            "2026-02-29T12:00:00Z", "2026-04-31T12:00:00Z",
+            "2026-09-07T24:00:00Z", "2026-09-07T12:60:00Z",
+            "2026-09-07T12:00:60Z", "0000-01-01T00:00:00Z",
+        ):
+            with self.subTest(value=value), TemporaryDirectory() as temp_dir:
+                document = boundary_fixture("release")
+                document["created_at"] = value
+                fixture = Path(temp_dir) / "document.json"
+                fixture.write_text(json.dumps(document), encoding="utf-8")
+                result = run_validator("release", fixture)
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("created_at", result.stderr)
 
     def test_documented_data_classes_match_schema_enum(self) -> None:
         readme = (SCHEMAS_DIR / "README.md").read_text(encoding="utf-8")
@@ -249,7 +329,7 @@ class CapabilityContractValidationTests(unittest.TestCase):
         cases = {
             "invalid/release-candidate-in-stable.json": "'approved' was expected",
             "invalid/release-invalid-checksum.json": "does not match",
-            "invalid/release-invalid-created-at.json": "is not a 'date-time'",
+            "invalid/release-invalid-created-at.json": "does not match",
             "invalid/release-invalid-id.json": "does not match",
             "invalid/release-invalid-source-revision.json": "does not match",
             "invalid/release-missing-checksums.json": "checksums",
