@@ -57,7 +57,7 @@ class DeploymentPlanTests(unittest.TestCase):
         self.assertIn("missing origin", plan.operations[0].reason)
 
     def test_manual_review_builtin_collision(self) -> None:
-        policy = load_policy(self._load_policy(), root=self.root)
+        load_policy(self._load_policy(), root=self.root)
 
         plan = compile_plan(
             policy_path=self._load_policy(),
@@ -122,11 +122,11 @@ class DeploymentPlanTests(unittest.TestCase):
 
         self.assertEqual(
             skills_lab_plan.operations[0].destination,
-            "/Users/clawdia/.hermes/profiles/skills-lab/skills/productivity/approved-global",
+            "/opt/example/hermes/profiles/skills-lab/skills/productivity/approved-global",
         )
         self.assertEqual(
             default_plan.operations[0].destination,
-            "/Users/clawdia/.hermes/skills/productivity/approved-global",
+            "/opt/example/hermes/skills/productivity/approved-global",
         )
 
     def test_deterministic_plan_ignores_created_at_and_id(self) -> None:

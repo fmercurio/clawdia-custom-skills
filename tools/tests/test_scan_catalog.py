@@ -166,6 +166,21 @@ class ScannerTests(unittest.TestCase):
         target.write_text("http://127.0.0.1 http://192.0.2.1 http://[2001:db8::1]")
         self.assertEqual(self.run_scan()[0], 0)
 
+    def test_unspecified_bind_is_not_a_private_endpoint(self):
+        target = self.root / "note.md"
+        for address in ("0.0.0.0", "::", "::ffff:0.0.0.0"):
+            with self.subTest(address=address):
+                target.write_text("bind=" + address + "\n")
+                self.assertEqual(self.run_scan()[0], 0)
+        for address in ("10." + "2.3.4", "192.168." + "1.5", "fd12" + "::1"):
+            with self.subTest(address_kind="private"):
+                target.write_text("bind=" + address + "\n")
+                code, report = self.run_scan()
+                self.assertEqual(code, 1)
+                self.assertEqual(
+                    [f["rule_id"] for f in report["findings"]], ["builtin-006"]
+                )
+
     def test_template_exemption_rejects_quotes_anywhere_in_key(self):
         target = self.root / "note.md"
         keys = [

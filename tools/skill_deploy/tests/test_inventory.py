@@ -53,7 +53,7 @@ class InventoryTests(unittest.TestCase):
             canonical_registry_path=policy.inputs.canonical_registry_path,
             runtime_registry_path=policy.inputs.runtime_registry_path,
             root=self.root,
-            hermes_home=Path("/Users/clawdia/.hermes"),
+            hermes_home=Path("/opt/example/hermes"),
         )
         report_default = build_inventory(
             matrix=matrix,
@@ -61,7 +61,7 @@ class InventoryTests(unittest.TestCase):
             canonical_registry_path=policy.inputs.canonical_registry_path,
             runtime_registry_path=policy.inputs.runtime_registry_path,
             root=self.root,
-            hermes_home=Path("/Users/clawdia/.hermes"),
+            hermes_home=Path("/opt/example/hermes"),
         )
 
         skills_lab_destination = next(
@@ -73,9 +73,9 @@ class InventoryTests(unittest.TestCase):
 
         self.assertEqual(
             skills_lab_destination,
-            "/Users/clawdia/.hermes/profiles/skills-lab/skills/productivity/approved-global",
+            "/opt/example/hermes/profiles/skills-lab/skills/productivity/approved-global",
         )
         self.assertEqual(
             default_destination,
-            "/Users/clawdia/.hermes/skills/productivity/approved-global",
+            "/opt/example/hermes/skills/productivity/approved-global",
         )

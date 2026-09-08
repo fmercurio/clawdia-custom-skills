@@ -3,6 +3,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -628,12 +629,30 @@ class TestKitE2E(unittest.TestCase):
         for name in ("second-brain-operations", "pull-brain", "push-brain", "brain-search"):
             result = subprocess.run([PYTHON, str(REPO / "tools" / "validate_skill.py"), str(PACKAGE / "skills" / name / "SKILL.md")], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        forbidden = ("/Users/" + "clawdia", "Fel" + "ippe", "FM" + "ercurio")
-        for path in PACKAGE.rglob("*"):
-            if path.is_file() and path.suffix not in {".zip", ".pyc"}:
+        self._assert_no_account_paths(PACKAGE)
+
+    def _assert_no_account_paths(self, root):
+        home_path = re.compile(r"/(?:Users|home)/[\w.-]+")
+        for path in root.rglob("*"):
+            if path.is_file() and path.suffix not in {".pyc", ".zip"}:
                 text = path.read_text(encoding="utf-8", errors="ignore")
-                for marker in forbidden:
-                    self.assertNotIn(marker, text, f"{marker} in {path}")
+                self.assertFalse(
+                    bool(home_path.search(text)),
+                    f"account-specific home in {path.relative_to(root)}",
+                )
+
+    def test_account_path_regression_rejects_synthetic_residue(self):
+        surface = self.root / "public-surface"
+        surface.mkdir()
+        document = surface / "example.md"
+        document.write_text("Vault: /srv/example/vault", encoding="utf-8")
+        self._assert_no_account_paths(surface)
+        for prefix in ("Users", "home"):
+            marker = "/" + prefix + "/" + "synthetic-operator" + "/vault"
+            document.write_text("Vault: " + marker, encoding="utf-8")
+            with self.assertRaisesRegex(AssertionError, "account-specific home"):
+                self._assert_no_account_paths(surface)
+
 
 
 if __name__ == "__main__":

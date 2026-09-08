@@ -116,10 +116,14 @@ def markers(value):
             continue
         if address.version == 6 and address.ipv4_mapped:
             address = address.ipv4_mapped
-        if address.is_loopback or any(
-            address in network
-            for network in EXAMPLES
-            if address.version == network.version
+        if (
+            address.is_loopback
+            or address.is_unspecified
+            or any(
+                address in network
+                for network in EXAMPLES
+                if address.version == network.version
+            )
         ):
             continue
         if not address.is_global:

@@ -204,9 +204,11 @@ atribuições contidas nelas. Sufixos, inclusive `}`, `]`, vírgula e ponto e v�
 não são terminadores genéricos. Outros formatos, comandos compostos, comentários
 na mesma linha e contextos ambíguos conservam o finding; não há parser shell/YAML.
 
-IPs loopback e redes de documentação `192.0.2.0/24`, `198.51.100.0/24`,
-`203.0.113.0/24`, `2001:db8::/32` são excluídos. Endereços IPv4-mapped IPv6 são
-avaliados como IPv4. A classificação não global usa `ipaddress` da stdlib; fixe a
+IPs loopback, endereços não especificados (`0.0.0.0` e `::`) e redes de documentação
+`192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`, `2001:db8::/32` são excluídos.
+Um bind coringa não identifica um endpoint privado; esta exclusão não aprova
+exposição de rede, firewall ou autenticação do serviço. Endereços IPv4-mapped IPv6
+são avaliados como IPv4. A classificação não global usa `ipaddress` da stdlib; fixe a
 versão do interpretador no gate. Heurísticas podem ter falsos positivos/negativos;
 nomes privados de tenant/origem dependem da política explícita. Não existe isenção
 geral por arquivo de teste ou por documentação.
@@ -262,6 +264,10 @@ igual. O relatório não emite hashes da política nem prova revisão humana.
    autorização de receber política privada. Os testes públicos sintéticos já são
    descobertos pela CI existente; não são verificação privada de produção.
 5. **#46** continua responsável pela migração real; **#47**, montagem/publicação.
-   Esta implementação preserva pipeline #43, inventário/statuses legados e conteúdos
-   de SKILL/package. Um scanner textual não comprova reautoria humana clean-room,
-   aprovação de licença, completude da política ou segurança do conteúdo executável.
+   Esta implementação preserva pipeline #43 e inventário/statuses legados. A triagem
+   também neutraliza referências locais em exemplos, fixtures e na expectativa de
+   biblioteca do serviço de usuário; não importa conteúdo externo nem promove status.
+   A classificação contextual de um falso positivo **não** autoriza o finding built-in:
+   enquanto permanecer na varredura, o gate continua bloqueado. Um scanner textual não
+   comprova reautoria humana clean-room, aprovação de licença, completude da política
+   ou segurança do conteúdo executável.

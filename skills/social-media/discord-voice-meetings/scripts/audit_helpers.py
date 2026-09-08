@@ -15,6 +15,11 @@ SECRET_ASSIGNMENT_RE = re.compile(
 )
 
 
+def expected_user_library_dir(home: Path) -> str:
+    """Library directory for the home owning the gateway's user service."""
+    return str(home / ".local" / "lib")
+
+
 def summarize_log_line(line: str) -> str:
     """Summarize a log line without printing transcript text or secret values."""
     redacted = SECRET_ASSIGNMENT_RE.sub(r"\1=<redacted>", line.strip())

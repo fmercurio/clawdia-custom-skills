@@ -10,6 +10,7 @@ Covers:
 """
 import importlib.util
 import json
+import re
 import sys
 from types import SimpleNamespace
 from pathlib import Path
@@ -580,4 +581,4 @@ class TestSecretSources:
         assert exc.value.code == 2
         err = capsys.readouterr().err
         assert "KEEPASS_DB" in err
-        assert "/Users/Shared" not in SCRIPT.read_text()
+        assert re.search(r"/(?:Users|home)/[\w.-]+", SCRIPT.read_text()) is None

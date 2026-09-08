@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 from audit_helpers import (
+    expected_user_library_dir,
     load_private_env_value,
     probe_zai_endpoint,
     process_has_env_value,
@@ -59,7 +60,7 @@ if MEETINGS_DIR.exists():
     empty_count = 0
     for ata in sorted(atas, reverse=True)[:5]:
         content = ata.read_text()
-        lines = [l for l in content.splitlines() if l.strip().startswith("- `")]
+        lines = [line for line in content.splitlines() if line.strip().startswith("- `")]
         if not lines:
             empty_count += 1
             warn(f"  {ata.name}: 0 transcript entries (possible race condition)")
@@ -160,7 +161,7 @@ pid_result = subprocess.run(
 )
 if pid_result.stdout.strip():
     pid = pid_result.stdout.strip().split()[0]
-    has_ld_library = process_has_env_value(pid, "LD_LIBRARY_PATH", "/home/nuclia/.local/lib")
+    has_ld_library = process_has_env_value(pid, "LD_LIBRARY_PATH", expected_user_library_dir(Path.home()))
     if has_ld_library is True:
         ok("Running process has LD_LIBRARY_PATH set")
     elif has_ld_library is None:
@@ -177,8 +178,8 @@ if GATEWAY_LOG.exists():
         capture_output=True, text=True
     )
     relevant = [
-        l for l in result.stdout.splitlines()
-        if any(k in l.lower() for k in ["voice", "meeting", "opus", "flush", "ssrc"])
+        line for line in result.stdout.splitlines()
+        if any(k in line.lower() for k in ["voice", "meeting", "opus", "flush", "ssrc"])
     ]
     if relevant:
         ok(f"{len(relevant)} voice/meeting log lines in recent output")
