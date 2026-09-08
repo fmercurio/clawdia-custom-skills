@@ -1738,33 +1738,14 @@ class ValidateStagingTests(unittest.TestCase):
         for required, document in required_attribution.items():
             self.assertIn(required, document)
 
-        local_user = "".join(["claw", "dia"])
-        organization = "".join(["fm", "ercurio"])
-        product_brand = "".join(["clawd", "ia"])
-        operator_name = "".join(["fel", "ippe"])
-        internal_workspace = "".join(["skills", "-lab"])
-        forbidden_tokens = {
-            "deployment_user": local_user,
-            "organization_name": organization,
-            "product_brand": product_brand,
-            "operator_name": operator_name,
-            "macos_home_path": "".join(["/Users/", local_user, "/.hermes/"]),
-            "proposal_path": "".join(
-                ["/Users/", local_user, "/.hermes/", internal_workspace, "/proposals/"]
-            ),
-            "catalog_reference": "".join(
-                ["charles", "-luxinger", "-llm-wiki-skill"]
-            ),
-            "repository_reference": "".join(
-                [organization, "/", product_brand, "-custom-skills"]
-            ),
-            "internal_workspace_reference": "".join(
-                [internal_workspace, "/", "proposals"]
-            ),
-        }
-        users_root_prefix = "".join(["/Users", "/"])
-        users_home_like = re.compile(rf"{re.escape(users_root_prefix)}[^/\s\"']+")
+        self._assert_neutral_public_tree(package_root)
 
+    def _assert_neutral_public_tree(self, package_root):
+        # Preserve the macOS-home and internal-proposal checks without tenant names.
+        users_root = "/" + "Users" + "/"
+        private_structure = re.compile(
+            rf"{re.escape(users_root)}[^\s<>\"']+|\b[\w.-]+/proposals\b"
+        )
         for path in package_root.rglob("*"):
             if (
                 not path.is_file()
@@ -1773,18 +1754,29 @@ class ValidateStagingTests(unittest.TestCase):
             ):
                 continue
             text = path.read_text(encoding="utf-8")
-            match = users_home_like.search(text)
-            self.assertIsNone(
-                match,
-                f"detected macOS user-home-like path in {path.relative_to(package_root)}",
+            self.assertFalse(
+                bool(private_structure.search(text)),
+                f"deployment-specific structure in {path.relative_to(package_root)}",
             )
-            normalized_text = text.lower()
-            for reason, token in forbidden_tokens.items():
-                self.assertNotIn(
-                    token.lower(),
-                    normalized_text,
-                    f"{reason} leaked in {path.relative_to(package_root)}",
-                )
+
+    def test_public_surface_scan_rejects_synthetic_deployment_residue(self):
+        with TemporaryDirectory() as tmp:
+            surface = Path(tmp)
+            document = surface / "example.md"
+            document.write_text("Workspace: /srv/example/workspace", encoding="utf-8")
+            self._assert_neutral_public_tree(surface)
+            account = "synthetic" + "-operator"
+            markers = [
+                "/" + prefix + "/" + account + "/workspace"
+                for prefix in ("Users",)
+            ]
+            markers.extend([
+                "synthetic-workspace" + "/" + "proposals",
+            ])
+            for marker in markers:
+                document.write_text("Workspace: " + marker, encoding="utf-8")
+                with self.assertRaisesRegex(AssertionError, "deployment-specific structure"):
+                    self._assert_neutral_public_tree(surface)
 
 
 if __name__ == "__main__":

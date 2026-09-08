@@ -25,8 +25,8 @@ All decisions are read-only by design; no runtime writes are performed.
     "require_audit_gate": "high"
   },
   "inputs": {
-    "hermes_home": "/Users/clawdia/.hermes",
-    "skills_lab_root": "/Users/clawdia/.hermes/skills-lab",
+    "hermes_home": "/opt/example/hermes",
+    "skills_lab_root": "/srv/example/workspace",
     "matrix_path": "/path/to/matrix.yaml",
     "runtime_registry_path": "/path/to/skills-registry.yaml",
     "canonical_registry_path": "/path/to/custom-skills/registry/skills-registry.yaml"
@@ -65,7 +65,7 @@ skills:
     status: implemented
     implementation_state: implemented
     category: productivity
-    local_path: "/Users/clawdia/.hermes/skills/productivity/example/SKILL.md"
+    local_path: "/opt/example/hermes/skills/productivity/example/SKILL.md"
     canonical_source: global-local
     governance_status: canonical-global-local
     local_copy_action: keep
@@ -121,7 +121,7 @@ Skills Lab is governance metadata only and is never used as a runtime destinatio
 - Every named profile resolves to `<hermes_home>/profiles/<profile>/skills/<category>/<name>`.
 
 For example, `skills-lab` resolves to
-`/Users/clawdia/.hermes/profiles/skills-lab/skills/<category>/<name>`.
+`/opt/example/hermes/profiles/skills-lab/skills/<category>/<name>`.
 
 ## Plan model
 

@@ -357,14 +357,24 @@ transcription tasks to complete during the grace period.
 Gateway starts but voice connect fails with Opus-related error.
 
 ### Fix
-Ensure libopus is on LD_LIBRARY_PATH. For systemd-managed gateways,
-set it in the service file:
+Ensure libopus is on LD_LIBRARY_PATH. This audit targets the current user's
+`systemctl --user` gateway. Its expected library directory is the absolute
+`Path.home() / ".local" / "lib"` of that service owner.
+
+Before using any example below, replace `<LIBRARY_DIR>` with that absolute path.
+Run this as the service owner to obtain it:
+```bash
+python3 -c 'from pathlib import Path; print(Path.home() / ".local" / "lib")'
+```
+Systemd does not expand shell `$HOME` in `Environment=` values. Substitute the
+absolute path yourself, including in the quoted heredoc below. For the user
+service, set it in a drop-in override:
 ```ini
 [Service]
-Environment=LD_LIBRARY_PATH=/home/nuclia/.local/lib
+Environment="LD_LIBRARY_PATH=<LIBRARY_DIR>"
 ```
 
-Verify: `LD_LIBRARY_PATH=/home/nuclia/.local/lib python -c "import ctypes.util; print(ctypes.util.find_library('opus'))"`
+Verify (after substitution): `LD_LIBRARY_PATH="<LIBRARY_DIR>" python -c "import ctypes.util; print(ctypes.util.find_library('opus'))"`
 
 ---
 
@@ -399,11 +409,12 @@ Compare on-disk unit with runtime:
 cat ~/.config/systemd/user/hermes-gateway.service
 
 # What systemd actually has loaded
-XDG_RUNTIME_DIR=/run/user/$(id -u) systemctl --user show hermes-gateway -p ExecStart -p Environment
+XDG_RUNTIME_DIR=/run/user/$(id -u) systemctl --user show hermes-gateway -p ExecStart
 ```
 
 Check for:
-- `LD_LIBRARY_PATH` in Environment (should be `/home/nuclia/.local/lib`)
+- `LD_LIBRARY_PATH` in the drop-in (must equal the substituted `<LIBRARY_DIR>`);
+  use the value-free process check below to verify it at runtime
 - `RestartMaxDelaySec` / `RestartSteps` (invalid keys cause warnings in journal)
 
 ### Fix: minimal drop-in override (no wrapper script)
@@ -418,7 +429,7 @@ needed since credentials come from `.env`:
 mkdir -p ~/.config/systemd/user/hermes-gateway.service.d
 cat > ~/.config/systemd/user/hermes-gateway.service.d/override.conf << 'EOF'
 [Service]
-Environment="LD_LIBRARY_PATH=/home/nuclia/.local/lib"
+Environment="LD_LIBRARY_PATH=<LIBRARY_DIR>"
 RestartMaxDelaySec=
 RestartSteps=
 EOF
@@ -428,11 +439,12 @@ systemctl --user restart hermes-gateway
 
 The drop-in survives main unit regeneration. Verify with:
 ```bash
-systemctl --user show hermes-gateway -p ExecStart -p Environment
+systemctl --user show hermes-gateway -p ExecStart
 # ExecStart: python -m hermes_cli.main gateway run --replace (no wrapper)
 python3 - <<'PY'
 from pathlib import Path
 
+expected = str(Path.home() / ".local" / "lib").encode()
 for pid in Path('/proc').iterdir():
     if not pid.name.isdigit():
         continue
@@ -442,12 +454,14 @@ for pid in Path('/proc').iterdir():
             continue
         for entry in (pid / 'environ').read_bytes().split(b'\0'):
             if entry.startswith(b'LD_LIBRARY_PATH='):
-                print(entry.decode(errors='replace'))
+                matches = entry.partition(b"=")[2] == expected
+                print("LD_LIBRARY_PATH matches user-service home:", matches)
                 raise SystemExit(0)
     except OSError:
         continue
 PY
-# Should print only: LD_LIBRARY_PATH=/home/nuclia/.local/lib
+# Should print only: LD_LIBRARY_PATH matches user-service home: True
+# No environment values are printed.
 ```
 
 ### After any Hermes update or config change, run:
