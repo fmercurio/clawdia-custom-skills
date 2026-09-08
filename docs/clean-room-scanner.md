@@ -1,4 +1,4 @@
-# Scanner neutro de clean-room — contrato v1 (#44)
+# Scanner neutro de clean-room — contratos v1/v2 (#44)
 
 `tools/scan_catalog.py` é um motor público, offline, stdlib-only. Exige uma
 política JSON do operador **fora da árvore examinada e do repositório público**.
@@ -23,7 +23,7 @@ busca; são examinados apenas seus bytes locais, não o objeto remoto.
 
 ## Política fechada
 
-Todos os quatro campos de topo são obrigatórios. Sem chaves extras em qualquer
+Em `clean-room-policy/v1`, todos os quatro campos de topo são obrigatórios. Sem chaves extras em qualquer
 objeto; JSON estrito UTF-8, sem BOM, chaves duplicadas, NaN/Infinity, raiz errada,
 strings com controles/surrogates ou dados malformados. Arquivo de política regular,
 sem symlink/hardlink, até 1 MiB. Não é carregado de dentro da raiz, mesmo por alias
@@ -40,7 +40,7 @@ resolvido. Sua ausência, erro de I/O ou lista de negação vazia retorna 2.
 }
 ```
 
-Cada lista tem até 256 registros. Regras têm exatamente `id`, `term` e
+As listas v1 têm até 256 registros. Regras têm exatamente `id`, `term` e
 `classification`. IDs seguem `term-[0-9]{3}`, são únicos e deliberadamente opacos:
 não usar nomes nem hashes privados como IDs. Classificação é `origin`, `private`
 ou `tenant`; não existe descoberta automática de todos os identificadores de tenant.
@@ -94,8 +94,61 @@ clean-room-context/v1 + NUL + location + NUL + N(term) + NUL + N(context)
 implementa esse contrato. O termo é parte do vínculo, além do ID. Calcule o
 contexto e registre a justificativa em ambiente privado; não copie linhas reais
 para fixtures, documentação ou comandos em logs públicos. Não há geração automática
-de exceções. As regras built-in não podem ser isentadas; triagem exige remover o
+de exceções. Em v1, as regras built-in não podem ser isentadas; triagem exige remover o
 literal ou usar uma variável inerte explícita, ou revisão do motor com testes.
+A autorização privada por ocorrência exige adesão explícita ao contrato v2 abaixo.
+
+### Revisões privadas exatas de built-ins (v2)
+
+`clean-room-policy/v2` exige os mesmos campos e contratos de v1, mais a lista
+obrigatória `builtin_reviews` (pode ser vazia). Não há conversão automática: v1
+continua recusando esse campo e built-ins na allowlist. A nova lista admite até
+`MAX_FINDINGS` (10.000) registros, dentro do limite global de 1 MiB da política.
+Cada registro é fechado e exige todos os campos:
+
+- `rule_id`: somente `builtin-002`, `builtin-004`, `builtin-005` ou `builtin-006`.
+  Prefixos fortes de credenciais (`builtin-001`) e JWT (`builtin-003`) não admitem
+  dispensa nesta versão.
+- `path`: identidade exata, na mesma gramática da allowlist; para membros, inclui
+  todos os caminhos e hashes dos containers externos e internos. Não há glob,
+  alias, prefix match nem herança da revisão de fonte para archives.
+- `location`: exclusivamente `content` de payload de texto UTF-8 estrito.
+  Nomes, metadados e binários não recebem esta autorização.
+- `line`: inteiro de 1 a `MAX_LINES` (100.000), sem booleanos.
+- `occurrence`: inteiro de 1 a `MAX_FINDINGS` (10.000), sem booleanos. Ordinal
+  base 1 por `(rule_id, line)` na unidade de texto inspecionada, na ordem do
+  detector; distingue ocorrências duplicadas da mesma regra na mesma linha.
+- `content_sha256`: SHA-256 hexadecimal minúsculo, 64 caracteres, dos **bytes
+  originais completos** do arquivo ou membro UTF-8. Não é hash da linha, do
+  rendering ou do texto normalizado. Alterar CRLF, normalização Unicode ou uma
+  linha não relacionada invalida a revisão mesmo se o detector achar o mesmo texto.
+- `decision`: exatamente `false_positive`.
+- `review_id`: identificador neutro no formato `review-NNNNNN`, seis dígitos ASCII.
+- `justification`: justificativa privada de 8–1.024 caracteres, com a mesma
+  validação de strings existente (sem controles ou whitespace nas extremidades).
+
+Não pode haver duplicatas de `(rule_id, path, location, line, occurrence)`, mesmo
+com hash ou ID de revisão distintos, nem IDs de revisão repetidos. Campos ausentes,
+extras, tipos errados, hashes malformados e caminhos inseguros invalidam a política.
+A autorização exige igualdade de todos os componentes da identidade e do hash.
+`inspect()` sem `content_sha256` nunca autoriza um built-in. Somente o ramo de
+texto simples de `inspect_payload` fornece esse vínculo; metadados de containers
+e rendering Latin-1 de binários não o fornecem.
+
+Cada revisão deve ser consumida **exatamente uma vez por scan**. Uma revisão
+obsoleta, ausente, não utilizada ou reutilizada produz retorno 2 e
+`error: invalid_input`, inclusive após remover o marcador ou o arquivo inteiro.
+Reutilização deixa a ocorrência adicional não autorizada. Essas falhas de revisão
+não interrompem a inspeção dos demais achados; limites e outros erros de entrada
+continuam sujeitos ao encerramento fechado existente. Dois archives idênticos
+passados no mesmo scan reutilizam a mesma identidade, portanto não podem consumir
+a mesma revisão duas vezes. Cada nova chamada a `scan` começa sem consumo anterior.
+
+A política é uma declaração de operador confiável. Hashes vinculam bytes, mas
+**não provam falso positivo, autenticidade, autoria ou aprovação humana**. A
+justificativa e a evidência da decisão devem ser revisadas por canal privado;
+não há helper público para gerar aprovações a partir do scan nem isenção heurística
+adicional para código considerado legítimo.
 
 ### Binários revisados
 
@@ -221,7 +274,7 @@ produzem erro JSON, sem usage/traceback. Retornos:
 - `1`: scan completo com ocorrências não autorizadas; `status: fail`.
 - `2`: entrada/política/I/O/formato/limite inválido; `status: error`.
 
-Relatório fechado: `schema_version: clean-room-report/v1`, `status`, `error`
+Para política v1, relatório fechado: `schema_version: clean-room-report/v1`, `status`, `error`
 (`null` ou `invalid_input`), `scanned_entries`, `authorized_findings`,
 `unauthorized_findings`, `findings`. Cada finding contém apenas `rule_id`,
 `path_id`, `location`, `line`, `authorized`. Não há caminhos/valores/termos brutos,
@@ -233,6 +286,18 @@ Não normaliza a identidade antes do hash. Findings são ordenados por
 entregues para inspeção e ocorrências registradas; no erro podem ser parciais,
 e `status: error` nunca atesta conclusão. Não deduplicam ocorrências em contexto
 igual. O relatório não emite hashes da política nem prova revisão humana.
+
+Política v2 válida emite `clean-room-report/v2` com os mesmos campos de topo.
+Somente findings built-in recebem o campo adicional `occurrence`, inclusive os
+não autorizados; findings de termos mantêm o formato v1. O ordinal é calculado
+por regra/linha na unidade inspecionada, inclusive para nomes e blocos de metadados;
+o campo `line` público de nomes continua 0. A ordenação v2 usa
+`(path_id, location, line, rule_id, occurrence, authorized)` (ordinal ausente nos
+termos equivale a 0). Não são publicados caminhos, valores, justificativas,
+`review_id` ou hashes de conteúdo; o `path_id` opaco existente permanece.
+Política inválida antes da construção do scanner pode emitir o relatório genérico
+legado v1. `invalid_input` não revela qual revisão falhou. Relatório, contadores e
+ordinal não comprovam aprovação humana nem expõem os registros privados.
 
 ## Procedimento do operador e handoff
 
@@ -267,7 +332,8 @@ igual. O relatório não emite hashes da política nem prova revisão humana.
    Esta implementação preserva pipeline #43 e inventário/statuses legados. A triagem
    também neutraliza referências locais em exemplos, fixtures e na expectativa de
    biblioteca do serviço de usuário; não importa conteúdo externo nem promove status.
-   A classificação contextual de um falso positivo **não** autoriza o finding built-in:
-   enquanto permanecer na varredura, o gate continua bloqueado. Um scanner textual não
+   Em v1, a classificação contextual de um falso positivo não autoriza o finding
+   built-in; em v2, somente a revisão privada exata acima pode autorizá-lo.
+   Um scanner textual não
    comprova reautoria humana clean-room, aprovação de licença, completude da política
    ou segurança do conteúdo executável.

@@ -404,7 +404,9 @@ def inspect_payload(scanner, path, data, budget, depth=0):
         if binary:
             inspect_binary(scanner, path, data)
         else:
-            scanner.inspect(path, "content", text)
+            scanner.inspect(
+                path, "content", text, content_sha256=hashlib.sha256(data).hexdigest()
+            )
 
 
 def inspect_binary(scanner, path, data):

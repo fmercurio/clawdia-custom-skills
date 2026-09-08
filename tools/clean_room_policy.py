@@ -103,8 +103,14 @@ def load_policy(root, path):
         object_pairs_hook=unique_object,
         parse_constant=reject_constant,
     )
-    fields(policy, "schema_version deny_terms allowlist reviewed_assets")
-    require(policy["schema_version"] == "clean-room-policy/v1")
+    require(type(policy) is dict)
+    version = policy.get("schema_version")
+    require(version in ("clean-room-policy/v1", "clean-room-policy/v2"))
+    names = "schema_version deny_terms allowlist reviewed_assets"
+    fields(
+        policy,
+        names + (" builtin_reviews" if version == "clean-room-policy/v2" else ""),
+    )
     for key in ("deny_terms", "allowlist", "reviewed_assets"):
         require(type(policy[key]) is list and len(policy[key]) <= MAX_RULES)
     require(policy["deny_terms"])
@@ -143,4 +149,35 @@ def load_policy(root, path):
             string(entry[key], minimum=3 if key == "license" else 8)
         require(entry["metadata_scrubbed"] is True and entry["path"] not in assets)
         assets.add(entry["path"])
+    if version == "clean-room-policy/v2":
+        reviews = policy["builtin_reviews"]
+        require(type(reviews) is list and len(reviews) <= MAX_FINDINGS)
+        identities, review_ids = set(), set()
+        for entry in reviews:
+            fields(
+                entry,
+                "rule_id path location line occurrence content_sha256 decision review_id justification",
+            )
+            require(
+                entry["rule_id"]
+                in ("builtin-002", "builtin-004", "builtin-005", "builtin-006")
+            )
+            relative_path(entry["path"])
+            require(entry["location"] == "content")
+            for key, limit in (("line", MAX_LINES), ("occurrence", MAX_FINDINGS)):
+                require(type(entry[key]) is int and 1 <= entry[key] <= limit)
+            sha(entry["content_sha256"])
+            require(entry["decision"] == "false_positive")
+            require(
+                type(entry["review_id"]) is str
+                and re.fullmatch(r"review-[0-9]{6}", entry["review_id"])
+            )
+            string(entry["justification"], minimum=8)
+            identity = tuple(
+                entry[key]
+                for key in ("rule_id", "path", "location", "line", "occurrence")
+            )
+            require(identity not in identities and entry["review_id"] not in review_ids)
+            identities.add(identity)
+            review_ids.add(entry["review_id"])
     return policy
