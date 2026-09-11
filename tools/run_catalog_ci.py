@@ -586,35 +586,45 @@ def gate_unit_contract(root: Path) -> dict:
                 "ALL_PROXY": "http://127.0.0.1:9",
                 "NO_PROXY": "",
             }
+            total_output_bytes = 0
+            unit_index = 0
             for relative, pattern in UNIT_SUITES:
                 suite_root = root / relative
                 _validate_tree_layout(root, suite_root)
-                output_path = public_root / f"unit-{UNIT_SUITES.index((relative, pattern))}.log"
-                with output_path.open("w+b") as output:
-                    completed = subprocess.run(
-                        [
-                            sys.executable,
-                            "-B",
-                            "-c",
-                            UNIT_HARNESS,
-                            str(suite_root),
-                            pattern,
-                        ],
-                        cwd=root,
-                        env=environment,
-                        stdin=subprocess.DEVNULL,
-                        stdout=output,
-                        stderr=output,
-                        check=False,
-                        timeout=UNIT_TIMEOUT_SECONDS,
-                        preexec_fn=_limit_unit_process,
-                    )
-                    output.seek(0)
-                    captured = output.read(MAX_UNIT_OUTPUT_BYTES + 1)
-                if (completed.returncode != 0
-                        or len(captured) > MAX_UNIT_OUTPUT_BYTES
-                        or b"CLAWDIA_PUBLIC_UNIT_OK\n" not in captured):
-                    raise ValueError
+                discovered_patterns = tuple(sorted({
+                    path.name
+                    for path in suite_root.rglob(pattern)
+                    if _regular_file(root, path)
+                })) or (pattern,)
+                for discovered_pattern in discovered_patterns:
+                    output_path = public_root / f"unit-{unit_index}.log"
+                    unit_index += 1
+                    with output_path.open("w+b") as output:
+                        completed = subprocess.run(
+                            [
+                                sys.executable,
+                                "-B",
+                                "-c",
+                                UNIT_HARNESS,
+                                str(suite_root),
+                                discovered_pattern,
+                            ],
+                            cwd=root,
+                            env=environment,
+                            stdin=subprocess.DEVNULL,
+                            stdout=output,
+                            stderr=output,
+                            check=False,
+                            timeout=UNIT_TIMEOUT_SECONDS,
+                            preexec_fn=_limit_unit_process,
+                        )
+                        output.seek(0)
+                        captured = output.read(MAX_UNIT_OUTPUT_BYTES + 1)
+                    total_output_bytes += len(captured)
+                    if (completed.returncode != 0
+                            or total_output_bytes > MAX_UNIT_OUTPUT_BYTES
+                            or b"CLAWDIA_PUBLIC_UNIT_OK\n" not in captured):
+                        raise ValueError
     except (OSError, ValueError, subprocess.TimeoutExpired):
         return _result("unit-contract", False, "public-unit-failure", files)
     return _result("unit-contract", True, "ok", files)

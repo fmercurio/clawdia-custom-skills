@@ -601,6 +601,135 @@ class CatalogCIRunnerTests(unittest.TestCase):
             json.loads(result.stdout)["gates"][0]["code"], "public-unit-failure"
         )
 
+    def test_unit_contract_gives_each_discovered_test_module_a_finite_budget(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "tools" / "tests").mkdir(parents=True)
+            for name in ("one", "two"):
+                (root / "tools" / "tests" / f"test_{name}.py").write_text(
+                    "import time\n"
+                    "import unittest\n"
+                    "class SlowTest(unittest.TestCase):\n"
+                    "    def test_public(self): time.sleep(1.25)\n",
+                    encoding="utf-8",
+                )
+
+            with (
+                mock.patch.object(
+                    catalog_ci, "UNIT_SUITES", (("tools/tests", "test_*.py"),)
+                ),
+                mock.patch.object(catalog_ci, "UNIT_TIMEOUT_SECONDS", 2),
+            ):
+                result = catalog_ci.gate_unit_contract(root)
+
+        self.assertEqual(result["status"], "passed")
+
+    def test_unit_contract_rejects_a_failing_nested_test_after_a_passing_top_level_test(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            test_dir = root / "tools" / "tests"
+            test_dir.mkdir(parents=True)
+            (test_dir / "test_top.py").write_text(
+                "import unittest\n"
+                "class TopTest(unittest.TestCase):\n"
+                "    def test_public(self): self.assertTrue(True)\n",
+                encoding="utf-8",
+            )
+            package = test_dir / "package"
+            package.mkdir()
+            (package / "__init__.py").write_text("", encoding="utf-8")
+            (package / "test_nested.py").write_text(
+                "import unittest\n"
+                "class NestedTest(unittest.TestCase):\n"
+                "    def test_public(self): self.fail('nested failure')\n",
+                encoding="utf-8",
+            )
+
+            with mock.patch.object(
+                catalog_ci, "UNIT_SUITES", (("tools/tests", "test_*.py"),)
+            ):
+                result = catalog_ci.gate_unit_contract(root)
+
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["code"], "public-unit-failure")
+
+    def test_unit_contract_deduplicates_identical_nested_basenames(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            test_dir = root / "tools" / "tests"
+            test_dir.mkdir(parents=True)
+            test_body = (
+                "from pathlib import Path\n"
+                "import unittest\n"
+                "class SharedNameTest(unittest.TestCase):\n"
+                "    def test_runs_once_per_package(self):\n"
+                "        marker = Path('test-invocations')\n"
+                "        count = int(marker.read_text()) if marker.exists() else 0\n"
+                "        marker.write_text(str(count + 1))\n"
+                "        self.assertLessEqual(count + 1, 2)\n"
+            )
+            for package_name in ("first", "second"):
+                package = test_dir / package_name
+                package.mkdir()
+                (package / "__init__.py").write_text("", encoding="utf-8")
+                (package / "test_shared.py").write_text(
+                    test_body, encoding="utf-8"
+                )
+
+            with mock.patch.object(
+                catalog_ci, "UNIT_SUITES", (("tools/tests", "test_*.py"),)
+            ):
+                result = catalog_ci.gate_unit_contract(root)
+
+        self.assertEqual(result["status"], "passed")
+
+    def test_unit_contract_rejects_a_timed_out_discovered_module(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            test_dir = root / "tools" / "tests"
+            test_dir.mkdir(parents=True)
+            (test_dir / "test_slow.py").write_text(
+                "import time\n"
+                "import unittest\n"
+                "class SlowTest(unittest.TestCase):\n"
+                "    def test_public(self): time.sleep(1.25)\n",
+                encoding="utf-8",
+            )
+
+            with (
+                mock.patch.object(
+                    catalog_ci, "UNIT_SUITES", (("tools/tests", "test_*.py"),)
+                ),
+                mock.patch.object(catalog_ci, "UNIT_TIMEOUT_SECONDS", 1),
+            ):
+                result = catalog_ci.gate_unit_contract(root)
+
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["code"], "public-unit-failure")
+
+    def test_unit_contract_rejects_an_oversized_temporary_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            write_tiny_unit_suites(root)
+            test_file = root / "tools" / "tests" / "test_tiny.py"
+            test_file.write_text(
+                "import tempfile\n"
+                "import unittest\n"
+                "from pathlib import Path\n"
+                "class TinyTest(unittest.TestCase):\n"
+                "    def test_public(self):\n"
+                "        with tempfile.TemporaryDirectory() as temp_dir:\n"
+                "            (Path(temp_dir) / 'fixture.bin').write_bytes(\n"
+                "                b' ' * (8 * 1024 * 1024 + 2)\n"
+                "            )\n",
+                encoding="utf-8",
+            )
+
+            result = run_ci("--root", str(root), "--gate", "unit-contract")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(json.loads(result.stdout)["gates"][0]["code"], "public-unit-failure")
+
     def test_unit_contract_allows_bounded_large_temporary_fixture(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
