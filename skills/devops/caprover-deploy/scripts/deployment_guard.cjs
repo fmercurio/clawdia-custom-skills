@@ -9,7 +9,7 @@ const http = require('http');
 const https = require('https');
 const Module = require('module');
 
-const GUARD_VERSION = 1;
+const GUARD_VERSION = 3;
 const MAX_READS_AFTER_DEPLOY = 256;
 const MAX_BODY_BYTES = 1048576;
 let policy;
@@ -23,6 +23,8 @@ if (
   !policy || policy.guardVersion !== GUARD_VERSION ||
   typeof policy.origin !== 'string' || typeof policy.appName !== 'string' ||
   typeof policy.sourcePath !== 'string' || !['tarball', 'branch'].includes(policy.sourceMode) ||
+  typeof policy.expectedSourceId !== 'string' ||
+  !(/^[a-f0-9]{40}$/.test(policy.expectedSourceId) || /^sha256:[a-f0-9]{64}$/.test(policy.expectedSourceId)) ||
   typeof policy.authTokenSha256 !== 'string' || !Number.isInteger(eventFd) || eventFd < 3
 ) {
   process.exit(78);
@@ -51,7 +53,8 @@ try {
 }
 const encodedApp = encodeURIComponent(policy.appName);
 const definitionsPath = '/api/v2/user/apps/appDefinitions';
-const deployPath = `/api/v2/user/apps/appData/${encodedApp}?detached=1`;
+const cliDeployPath = `/api/v2/user/apps/appData/${encodedApp}?detached=1`;
+const synchronousDeployPath = `/api/v2/user/apps/appData/${encodedApp}`;
 const buildPath = `/api/v2/user/apps/appData/${encodedApp}`;
 let logicalStep = 0;
 let transportStep = 0;
@@ -60,6 +63,27 @@ let transportBuildReads = 0;
 
 function digest(value) {
   return crypto.createHash('sha256').update(value, 'utf8').digest('hex');
+}
+
+function digestFile(path) {
+  const hash = crypto.createHash('sha256');
+  const buffer = Buffer.allocUnsafe(65536);
+  let fd;
+  try {
+    fd = fs.openSync(path, 'r');
+    for (;;) {
+      const count = fs.readSync(fd, buffer, 0, buffer.length, null);
+      if (!count) break;
+      hash.update(buffer.subarray(0, count));
+    }
+    return hash.digest('hex');
+  } catch (_) {
+    fail('deploy_source');
+  } finally {
+    if (fd !== undefined) {
+      try { fs.closeSync(fd); } catch (_) { /* best-effort close after completed read */ }
+    }
+  }
 }
 
 function headerValue(headers, wanted) {
@@ -91,7 +115,12 @@ function validateHeaders(headers) {
 
 function expected(step, isLogical) {
   if (step < 2) return {method: 'GET', path: definitionsPath};
-  if (step === 2) return {method: 'POST', path: deployPath};
+  if (step === 2) {
+    return {
+      method: 'POST',
+      path: isLogical ? cliDeployPath : synchronousDeployPath,
+    };
+  }
   const reads = isLogical ? ++logicalBuildReads : ++transportBuildReads;
   if (reads > MAX_READS_AFTER_DEPLOY) fail('sequence');
   return {method: 'GET', path: buildPath};
@@ -115,7 +144,11 @@ function validateLogical(method, uri, options) {
     if (!form || Object.keys(form).sort().join(',') !== 'gitHash,sourceFile' || !stream || stream.path !== policy.sourcePath) {
       fail('deploy_body');
     }
-    if (policy.sourceMode === 'tarball' ? gitHash !== '' : !/^[a-f0-9]{40}$/.test(gitHash)) fail('deploy_body');
+    if (policy.sourceMode === 'tarball') {
+      if (gitHash !== '' || policy.expectedSourceId !== `sha256:${digestFile(policy.sourcePath)}`) fail('deploy_body');
+    } else if (gitHash !== policy.expectedSourceId || !/^[a-f0-9]{40}$/.test(gitHash)) {
+      fail('deploy_body');
+    }
   } else if (options && (options.formData || options.body)) {
     fail('body');
   }
@@ -208,11 +241,21 @@ Module._load = function guardedLoad(request, parent, isMain) {
     if (typeof exported[methodName] !== 'function') continue;
     const original = exported[methodName].bind(exported);
     exported[methodName] = function guardedPromiseRequest(uri, options) {
+      const deployment = logicalStep === 2;
       validateLogical(methodName.toUpperCase(), uri, options || {});
       const safe = Object.assign({}, options || {}, {
         followRedirect: false, followAllRedirects: false, maxRedirects: 0, strictSSL: true,
       });
-      const promise = original(uri, safe);
+      let guardedUri = uri;
+      if (deployment) {
+        const parsed = uri instanceof URL ? new URL(uri.href) : new URL(String(uri));
+        parsed.searchParams.delete('detached');
+        guardedUri = parsed.toString();
+      }
+      if (deployment && policy.sourceMode === 'tarball') {
+        safe.formData = Object.assign({}, safe.formData, {gitHash: policy.expectedSourceId});
+      }
+      const promise = original(guardedUri, safe);
       if (logicalStep === 3) {
         promise.then(
           (value) => emit({

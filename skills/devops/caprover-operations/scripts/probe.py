@@ -19,7 +19,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from typing import Any
+from typing import Any, TypeAlias
 from urllib.parse import urlsplit
 
 
@@ -63,6 +63,10 @@ class NeutralArgumentError(Exception):
 class NeutralArgumentParser(argparse.ArgumentParser):
     def error(self, _message: str) -> None:
         raise NeutralArgumentError
+
+
+SourceAttributes: TypeAlias = tuple[int, int, int, int, int, int, int]
+SourceWitness: TypeAlias = tuple[Path, SourceAttributes, bytes]
 
 
 def report(status: str, reason: str, **counts: Any) -> dict[str, Any]:
@@ -109,7 +113,19 @@ def reject_git_ancestry(path: Path) -> None:
         raise ProbeError("configuration_error")
 
 
-def read_protected_json(raw_path: str) -> tuple[dict[str, Any], bytes]:
+def source_attributes(info: os.stat_result) -> SourceAttributes:
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_mode,
+        info.st_uid,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+    )
+
+
+def read_protected_bytes(raw_path: str | Path) -> tuple[Path, bytes, SourceAttributes]:
     requested = Path(raw_path)
     if not requested.is_absolute():
         raise ProbeError("configuration_error")
@@ -127,10 +143,14 @@ def read_protected_json(raw_path: str) -> tuple[dict[str, Any], bytes]:
             | getattr(os, "O_NONBLOCK", 0)
         )
         fd = os.open(requested, flags)
-        info = os.fstat(fd)
-        if (before.st_dev, before.st_ino) != (info.st_dev, info.st_ino):
+        opened = os.fstat(fd)
+        if (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino):
             raise ProbeError("protected_file_permissions")
-        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or opened.st_uid != os.getuid()
+            or opened.st_mode & 0o077
+        ):
             raise ProbeError("protected_file_permissions")
         chunks: list[bytes] = []
         remaining = MAX_CONFIG_BYTES + 1
@@ -141,6 +161,14 @@ def read_protected_json(raw_path: str) -> tuple[dict[str, Any], bytes]:
             chunks.append(chunk)
             remaining -= len(chunk)
         data = b"".join(chunks)
+        finished = os.fstat(fd)
+        named = requested.lstat()
+        if not (
+            source_attributes(opened)
+            == source_attributes(finished)
+            == source_attributes(named)
+        ):
+            raise ProbeError("configuration_error")
     except ProbeError:
         raise
     except (OSError, RuntimeError):
@@ -148,9 +176,39 @@ def read_protected_json(raw_path: str) -> tuple[dict[str, Any], bytes]:
     finally:
         if fd >= 0:
             os.close(fd)
-    if len(data) > MAX_CONFIG_BYTES:
+    if len(data) > MAX_CONFIG_BYTES or len(data) != finished.st_size:
         raise ProbeError("configuration_error")
-    return load_json_object(data), data
+    return requested, data, source_attributes(finished)
+
+
+def protected_json_with_witness(
+    raw_path: str,
+) -> tuple[dict[str, Any], bytes, SourceWitness]:
+    requested, data, attributes = read_protected_bytes(raw_path)
+    witness: SourceWitness = (
+        requested,
+        attributes,
+        hashlib.sha256(data).digest(),
+    )
+    return load_json_object(data), data, witness
+
+
+def read_protected_json(raw_path: str) -> tuple[dict[str, Any], bytes]:
+    value, data, _ = protected_json_with_witness(raw_path)
+    return value, data
+
+
+def source_unchanged(witness: SourceWitness) -> bool:
+    expected_path, expected_attributes, expected_sha256 = witness
+    try:
+        path, data, attributes = read_protected_bytes(expected_path)
+        return (
+            path == expected_path
+            and attributes == expected_attributes
+            and hashlib.sha256(data).digest() == expected_sha256
+        )
+    except Exception:
+        return False
 
 
 def exact_origin(value: Any, fixture_loopback: bool) -> str:
@@ -210,11 +268,13 @@ def exact_origin(value: Any, fixture_loopback: bool) -> str:
     return f"{parsed.scheme}://{host}{f':{port}' if port and port != default else ''}"
 
 
-def preflight(args: argparse.Namespace) -> tuple[str, dict[str, Any], Path, Path, str]:
+def preflight(
+    args: argparse.Namespace,
+) -> tuple[str, dict[str, Any], Path, Path, str, tuple[SourceWitness, SourceWitness]]:
     if any(key.startswith("CAPROVER_") or key in POLLUTANT_NAMES for key in os.environ):
         raise ProbeError("environment_pollution")
-    targets, _ = read_protected_json(args.targets)
-    registry, _ = read_protected_json(args.registry)
+    targets, _, targets_witness = protected_json_with_witness(args.targets)
+    registry, _, registry_witness = protected_json_with_witness(args.registry)
     if type(targets.get("version")) is not int or targets.get("version") != 1 or not isinstance(targets.get("targets"), list):
         raise ProbeError("configuration_error")
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", args.target):
@@ -297,7 +357,14 @@ def preflight(args: argparse.Namespace) -> tuple[str, dict[str, Any], Path, Path
         if not isinstance(app_token, str) or len(app_token) > 8192:
             raise ProbeError("registry_schema_error")
         snapshot["appToken"] = app_token
-    return origin, snapshot, cli_root, node, str(guard)
+    return (
+        origin,
+        snapshot,
+        cli_root,
+        node,
+        str(guard),
+        (targets_witness, registry_witness),
+    )
 
 
 def node_version(node: Path) -> str:
@@ -335,7 +402,15 @@ def close_fd(fd: int) -> None:
         pass
 
 
-def execute(args: argparse.Namespace, origin: str, machine: dict[str, Any], cli_root: Path, node: Path, guard: str) -> dict[str, Any]:
+def execute(
+    args: argparse.Namespace,
+    origin: str,
+    machine: dict[str, Any],
+    cli_root: Path,
+    node: Path,
+    guard: str,
+    source_witnesses: tuple[SourceWitness, SourceWitness],
+) -> dict[str, Any]:
     version = node_version(node)
     nonce = os.urandom(24).hex()
     events: list[dict[str, Any]] = []
@@ -493,6 +568,9 @@ def execute(args: argparse.Namespace, origin: str, machine: dict[str, Any], cli_
     requests = len(request_events)
     responses = len(http_events)
     base = {"node_version": version, "request_count": requests, "response_count": responses}
+    source_states = tuple(source_unchanged(witness) for witness in source_witnesses)
+    if not all(source_states):
+        return report("inconclusive", "source_changed", **base)
     if stop_reason == "guard_incompatible":
         return report("inconclusive", stop_reason, **base)
     ready = [event for event in events if event.get("type") == "guard_ready"]
@@ -626,7 +704,7 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         print(json.dumps(report("inconclusive", "interrupted"), sort_keys=True))
         return 130
-    except (OSError, ValueError, subprocess.SubprocessError):
+    except Exception:
         print(json.dumps(report("inconclusive", "internal_error"), sort_keys=True))
         return 1
     print(json.dumps(result, sort_keys=True))

@@ -9,6 +9,10 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def _collapsed(path: Path) -> str:
+    return " ".join(path.read_text(encoding="utf-8").split())
+
+
 def test_skill_frontmatter_and_requested_public_files() -> None:
     expected = {
         "SKILL.md", "README.md",
@@ -45,3 +49,29 @@ def test_probe_contract_is_neutral_and_read_only() -> None:
     assert "CAPROVER_PASSWORD" not in source
     assert "followRedirect: false" in guard
     assert "strictSSL: true" in guard
+
+
+def test_authorization_contract_reuses_only_current_sufficient_scoped_grants() -> None:
+    skill = _collapsed(ROOT / "SKILL.md")
+    lifecycle = _collapsed(ROOT / "references" / "app-lifecycle-and-retirement.md")
+    public_contract = " ".join((skill, lifecycle)).lower()
+
+    assert "obtain separate explicit authorization immediately before each applicable gate" not in public_contract
+    assert "separate, immediate deletion authorization" not in public_contract
+
+    canonical_policy = (
+        "Verify that explicit, current, and sufficient authorization exists for each action. "
+        "Reuse standing or session grants within their scope. "
+        "Request a new decision when the scope is new, insufficient, or ambiguous. "
+        "Authorization to access credentials does not authorize deployment, restart, or deletion."
+    )
+    assert canonical_policy in skill
+
+    assert (
+        "Before deletion, verify that an explicit, current, and sufficient grant names the app "
+        "and volume disposition."
+    ) in lifecycle
+    assert "A standing or session grant may be reused only within its scope." in lifecycle
+    assert (
+        "Credential-access authorization does not authorize deployment, restart, or deletion."
+    ) in lifecycle

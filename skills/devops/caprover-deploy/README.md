@@ -10,8 +10,11 @@ runtime installation**. Start with [SKILL.md](SKILL.md) and the
 > source, method, and the companion caprover-operations probe contract. Produce
 > only a plan first. Do not discover or renew credentials, create an app, change
 > configuration, upload, click Force Build, or install anything until the specific
-> action is authorized. Treat inconclusive evidence as a blocker, not permission
-> to change methods or repeat a mutation.
+> action is covered by an explicit, current and sufficient grant. Reuse a standing
+> or session grant only within its scope; request a new decision for new,
+> insufficient or ambiguous scope. Credential access is not deployment, restart
+> or deletion authorization. Treat inconclusive evidence as a blocker, not
+> permission to change methods or repeat a mutation.
 
 ## Requirements and inputs
 
@@ -21,8 +24,10 @@ runtime installation**. Start with [SKILL.md](SKILL.md) and the
 - For local branch upload: an explicitly selected checkout/branch and system Git
   at `/usr/bin/git` or `/bin/git`, with root-owned, non-writable executable and
   containing directory. An arbitrary ambient `PATH` is not inherited.
-- For dashboard Force Build: Playwright and its browser must already be available.
-  Installing them and authorizing login are separate decisions.
+- For dashboard Force Build: pinned Playwright `1.58.0` and its Chromium browser
+  must be available. Apply prepares and reuses one local browser before credential
+  access or controller writes; plan mode does not launch it. Provisioning test
+  dependencies and authorizing login are separate decisions.
 - Protected target bindings and a saved-session registry use the same format as
   the companion [operations examples](../caprover-operations/templates/targets.example.json).
   Copy/configure examples **outside Git**, use owner-only regular files, and never
@@ -42,21 +47,33 @@ no-credential plan; a plan is not evidence that a later deployment will work.
 - HTTPS/WebSocket changes, backups, migrations and retirement are outside this
   helper. Unsupported requests fail before writes.
 - `--allow-login` and `--allow-create` are independent of `--apply`.
-- An accepted upload, idle build, or zero CLI exit is insufficient. The controller
-  requires newer generation/image evidence; application health is a separate test.
+- An accepted upload, idle build, zero CLI exit, or merely newer generation/image
+  is insufficient. CLI confirmation requires the exact awaited synchronous status
+  `100` response and a matching expected source. An acknowledged Force Build stays
+  nonzero `reconcile_required` because the reviewed webhook cannot attribute
+  scheduling, even if the expected source is later observed. Application health
+  remains a separate test.
 - A possible-write failure ends with `reconcile_required`, not another method.
 
 ## Local verification, not live validation
 
-From the repository root, with the official dependency installed in a disposable
-location:
+From the repository root, with the official CLI and pinned Playwright Python
+dependency installed in disposable locations, provision isolated Chromium and
+run the mandatory fixtures with their paths explicit:
 
 ```sh
+PLAYWRIGHT_BROWSERS_PATH="$BROWSER_FIXTURE_DIR" \
+  python -m playwright install --with-deps chromium
+
+CI=1 \
+PLAYWRIGHT_BROWSERS_PATH="$BROWSER_FIXTURE_DIR" \
 CAPROVER_TEST_CLI_ROOT="$CLI_FIXTURE_DIR/node_modules/caprover" \
+PYTHONDONTWRITEBYTECODE=1 \
   python -m pytest skills/devops/caprover-deploy/tests -q -o addopts=''
 ```
 
-The suite uses synthetic credentials, local fixtures, and mocked boundaries.
-It does not authorize or prove a real CapRover deployment, live dashboard
-compatibility, SSH/container health, or production readiness. See the repository's
-[review contract](../../../docs/caprover-operations-review.md) for the full gate.
+Use a fresh `BROWSER_FIXTURE_DIR`; do not reuse a personal browser profile. The
+suite uses synthetic credentials, local fixtures, and mocked boundaries. It does
+not authorize or prove a real CapRover deployment, live dashboard compatibility,
+SSH/container health, or production readiness. See the repository's [review
+contract](../../../docs/caprover-operations-review.md) for the full gate.

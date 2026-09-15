@@ -10,15 +10,18 @@ The commit identifiers above are immutable review references. Runtime capability
 
 ## Official source anchors
 
-- [Server source at the reviewed revision](https://github.com/caprover/caprover/tree/c0db36f334071599fd732e6f355e55444578b177), including `src/handlers/users/apps/appdefinition/AppDefinitionHandler.ts`, `src/routes/user/apps/appdata/AppDataRouter.ts`, and `src/api/ApiStatusCodes.ts`.
+- [Server source at the reviewed revision](https://github.com/caprover/caprover/tree/c0db36f334071599fd732e6f355e55444578b177), including `src/handlers/users/apps/appdefinition/AppDefinitionHandler.ts`, `src/datastore/AppsDataStore.ts`, `src/routes/user/apps/appdata/AppDataRouter.ts`, and `src/api/ApiStatusCodes.ts`.
 - [Official CLI at the reviewed revision](https://github.com/caprover/caprover-cli/tree/418b8893fb2e49da02b9176cfd5e40b5edf76f64), including the built deployment, validation, API and HTTP client behavior in the published npm package.
 - [Official CLI command documentation](https://caprover.com/docs/cli-commands.html).
 
 ## Adopted and rejected behavior
 
 Adopted: explicit local-artifact versus remote-Git intent, saved-session reuse,
-full-update preservation/readback, detached-upload acknowledgment, strict build
-fields and post-trigger generation evidence. The Python controller and request
+full-update preservation/readback, synchronous guarded-CLI transport adaptation,
+detached-upload/webhook acknowledgment limits, strict build fields, and exact
+observational source correlation through the persisted version `gitHash`. The
+client-supplied tarball digest is a source fingerprint, not server-native artifact
+attestation or an operation receipt. The Python controller and request
 interlock are original implementations, not imported private skill packages.
 
 Rejected: incomplete default-filled update examples, empty-Git-hash build claims,

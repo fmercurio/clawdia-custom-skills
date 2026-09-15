@@ -30,7 +30,7 @@ Use for diagnosing a preselected saved session, reviewing an application change,
 
 ## Authorization gates
 
-Obtain separate explicit authorization immediately before each applicable gate: credential access, configuration write, deployment/build, start or scale-up, data migration, and deletion. Authentication renewal is a separate operation and is never performed by the probe. A timeout on a mutation may mean it applied: reconcile by reading current state before considering a retry.
+Verify that explicit, current, and sufficient authorization exists for each action. Reuse standing or session grants within their scope. Request a new decision when the scope is new, insufficient, or ambiguous. Authorization to access credentials does not authorize deployment, restart, or deletion. Apply this policy to credential access, configuration writes, deployment/build, start or scale-up, data migration, and deletion; distinct scopes do not require repeated confirmation when a current grant already covers the exact action. Authentication renewal is a separate operation and is never performed by the probe. A timeout on a mutation may mean it applied: reconcile by reading current state before considering a retry.
 
 Use [templates/operation-report.md](templates/operation-report.md) for a sanitized record. Do not put credentials, raw API responses, private snapshots, or private infrastructure identifiers in reports.
 
@@ -38,6 +38,7 @@ Use [templates/operation-report.md](templates/operation-report.md) for a sanitiz
 
 - Default to reads. A successful API acceptance is not proof that an operation completed.
 - Bind a saved CLI alias to an exact expected origin in an owner-only targets file outside source control.
+- The accepted targets and registry bytes remain the private request snapshot through the probe's end-of-query source recheck. Concurrent source change makes the result inconclusive; the probe neither locks nor rewrites operator files.
 - Do not accept a target-host override, relax TLS, follow redirects, use proxies, or reuse an ambient CapRover environment.
 - The Node preload is a narrow interlock for the pinned CLI layout, not a universal sandbox. Missing or incompatible guard, CLI, schema, or evidence is inconclusive and fails closed.
 - Never blindly retry a timed-out write or delete. Verify readback and app-specific health first.
@@ -53,9 +54,10 @@ Use [templates/operation-report.md](templates/operation-report.md) for a sanitiz
 ## Verification checklist
 
 - [ ] Approved alias and exact origin come from protected files outside Git.
+- [ ] A conclusive result covers source stability only from the accepted reads through the end-of-query recheck, not changes after the response.
 - [ ] The CLI version, runtime version and mandatory guard match the pinned contract.
 - [ ] Diagnosis used no login, token renewal, redirect or write endpoint.
 - [ ] Reports contain only fixed neutral metadata, not server payloads or credentials.
 - [ ] Full real-CLI fixtures ran; skips or sandbox restrictions are reported explicitly.
-- [ ] Any later mutation has its own authorization, private recovery snapshot and readback.
+- [ ] Any later mutation has explicit, current and sufficient authorization for its exact scope, plus a private recovery snapshot and readback.
 - [ ] Application-specific health and representative live validation remain separate gates.

@@ -2,6 +2,8 @@
 
 This local-only candidate separates saved-session diagnosis from authorized CapRover writes. `probe.py` invokes the official CapRover CLI noninteractively against a protected alias/origin binding. It snapshots only the selected saved machine into a private temporary config store, invokes the mandatory guard, suppresses raw CLI output, and returns fixed, typed metadata.
 
+Authorization follows the canonical [action-scoped gates](SKILL.md#authorization-gates). Before acting, verify that an explicit, current and sufficient standing or session grant covers the exact scope. Seek a new decision only when the scope is new, insufficient or ambiguous. Permission to access a credential never authorizes deployment, restart or deletion.
+
 ## Probe interface
 
 Copy `templates/targets.example.json` outside the repository, replace the example, set both that file and the explicitly supplied CapRover registry to owner-only mode, then run:
@@ -17,6 +19,10 @@ python3 scripts/probe.py \
 ```
 
 The targets file contains origins, never tokens. The registry is an explicit input; the probe does not search a home directory, credential manager, vault, or environment. Production targets require HTTPS. `--fixture-loopback` permits only explicit HTTP loopback tests.
+
+Each accepted targets or registry value is tied to a private witness captured from the same protected file descriptor and bytes that supplied it. Every in-flight request continues to use that original destination and credential snapshot. After subprocess and private-temporary-state cleanup, a bounded read-only recheck must establish that both sources still have the accepted identity, protected metadata, and content. A changed, replaced, deleted, or unreadable source makes the result `inconclusive` with reason `source_changed`, including when the observed session response otherwise indicates valid or invalid authentication.
+
+This interval runs from each accepted source read through the end-of-query recheck. The probe does not lock out concurrent writers and makes no source-stability guarantee after it returns. It never redirects to newly supplied values, refreshes credentials, restores stale bytes, or rewrites operator source files.
 
 The probe refuses inherited `CAPROVER_*`, `NODE_OPTIONS`, proxy, and Node TLS override variables. It runs exactly:
 
@@ -42,4 +48,4 @@ If `CAPROVER_TEST_CLI_ROOT` is absent, real-CLI fixture tests report skips; that
 
 ## Limitations
 
-This diagnoses one narrow session signal. It does not prove broad authorization, server health, application health, or credential freshness beyond the observed sequence. Deployment is a separate operation governed by the companion `caprover-deploy` contract; a probe success never authorizes it. The mandatory monkeypatch guard reduces risk for one inspected dependency layout; it is not OS isolation and does not defend against a malicious local Node binary, CLI package, or same-user process. Protect the inputs and trust the explicitly selected installations.
+This diagnoses one narrow session signal. It does not prove broad authorization, server health, application health, credential freshness beyond the observed sequence, or source stability after the response. Deployment is a separate operation governed by the companion `caprover-deploy` contract; a probe success never authorizes it. The mandatory monkeypatch guard reduces risk for one inspected dependency layout; it is not OS isolation and does not defend against a malicious local Node binary, CLI package, or same-user process. Protect the inputs and trust the explicitly selected installations.

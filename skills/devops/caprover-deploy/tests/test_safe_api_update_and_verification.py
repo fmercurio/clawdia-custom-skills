@@ -563,21 +563,34 @@ class _VerificationAPI:
         return False, copy.deepcopy(self.status)
 
 
-def _deployment_definition(version=8, instance_count=2):
+SOURCE_SHA = "1" * 40
+SOURCE_FINGERPRINT = "sha256:" + "2" * 64
+
+
+def _deployment_definition(
+    version=8, instance_count=2, source_id=SOURCE_SHA, is_legacy=False
+):
     return {
         "appName": "my-app",
         "deployedVersion": version,
         "versions": [
-            {"version": version, "deployedImageName": f"registry.example/app:{version}"}
+            {
+                "version": version,
+                "deployedImageName": f"registry.example/app:{version}",
+                "gitHash": source_id,
+            }
         ],
         "instanceCount": instance_count,
+        "isLegacyAppName": is_legacy,
     }
 
 
 def test_verify_deploy_rejects_idle_stale_generation(capsys):
     api = _VerificationAPI(_deployment_definition(version=7))
 
-    assert cd.verify_deploy(api, "my-app", baseline=7) is False
+    assert cd.verify_deploy(
+        api, "my-app", baseline=7, expected_source_id=SOURCE_SHA
+    ) is False
 
     output = capsys.readouterr().out
     assert "Deploy verified" not in output
@@ -587,13 +600,46 @@ def test_verify_deploy_rejects_idle_stale_generation(capsys):
 def test_verify_deploy_rejects_generation_older_than_baseline():
     api = _VerificationAPI(_deployment_definition(version=6))
 
-    assert cd.verify_deploy(api, "my-app", baseline=7) is False
+    assert cd.verify_deploy(
+        api, "my-app", baseline=7, expected_source_id=SOURCE_SHA
+    ) is False
 
 
-def test_verify_deploy_accepts_changed_generation_with_image_without_claiming_health(capsys):
+def test_verify_deploy_requires_pinned_expected_source_identity(capsys):
     api = _VerificationAPI(_deployment_definition(version=8))
 
-    assert cd.verify_deploy(api, "my-app", baseline=7) is True
+    assert cd.verify_deploy(api, "my-app", baseline=7) is False
+
+    output = capsys.readouterr().out
+    assert "Deployment evidence unavailable: expected source identity required" in output
+    assert "source, and image reference confirmed" not in output
+
+
+def test_verify_deploy_rejects_malformed_source_identity_without_echoing_it(capsys):
+    malformed_source = "SENSITIVE-CANARY-not-a-source-id"
+    api = _VerificationAPI(_deployment_definition(version=8))
+
+    assert cd.verify_deploy(
+        api,
+        "my-app",
+        baseline=7,
+        expected_source_id=malformed_source,
+    ) is False
+
+    output = capsys.readouterr().out
+    assert "Deployment evidence unavailable: expected source identity required" in output
+    assert malformed_source not in output
+
+
+@pytest.mark.parametrize("source_id", [SOURCE_SHA, SOURCE_FINGERPRINT])
+def test_verify_deploy_accepts_changed_generation_with_pinned_source_without_claiming_health(
+    capsys, source_id
+):
+    api = _VerificationAPI(_deployment_definition(version=8, source_id=source_id))
+
+    assert cd.verify_deploy(
+        api, "my-app", baseline=7, expected_source_id=source_id
+    ) is True
 
     output = capsys.readouterr().out
     assert "application health not proven" in output
@@ -601,33 +647,238 @@ def test_verify_deploy_accepts_changed_generation_with_image_without_claiming_he
     assert "app:8" not in output
 
 
-def test_verify_deploy_requires_exact_service_and_intended_two_replicas(monkeypatch):
-    api = _VerificationAPI(_deployment_definition(version=8, instance_count=2))
+def test_verify_deploy_requires_matching_expected_source_identity(capsys):
+    definition = _deployment_definition(version=8)
+    api = _VerificationAPI(definition)
+
+    assert cd.verify_deploy(
+        api,
+        "my-app",
+        baseline=7,
+        expected_source_id=SOURCE_SHA,
+    ) is True
+    assert cd.verify_deploy(
+        api,
+        "my-app",
+        baseline=7,
+        expected_source_id="2" * 40,
+    ) is False
+
+    output = capsys.readouterr().out
+    assert "generation/source not confirmed" in output
+
+
+def test_verify_deploy_serializes_one_remote_command_and_preserves_template_tab_through_shell(
+    monkeypatch,
+):
+    api = _VerificationAPI(
+        _deployment_definition(version=8, instance_count=2, is_legacy=True)
+    )
+    real_run = cd.subprocess.run
     calls = []
 
     def run(command, **kwargs):
-        calls.append((command, kwargs))
-        return SimpleNamespace(returncode=0, stdout="srv-captain--my-app 2/2\n")
+        remote_command = " ".join(command[2:])
+        shell_script = """
+docker() {
+    printf 'argc=<%s>\\n' "$#" >&2
+    for argument do
+        printf 'arg=<%s>\\n' "$argument" >&2
+    done
+    printf 'srv-captain--my-app\\t2/2\\n'
+}
+""" + remote_command
+        completed = real_run(
+            ["/bin/sh", "-c", shell_script],
+            capture_output=True,
+            text=True,
+            timeout=kwargs["timeout"],
+        )
+        calls.append((command, kwargs, completed.stderr.splitlines()))
+        return completed
 
     monkeypatch.setattr(cd.subprocess, "run", run)
 
-    assert cd.verify_deploy(api, "my-app", ssh_cmd=["ssh", "host"], baseline=7) is True
-    assert calls == [
-        (
-            [
-                "ssh",
-                "host",
-                "docker",
-                "service",
-                "ls",
-                "--filter",
-                "name=srv-captain--my-app",
-                "--format",
-                "{{.Name}}\t{{.Replicas}}",
-            ],
-            {"capture_output": True, "text": True, "timeout": 15},
-        )
+    assert cd.verify_deploy(
+        api,
+        "my-app",
+        ssh_cmd=["ssh", "host"],
+        baseline=7,
+        expected_source_id=SOURCE_SHA,
+    ) is True
+    assert len(calls) == 1
+    command, kwargs, parsed_arguments = calls[0]
+    assert command[:2] == ["ssh", "host"]
+    assert len(command[2:]) == 1
+    assert kwargs == {"capture_output": True, "text": True, "timeout": 15}
+    assert parsed_arguments == [
+        "argc=<6>",
+        "arg=<service>",
+        "arg=<ls>",
+        "arg=<--filter>",
+        "arg=<name=srv-captain--my-app>",
+        "arg=<--format>",
+        "arg=<{{.Name}}\t{{.Replicas}}>",
     ]
+
+
+@pytest.mark.parametrize(
+    ("is_legacy", "service_name"),
+    [(False, "my-app"), (True, "srv-captain--my-app")],
+)
+def test_verify_deploy_uses_supported_server_service_name(
+    monkeypatch, is_legacy, service_name
+):
+    api = _VerificationAPI(
+        _deployment_definition(version=8, instance_count=2, is_legacy=is_legacy)
+    )
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        return SimpleNamespace(returncode=0, stdout=f"{service_name}\t2/2\n")
+
+    monkeypatch.setattr(cd.subprocess, "run", run)
+
+    assert cd.verify_deploy(
+        api,
+        "my-app",
+        ssh_cmd=["ssh", "host"],
+        baseline=7,
+        expected_source_id=SOURCE_SHA,
+    ) is True
+    assert len(calls) == 1
+    assert len(calls[0][2:]) == 1
+    assert f"name={service_name}" in calls[0][2]
+
+
+@pytest.mark.parametrize(
+    ("is_legacy", "service_name"),
+    [(False, "my-app"), (True, "srv-captain--my-app")],
+)
+def test_verify_deploy_accepts_one_healthy_exact_row_with_healthy_prefix_sibling(
+    monkeypatch, is_legacy, service_name
+):
+    api = _VerificationAPI(
+        _deployment_definition(version=8, instance_count=2, is_legacy=is_legacy)
+    )
+    service_rows = f"{service_name}\t2/2\n{service_name}-worker\t2/2\n"
+    monkeypatch.setattr(
+        cd.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=service_rows),
+    )
+
+    assert cd.verify_deploy(
+        api,
+        "my-app",
+        ssh_cmd=["ssh", "host"],
+        baseline=7,
+        expected_source_id=SOURCE_SHA,
+    ) is True
+
+
+@pytest.mark.parametrize(
+    ("is_legacy", "service_name"),
+    [(False, "my-app"), (True, "srv-captain--my-app")],
+)
+@pytest.mark.parametrize(
+    "rows",
+    [
+        "{service_name}-worker\t2/2\n",
+        "{service_name}\t2/2\n{service_name}\t2/2\n",
+        "{service_name}\t1/2\n{service_name}-worker\t2/2\n",
+    ],
+    ids=["sibling-only", "duplicate-exact-target", "unhealthy-target-healthy-sibling"],
+)
+def test_verify_deploy_rejects_prefix_results_without_one_healthy_exact_target(
+    monkeypatch, is_legacy, service_name, rows
+):
+    api = _VerificationAPI(
+        _deployment_definition(version=8, instance_count=2, is_legacy=is_legacy)
+    )
+    monkeypatch.setattr(
+        cd.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(
+            returncode=0,
+            stdout=rows.format(service_name=service_name),
+        ),
+    )
+
+    assert cd.verify_deploy(
+        api,
+        "my-app",
+        ssh_cmd=["ssh", "host"],
+        baseline=7,
+        expected_source_id=SOURCE_SHA,
+    ) is False
+
+
+@pytest.mark.parametrize("legacy_flag", [None, 0, 1, "false", {}, []])
+def test_verify_deploy_rejects_missing_or_malformed_legacy_name_flag(
+    monkeypatch, legacy_flag
+):
+    definition = _deployment_definition(version=8, instance_count=2)
+    if legacy_flag is None:
+        definition.pop("isLegacyAppName")
+    else:
+        definition["isLegacyAppName"] = legacy_flag
+    api = _VerificationAPI(definition)
+    calls = []
+    monkeypatch.setattr(
+        cd.subprocess,
+        "run",
+        lambda *args, **kwargs: calls.append((args, kwargs))
+        or SimpleNamespace(returncode=0, stdout="my-app\t2/2\n"),
+    )
+
+    assert cd.verify_deploy(
+        api,
+        "my-app",
+        ssh_cmd=["ssh", "host"],
+        baseline=7,
+        expected_source_id=SOURCE_SHA,
+    ) is False
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    "service_rows",
+    [
+        "",
+        "my-app\t1/2\n",
+        "my-app\t3/2\n",
+        "my-app\t2/3\n",
+        "my-app\t2/2\nmy-app\t2/2\n",
+        "my-app-worker\t2/2\n",
+    ],
+    ids=[
+        "zero",
+        "partial",
+        "excess-running",
+        "excess-desired",
+        "duplicates",
+        "similar-name",
+    ],
+)
+def test_verify_deploy_requires_one_exact_row_matching_instance_count(
+    monkeypatch, service_rows
+):
+    api = _VerificationAPI(_deployment_definition(version=8, instance_count=2))
+    monkeypatch.setattr(
+        cd.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=service_rows),
+    )
+
+    assert cd.verify_deploy(
+        api,
+        "my-app",
+        ssh_cmd=["ssh", "host"],
+        baseline=7,
+        expected_source_id=SOURCE_SHA,
+    ) is False
 
 
 def test_verify_deploy_rejects_one_of_one_when_two_replicas_are_intended(monkeypatch):
@@ -637,11 +888,17 @@ def test_verify_deploy_rejects_one_of_one_when_two_replicas_are_intended(monkeyp
         "run",
         lambda *args, **kwargs: SimpleNamespace(
             returncode=0,
-            stdout="srv-captain--my-app 1/1\n",
+            stdout="my-app\t1/1\n",
         ),
     )
 
-    assert cd.verify_deploy(api, "my-app", ssh_cmd=["ssh", "host"], baseline=7) is False
+    assert cd.verify_deploy(
+        api,
+        "my-app",
+        ssh_cmd=["ssh", "host"],
+        baseline=7,
+        expected_source_id=SOURCE_SHA,
+    ) is False
 
 
 def test_verify_deploy_rejects_zero_intended_replicas_without_ssh(monkeypatch):
@@ -652,7 +909,13 @@ def test_verify_deploy_rejects_zero_intended_replicas_without_ssh(monkeypatch):
         lambda *args, **kwargs: pytest.fail("SSH must not run for an invalid replica target"),
     )
 
-    assert cd.verify_deploy(api, "my-app", ssh_cmd=["ssh", "host"], baseline=7) is False
+    assert cd.verify_deploy(
+        api,
+        "my-app",
+        ssh_cmd=["ssh", "host"],
+        baseline=7,
+        expected_source_id=SOURCE_SHA,
+    ) is False
 
 
 def test_verify_deploy_rejects_failed_ssh_check_without_printing_output(monkeypatch, capsys):
@@ -667,7 +930,13 @@ def test_verify_deploy_rejects_failed_ssh_check_without_printing_output(monkeypa
         ),
     )
 
-    assert cd.verify_deploy(api, "my-app", ssh_cmd=["ssh", "host"], baseline=7) is False
+    assert cd.verify_deploy(
+        api,
+        "my-app",
+        ssh_cmd=["ssh", "host"],
+        baseline=7,
+        expected_source_id=SOURCE_SHA,
+    ) is False
     assert "SENSITIVE-CANARY" not in capsys.readouterr().out
 
 
@@ -676,5 +945,7 @@ def test_verify_deploy_sanitizes_unexpected_exception(capsys):
         def get_build_status(self, app_name):
             raise RuntimeError("SENSITIVE-CANARY-token-path")
 
-    assert cd.verify_deploy(BrokenAPI(), "my-app", baseline=7) is False
+    assert cd.verify_deploy(
+        BrokenAPI(), "my-app", baseline=7, expected_source_id=SOURCE_SHA
+    ) is False
     assert "SENSITIVE-CANARY" not in capsys.readouterr().out

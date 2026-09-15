@@ -198,9 +198,54 @@ def loopback_server():
         server.server_close()
 
 
+@pytest.fixture
+def capture_server():
+    captured: list[tuple[str, str, str | None]] = []
+
+    class CaptureHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802 - stdlib interface
+            captured.append(("GET", self.path, self.headers.get("x-captain-auth")))
+            self.send_response(500)
+            self.end_headers()
+
+        def do_POST(self) -> None:  # noqa: N802 - stdlib interface
+            captured.append(("POST", self.path, self.headers.get("x-captain-auth")))
+            self.send_response(500)
+            self.end_headers()
+
+        def log_message(self, *_args: object) -> None:
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), CaptureHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield server, captured
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
 def protected_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value), encoding="utf-8")
     path.chmod(0o600)
+
+
+def protected_bytes(path: Path, value: bytes) -> None:
+    path.write_bytes(value)
+    path.chmod(0o600)
+
+
+def json_bytes(value: object) -> bytes:
+    return json.dumps(value).encode()
+
+
+def assert_source_state(path: Path, expected: bytes | None) -> None:
+    if expected is None:
+        assert not path.exists()
+    else:
+        assert path.read_bytes() == expected
 
 
 def probe_args(tmp_path: Path, cli_root: Path, node: str, origin: str, token: str) -> list[str]:
@@ -259,11 +304,19 @@ def test_invalid_token_is_concrete_auth_evidence_and_never_posts_login(
     server, requests = loopback_server
     FixtureHandler.mode = "invalid_token"
     origin = f"http://127.0.0.1:{server.server_port}"
-    code, result = invoke(*probe_args(tmp_path, cli_root, node, origin, "synthetic-token"))
+    token = "synthetic-token"
+    args = probe_args(tmp_path, cli_root, node, origin, token)
+    targets, registry = Path(args[1]), Path(args[5])
+    targets_before, registry_before = targets.read_bytes(), registry.read_bytes()
+    code, result = invoke(*args)
     assert code == 1
+    assert result["status"] == "invalid"
     assert result["reason"] == "authentication_rejected"
     assert result["request_count"] == 1
+    assert requests == [("GET", "/api/v2/user/apps/appDefinitions", token)]
     assert not any(method == "POST" for method, _, _ in requests)
+    assert targets.read_bytes() == targets_before
+    assert registry.read_bytes() == registry_before
 
 
 def test_http_403_is_authorization_evidence(
@@ -549,38 +602,176 @@ def test_protected_config_inside_git_fails_before_http(
 
 
 def test_source_mutation_cannot_redirect_or_overwrite_registry(
+    tmp_path: Path, cli_root: Path, node: str, loopback_server, capture_server
+) -> None:
+    server, requests = loopback_server
+    changed_server, captured = capture_server
+    origin = f"http://127.0.0.1:{server.server_port}"
+    changed_origin = f"http://127.0.0.1:{changed_server.server_port}"
+    token = "mutation-canary"
+    args = probe_args(tmp_path, cli_root, node, origin, token)
+    targets, registry = Path(args[1]), Path(args[5])
+    targets_after = json_bytes(
+        {"version": 1, "targets": [{"alias": "fixture", "origin": changed_origin}]}
+    )
+    registry_after = json_bytes({"CapMachines": []})
+
+    def mutate() -> None:
+        protected_bytes(targets, targets_after)
+        protected_bytes(registry, registry_after)
+
+    FixtureHandler.mutate = mutate
+    code, result = invoke(*args)
+    assert code != 0
+    assert result["status"] == "inconclusive"
+    assert result["reason"] == "source_changed"
+    assert requests == [
+        ("GET", "/api/v2/user/apps/appDefinitions", token),
+        ("GET", "/api/v2/user/system/info", token),
+        ("GET", "/api/v2/user/system/info", token),
+    ]
+    assert captured == []
+    assert_source_state(targets, targets_after)
+    assert_source_state(registry, registry_after)
+
+
+@pytest.mark.parametrize(
+    ("source", "mutation"),
+    [
+        ("targets", "content"),
+        ("registry", "content"),
+        ("targets", "same_content_replacement"),
+        ("registry", "same_content_replacement"),
+        ("targets", "deletion"),
+        ("registry", "deletion"),
+    ],
+)
+def test_single_source_mutation_is_inconclusive_without_redirect_or_overwrite(
+    source: str,
+    mutation: str,
+    tmp_path: Path,
+    cli_root: Path,
+    node: str,
+    loopback_server,
+    capture_server,
+) -> None:
+    server, requests = loopback_server
+    changed_server, captured = capture_server
+    origin = f"http://127.0.0.1:{server.server_port}"
+    changed_origin = f"http://127.0.0.1:{changed_server.server_port}"
+    token = "single-source-mutation-canary"
+    args = probe_args(tmp_path, cli_root, node, origin, token)
+    targets, registry = Path(args[1]), Path(args[5])
+    before = {"targets": targets.read_bytes(), "registry": registry.read_bytes()}
+    paths = {"targets": targets, "registry": registry}
+    mutated = paths[source]
+    expected: dict[str, bytes | None] = dict(before)
+    identity: dict[str, tuple[int, int]] = {}
+
+    if source == "targets":
+        changed_bytes = json_bytes(
+            {"version": 1, "targets": [{"alias": "fixture", "origin": changed_origin}]}
+        )
+    else:
+        changed_bytes = json_bytes(
+            {
+                "CapMachines": [
+                    {
+                        "name": "fixture",
+                        "baseUrl": changed_origin,
+                        "authToken": "changed-destination-token",
+                    }
+                ]
+            }
+        )
+
+    def mutate() -> None:
+        if mutation == "content":
+            protected_bytes(mutated, changed_bytes)
+            expected[source] = changed_bytes
+        elif mutation == "same_content_replacement":
+            replacement = mutated.with_name(f".{mutated.name}.replacement")
+            protected_bytes(replacement, before[source])
+            old = mutated.stat()
+            os.replace(replacement, mutated)
+            new = mutated.stat()
+            identity["old"] = (old.st_dev, old.st_ino)
+            identity["new"] = (new.st_dev, new.st_ino)
+        else:
+            mutated.unlink()
+            expected[source] = None
+
+    FixtureHandler.mutate = mutate
+    code, result = invoke(*args)
+    assert code != 0
+    assert result["status"] == "inconclusive"
+    assert result["reason"] == "source_changed"
+    assert requests == [
+        ("GET", "/api/v2/user/apps/appDefinitions", token),
+        ("GET", "/api/v2/user/system/info", token),
+        ("GET", "/api/v2/user/system/info", token),
+    ]
+    assert captured == []
+    assert_source_state(targets, expected["targets"])
+    assert_source_state(registry, expected["registry"])
+    if mutation == "same_content_replacement":
+        assert identity["new"] != identity["old"]
+
+
+def test_unchanged_sources_remain_valid_and_preserve_both_files(
     tmp_path: Path, cli_root: Path, node: str, loopback_server
 ) -> None:
     server, requests = loopback_server
     origin = f"http://127.0.0.1:{server.server_port}"
-    args = probe_args(tmp_path, cli_root, node, origin, "mutation-canary")
+    token = "preserve-canary"
+    args = probe_args(tmp_path, cli_root, node, origin, token)
+    targets, registry = Path(args[1]), Path(args[5])
+    targets_before, registry_before = targets.read_bytes(), registry.read_bytes()
+    code, result = invoke(*args)
+    assert code == 0
+    assert result["status"] == "valid"
+    assert result["reason"] == "session_valid"
+    assert requests == [
+        ("GET", "/api/v2/user/apps/appDefinitions", token),
+        ("GET", "/api/v2/user/system/info", token),
+        ("GET", "/api/v2/user/system/info", token),
+    ]
+    assert targets.read_bytes() == targets_before
+    assert registry.read_bytes() == registry_before
+
+
+def test_source_change_takes_precedence_over_authentication_rejection(
+    tmp_path: Path,
+    cli_root: Path,
+    node: str,
+    loopback_server,
+    capture_server,
+) -> None:
+    server, requests = loopback_server
+    changed_server, captured = capture_server
+    FixtureHandler.mode = "invalid_token"
+    origin = f"http://127.0.0.1:{server.server_port}"
+    changed_origin = f"http://127.0.0.1:{changed_server.server_port}"
+    token = "rejected-mutation-canary"
+    args = probe_args(tmp_path, cli_root, node, origin, token)
     targets, registry = Path(args[1]), Path(args[5])
     registry_before = registry.read_bytes()
+    targets_after = json_bytes(
+        {"version": 1, "targets": [{"alias": "fixture", "origin": changed_origin}]}
+    )
 
     def mutate() -> None:
-        protected_json(targets, {"version": 1, "targets": [{"alias": "fixture", "origin": "http://127.0.0.1:9"}]})
-        protected_json(registry, {"CapMachines": []})
+        protected_bytes(targets, targets_after)
 
     FixtureHandler.mutate = mutate
     code, result = invoke(*args)
-    assert code == 0 and result["status"] == "valid"
-    assert len(requests) == 3
-    # The caller-owned registry mutation is visible, but the probe itself never
-    # writes it back or restores stale bytes over that concurrent owner change.
-    assert registry.read_bytes() != registry_before
-
-
-def test_registry_bytes_are_preserved(
-    tmp_path: Path, cli_root: Path, node: str, loopback_server
-) -> None:
-    server, _ = loopback_server
-    origin = f"http://127.0.0.1:{server.server_port}"
-    args = probe_args(tmp_path, cli_root, node, origin, "preserve-canary")
-    registry = Path(args[5])
-    before = registry.read_bytes()
-    code, _ = invoke(*args)
-    assert code == 0
-    assert registry.read_bytes() == before
+    assert code != 0
+    assert result["status"] == "inconclusive"
+    assert result["reason"] == "source_changed"
+    assert requests == [("GET", "/api/v2/user/apps/appDefinitions", token)]
+    assert captured == []
+    assert_source_state(targets, targets_after)
+    assert_source_state(registry, registry_before)
 
 
 def test_redirect_is_rejected_without_external_token_delivery(

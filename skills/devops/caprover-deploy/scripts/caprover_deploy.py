@@ -15,6 +15,7 @@ import copy
 import json
 import os
 import re
+import shlex
 import signal
 import stat
 import subprocess
@@ -40,9 +41,11 @@ MAX_API_ERROR_BYTES = 8_192
 MAX_PROTECTED_JSON_BYTES = 1_048_576
 SUPPORTED_CLI_VERSION = "2.4.4"
 SUPPORTED_NODE_VERSION = "26.7.0"
-DEPLOYMENT_GUARD_SHA256 = "6e1bcef46b6367575db593a0d8fd0338bc539a7d97dc5f5a13f3a861b8c54bf7"
+DEPLOYMENT_GUARD_SHA256 = "ade8432cefb00512b81fc86d0717d6d8c70c2087d2fc88e119b8ee6be7692b81"
 APP_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 BRANCH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,200}$")
+FULL_GIT_SHA_RE = re.compile(r"^[a-f0-9]{40}$")
+SOURCE_FINGERPRINT_RE = re.compile(r"^sha256:[a-f0-9]{64}$")
 TRUSTED_GIT_EXECUTABLES = (Path("/usr/bin/git"), Path("/bin/git"))
 CLI_LAYOUT_HASHES = {
     "package.json": "8c09086e2e4e205ec55fd504516a5c4328ece2080ba7b8f0ef8de121e15754f7",
@@ -259,6 +262,7 @@ class CapRoverAPI:
             "networks": list,
             "deployedVersion": int,
             "versions": list,
+            "isAppBuilding": bool,
         }
         for field, expected_type in required_types.items():
             value = app.get(field)
@@ -286,8 +290,6 @@ class CapRoverAPI:
             port = app["containerHttpPort"]
             if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port < 65535:
                 raise CapRoverDeployError("caprover_response_inconclusive")
-        if "isAppBuilding" in app and not isinstance(app["isAppBuilding"], bool):
-            raise CapRoverDeployError("caprover_response_inconclusive")
         if "isLegacyAppName" in app and not isinstance(app["isLegacyAppName"], bool):
             raise CapRoverDeployError("caprover_response_inconclusive")
 
@@ -472,7 +474,9 @@ class CapRoverAPI:
         return value
 
     @staticmethod
-    def _has_deployment_evidence(app_definition, baseline_version=None):
+    def _has_deployment_evidence(
+        app_definition, baseline_version=None, expected_source_id=None
+    ):
         if not isinstance(app_definition, dict):
             return False
         version = app_definition.get("deployedVersion")
@@ -487,7 +491,11 @@ class CapRoverAPI:
         if len(matches) != 1:
             return False
         image = matches[0].get("deployedImageName")
-        return isinstance(image, str) and bool(image)
+        if not isinstance(image, str) or not image:
+            return False
+        if expected_source_id is not None and matches[0].get("gitHash") != expected_source_id:
+            return False
+        return True
 
     def get_build_status(self, app_name):
         body = self._request("GET", f"/api/v2/user/apps/appData/{app_name}/")
@@ -974,6 +982,51 @@ def _terminate_cli_process_group(process):
             continue
 
 
+def _copy_verified_tarball_snapshot(source, destination, expected_source_id):
+    """Copy and re-hash the exact bytes that the guarded CLI will upload."""
+    expected_prefix = "sha256:"
+    if not isinstance(expected_source_id, str) or not expected_source_id.startswith(
+        expected_prefix
+    ):
+        raise CapRoverDeployError("caprover_config_invalid")
+    source_fd = destination_fd = -1
+    digest = hashlib.sha256()
+    try:
+        read_flags = os.O_RDONLY
+        if hasattr(os, "O_NOFOLLOW"):
+            read_flags |= os.O_NOFOLLOW
+        source_fd = os.open(source, read_flags)
+        source_info = os.fstat(source_fd)
+        if not stat.S_ISREG(source_info.st_mode) or source_info.st_size <= 0:
+            raise OSError
+        destination_fd = os.open(
+            destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600
+        )
+        while True:
+            chunk = os.read(source_fd, 1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+            offset = 0
+            while offset < len(chunk):
+                offset += os.write(destination_fd, chunk[offset:])
+    except OSError:
+        raise CapRoverDeployError(
+            "caprover_config_invalid", "tarball snapshot could not be created"
+        ) from None
+    finally:
+        for fd in (destination_fd, source_fd):
+            if fd >= 0:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+    if f"{expected_prefix}{digest.hexdigest()}" != expected_source_id:
+        raise CapRoverDeployError(
+            "caprover_config_invalid", "tarball changed after validation"
+        )
+
+
 def try_cli_deploy(args, session):
     """Run exactly one pinned saved-session CLI deployment behind its request guard."""
     cli_root, node = args.cli_capability
@@ -982,11 +1035,17 @@ def try_cli_deploy(args, session):
         raise CapRoverDeployError("capability_unavailable")
     source_mode = "tarball" if args.tarball else "branch"
     cwd = Path(args.source_dir) if args.source_dir else None
-    source_path = Path(args.tarball) if args.tarball else cwd / "temporary-captain-to-deploy.tar"
     event_fd = -1
     with tempfile.TemporaryDirectory(prefix="caprover-deploy-") as raw_temp:
         private = Path(raw_temp).resolve()
         private.chmod(0o700)
+        if args.tarball:
+            source_path = private / "source.tar"
+            _copy_verified_tarball_snapshot(
+                Path(args.tarball), source_path, args.expected_source_id
+            )
+        else:
+            source_path = cwd / "temporary-captain-to-deploy.tar"
         config_dir = private / "config" / "configstore"
         config_dir.mkdir(parents=True, mode=0o700)
         config_path = config_dir / "caprover.json"
@@ -1001,11 +1060,12 @@ def try_cli_deploy(args, session):
         event_path = private / "guard-events.jsonl"
         event_fd = os.open(event_path, os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o600)
         policy = {
-            "guardVersion": 1,
+            "guardVersion": 3,
             "origin": session["baseUrl"],
             "appName": args.app_name,
             "sourceMode": source_mode,
             "sourcePath": str(source_path),
+            "expectedSourceId": args.expected_source_id,
             "authTokenSha256": hashlib.sha256(session["authToken"].encode()).hexdigest(),
             "appTokenSha256": (
                 hashlib.sha256(session["appToken"].encode()).hexdigest()
@@ -1041,7 +1101,7 @@ def try_cli_deploy(args, session):
             command += ["--tarFile", str(source_path)]
             run_cwd = str(private)
         else:
-            command += ["--branch", args.branch]
+            command += ["--branch", args.expected_source_id]
             run_cwd = str(cwd)
         process = None
         try:
@@ -1077,7 +1137,7 @@ def try_cli_deploy(args, session):
         and len(requests) == 1
         and requests[0].get("app") == args.app_name
         and len(responses) == 1
-        and responses[0].get("captainStatus") == 101
+        and responses[0].get("captainStatus") == 100
         and not violations
     )
     if not confirmed and possible_write:
@@ -1091,25 +1151,87 @@ def deploy_via_api(api, args, gh_user, gh_token):
     return "configured_not_deployed"
 
 
-def deploy_via_playwright(args, password, gh_user, gh_token):
-    """Trigger exactly one authenticated Force Build for the selected app."""
+class PreparedPlaywright:
+    """Locally prepared browser resources owned by one apply operation."""
+
+    def __init__(self):
+        self.manager = None
+        self.manager_entered = False
+        self.browser = None
+        self.context = None
+        self.page = None
+        self.closed = False
+
+    def __enter__(self):
+        return self.page
+
+    def __exit__(self, exception_type, exception, traceback):
+        return False
+
+    def close(self):
+        if self.closed:
+            return
+        self.closed = True
+        if self.context is not None:
+            try:
+                self.context.close()
+            except Exception:
+                pass
+        if self.browser is not None:
+            try:
+                self.browser.close()
+            except Exception:
+                pass
+        if self.manager is not None and self.manager_entered:
+            try:
+                self.manager.__exit__(None, None, None)
+            except Exception:
+                pass
+
+
+def prepare_playwright():
+    """Launch local browser resources without navigating to any service."""
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
-        return False
+        raise CapRoverDeployError(
+            "capability_unavailable", "Playwright is unavailable"
+        ) from None
 
+    prepared = PreparedPlaywright()
+    try:
+        prepared.manager = sync_playwright()
+        playwright = prepared.manager.__enter__()
+        prepared.manager_entered = True
+        prepared.browser = playwright.chromium.launch(headless=True)
+        # Never use ignore_https_errors=args.allow_insecure; it only permits local HTTP.
+        prepared.context = prepared.browser.new_context(ignore_https_errors=False)
+        prepared.page = prepared.context.new_page()
+        return prepared
+    except Exception:
+        prepared.close()
+        raise CapRoverDeployError(
+            "capability_unavailable", "Playwright browser preparation failed"
+        ) from None
+
+
+def deploy_via_playwright(args, password, gh_user, gh_token, prepared=None):
+    """Trigger exactly one authenticated Force Build for the selected app."""
     base_url = args.caprover_url.rstrip("/")
     app = args.app_name
-    browser = None
+    trigger_token = getattr(args, "playwright_trigger_token", None)
+    if not isinstance(trigger_token, str) or not trigger_token:
+        return False
+    owns_prepared = prepared is None
+    if prepared is None:
+        try:
+            prepared = prepare_playwright()
+        except CapRoverDeployError:
+            return False
     mutation_attempted = False
     route_violation = False
     try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            # Never use ignore_https_errors=args.allow_insecure; it only permits local HTTP.
-            context = browser.new_context(ignore_https_errors=False)
-            page = context.new_page()
-
+        with prepared as page:
             def same_origin_route(route, request):
                 nonlocal route_violation
                 try:
@@ -1168,9 +1290,73 @@ def deploy_via_playwright(args, password, gh_user, gh_token):
                 return False
             if route_violation:
                 return False
+            trigger_path = "/api/v2/user/apps/webhooks/triggerbuild"
+            clicked_request = None
+
+            def is_exact_trigger_request(request):
+                try:
+                    parsed = urllib.parse.urlsplit(request.url)
+                    query = urllib.parse.parse_qsl(
+                        parsed.query, keep_blank_values=True, strict_parsing=True
+                    )
+                    return (
+                        request.method == "POST"
+                        and _origin(request.url) == _origin(base_url)
+                        and parsed.path == trigger_path
+                        and sorted(query) == sorted([
+                            ("namespace", "captain"),
+                            ("token", trigger_token),
+                        ])
+                    )
+                except Exception:
+                    return False
+
+            def capture_exact_trigger_request(request):
+                nonlocal clicked_request
+                try:
+                    if not is_exact_trigger_request(request):
+                        return False
+                    clicked_request = request
+                    return True
+                except Exception:
+                    return False
+
+            def is_clicked_trigger_response(response):
+                return (
+                    clicked_request is not None
+                    and response.request is clicked_request
+                )
+
+            def is_clicked_request_finished(request):
+                return clicked_request is not None and request is clicked_request
+
             mutation_attempted = True
-            force.click()
+            with page.expect_request(
+                capture_exact_trigger_request, timeout=args.timeout * 1000
+            ):
+                with page.expect_response(
+                    is_clicked_trigger_response, timeout=args.timeout * 1000
+                ) as response_info:
+                    with page.expect_request_finished(
+                        is_clicked_request_finished, timeout=args.timeout * 1000
+                    ):
+                        force.click()
             if route_violation:
+                raise CapRoverDeployError("reconcile_required")
+            response = response_info.value
+            if response.status != 200:
+                raise CapRoverDeployError("reconcile_required")
+            try:
+                raw_response = response.body()
+                if len(raw_response) > MAX_API_RESPONSE_BYTES:
+                    raise ValueError
+                response_body = json.loads(raw_response)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                raise CapRoverDeployError("reconcile_required") from None
+            if (
+                not isinstance(response_body, dict)
+                or response_body.get("status") != 100
+            ):
                 raise CapRoverDeployError("reconcile_required")
             return True
     except Exception:
@@ -1178,16 +1364,21 @@ def deploy_via_playwright(args, password, gh_user, gh_token):
             raise CapRoverDeployError("reconcile_required") from None
         return False
     finally:
-        if browser is not None:
-            try:
-                browser.close()
-            except Exception:
-                pass
+        if owns_prepared:
+            prepared.close()
 
 
-def verify_deploy(api, app_name, ssh_cmd=None, baseline=None):
-    """Verify deployment evidence without claiming application health."""
+def verify_deploy(
+    api, app_name, ssh_cmd=None, baseline=None, expected_source_id=None
+):
+    """Verify observed deployment evidence for one pinned source identity."""
     print("\n[Verify] Checking deployment evidence...")
+    if not isinstance(expected_source_id, str) or not (
+        FULL_GIT_SHA_RE.fullmatch(expected_source_id)
+        or SOURCE_FINGERPRINT_RE.fullmatch(expected_source_id)
+    ):
+        print("  Deployment evidence unavailable: expected source identity required")
+        return False
     try:
         baseline_version = CapRoverAPI._baseline_version(baseline)
         status = api.get_build_status(app_name)
@@ -1208,29 +1399,37 @@ def verify_deploy(api, app_name, ssh_cmd=None, baseline=None):
                 return False
 
         app_definition = api.get_app_definition(app_name)
-        if not CapRoverAPI._has_deployment_evidence(app_definition, baseline_version):
-            print("  Deployment evidence unavailable: generation not confirmed")
+        if not CapRoverAPI._has_deployment_evidence(
+            app_definition, baseline_version, expected_source_id
+        ):
+            print("  Deployment evidence unavailable: generation/source not confirmed")
             return False
-        print("  Deployment generation and image reference confirmed")
+        print("  Deployment generation, source, and image reference confirmed")
 
         if ssh_cmd:
             desired = app_definition.get("instanceCount") if isinstance(app_definition, dict) else None
             if isinstance(desired, bool) or not isinstance(desired, int) or desired <= 0:
                 print("  Deployment evidence unavailable: replica target invalid")
                 return False
-            service_name = f"srv-captain--{app_name}"
+            legacy_name = app_definition.get("isLegacyAppName")
+            if not isinstance(legacy_name, bool):
+                print("  Deployment evidence unavailable: service naming flag invalid")
+                return False
+            service_name = f"srv-captain--{app_name}" if legacy_name else app_name
+            remote_command = shlex.join(
+                [
+                    "docker",
+                    "service",
+                    "ls",
+                    "--filter",
+                    f"name={service_name}",
+                    "--format",
+                    "{{.Name}}\t{{.Replicas}}",
+                ]
+            )
             try:
                 result = subprocess.run(
-                    ssh_cmd
-                    + [
-                        "docker",
-                        "service",
-                        "ls",
-                        "--filter",
-                        f"name={service_name}",
-                        "--format",
-                        "{{.Name}}\t{{.Replicas}}",
-                    ],
+                    ssh_cmd + [remote_command],
                     capture_output=True,
                     text=True,
                     timeout=15,
@@ -1243,7 +1442,7 @@ def verify_deploy(api, app_name, ssh_cmd=None, baseline=None):
                 return False
             replicas = []
             for line in result.stdout.splitlines():
-                match = re.fullmatch(r"(\S+)\s+([0-9]+)/([0-9]+)", line.strip())
+                match = re.fullmatch(r"([^\t\r\n]+)\t([0-9]+)/([0-9]+)", line)
                 if match and match.group(1) == service_name:
                     replicas.append((int(match.group(2)), int(match.group(3))))
             if len(replicas) != 1 or replicas[0] != (desired, desired):
@@ -1268,6 +1467,10 @@ def build_arg_parser():
     parser.add_argument("--app-name", required=True, help="CapRover app name")
     parser.add_argument("--repo", help="GitHub repo URL")
     parser.add_argument("--branch", help="Explicit Git branch for --repo or --source-dir")
+    parser.add_argument(
+        "--git-sha",
+        help="Expected immutable full lowercase Git commit SHA for remote/rebuild Git",
+    )
     parser.add_argument("--tarball", help="Path to tarball file for upload")
     parser.add_argument("--source-dir", help="Explicit local Git checkout used with --branch")
     parser.add_argument("--rebuild-only", action="store_true", help="Skip config, just rebuild")
@@ -1420,10 +1623,23 @@ def _trusted_cli_capability(args):
 
 
 def _validate_source_capability(args, method):
+    args.expected_source_id = None
     if not APP_NAME_RE.fullmatch(args.app_name or ""):
         raise CapRoverDeployError("caprover_config_invalid", "app name has an unsafe format")
     if args.branch:
         _validate_branch(args.branch)
+    if args.git_sha:
+        if not FULL_GIT_SHA_RE.fullmatch(args.git_sha):
+            raise CapRoverDeployError(
+                "caprover_config_invalid",
+                "--git-sha must be a full lowercase 40-character SHA",
+            )
+        if not (args.repo or args.rebuild_only):
+            raise CapRoverDeployError("caprover_config_invalid", "--git-sha is only valid for remote/rebuild Git")
+    if method == "playwright":
+        if not args.git_sha:
+            raise CapRoverDeployError("caprover_config_invalid", "Playwright Git deployment requires --git-sha")
+        args.expected_source_id = args.git_sha
     if args.repo:
         if not args.recovery_snapshot:
             raise CapRoverDeployError("caprover_config_invalid", "remote Git configuration requires --recovery-snapshot")
@@ -1446,6 +1662,14 @@ def _validate_source_capability(args, method):
         if not stat.S_ISREG(info.st_mode) or source.is_symlink() or info.st_size <= 0:
             raise CapRoverDeployError("caprover_config_invalid", "tarball must be a nonempty regular file")
         args.tarball = str(source)
+        digest = hashlib.sha256()
+        try:
+            with source.open("rb") as artifact:
+                for chunk in iter(lambda: artifact.read(1024 * 1024), b""):
+                    digest.update(chunk)
+        except OSError:
+            raise CapRoverDeployError("caprover_config_invalid", "tarball could not be hashed") from None
+        args.expected_source_id = f"sha256:{digest.hexdigest()}"
     if args.source_dir:
         try:
             source_dir = Path(args.source_dir).resolve(strict=True)
@@ -1480,8 +1704,12 @@ def _validate_source_capability(args, method):
             raise CapRoverDeployError("caprover_config_invalid", "local Git source root is invalid") from None
         if checkout_root != source_dir:
             raise CapRoverDeployError("caprover_config_invalid", "--source-dir must be the Git checkout root")
+        git_sha = results[1].stdout.strip()
+        if not FULL_GIT_SHA_RE.fullmatch(git_sha):
+            raise CapRoverDeployError("caprover_response_inconclusive", "local Git commit identity is invalid")
         args.source_dir = str(source_dir)
         args.git_capability = git
+        args.expected_source_id = git_sha
     if method == "cli":
         guard = Path(__file__).with_name("deployment_guard.cjs")
         try:
@@ -1696,6 +1924,26 @@ def main(argv=None):
     if not has_session and not args.allow_login:
         fail("caprover_config_invalid", "apply requires a saved session or explicit --allow-login", detail="authentication policy", exit_code=2)
 
+    prepared_playwright = None
+    if args.selected_method == "playwright":
+        try:
+            validate_credential_origin(
+                args.caprover_url, os.environ.get("CAPROVER_CREDENTIAL_ORIGIN")
+            )
+        except CapRoverDeployError as e:
+            fail(e.code, e.message, detail="credential origin validation", exit_code=2)
+        try:
+            prepared_playwright = prepare_playwright()
+        except CapRoverDeployError as e:
+            fail(e.code, e.message, detail="local browser preparation")
+    try:
+        return _run_apply(args, prepared_playwright, has_session)
+    finally:
+        if prepared_playwright is not None:
+            prepared_playwright.close()
+
+
+def _run_apply(args, prepared_playwright, has_session):
     ssh_cmd = None
     if args.ssh_host:
         try:
@@ -1810,11 +2058,26 @@ def main(argv=None):
             fail("reconcile_required", "Deployment state requires reconciliation", detail="possible write")
         fail("caprover_response_inconclusive", "Deployment baseline unavailable", detail="baseline")
 
+    if baseline.get("isAppBuilding") is True:
+        if mutation_attempted:
+            fail("reconcile_required", "Deployment state requires reconciliation", detail="build already running")
+        fail("deployment_trigger_failed", "Selected app already has a build in progress", detail="build already running")
+    if args.selected_method == "playwright":
+        webhook = baseline.get("appPushWebhook")
+        trigger_token = webhook.get("pushWebhookToken") if isinstance(webhook, dict) else None
+        if not isinstance(trigger_token, str) or not trigger_token:
+            if mutation_attempted:
+                fail("reconcile_required", "Deployment state requires reconciliation", detail="trigger binding unavailable")
+            fail("caprover_response_inconclusive", "Force Build trigger binding unavailable", detail="trigger binding")
+        args.playwright_trigger_token = trigger_token
+
     try:
         if args.selected_method == "cli":
             triggered = try_cli_deploy(args, session)
         else:
-            triggered = deploy_via_playwright(args, password, gh_user, gh_token)
+            triggered = deploy_via_playwright(
+                args, password, gh_user, gh_token, prepared_playwright
+            )
     except CapRoverDeployError as e:
         if e.code == "reconcile_required" or mutation_attempted:
             fail("reconcile_required", "Deployment state requires reconciliation", detail="possible write")
@@ -1831,7 +2094,34 @@ def main(argv=None):
         fail("reconcile_required", "Deployment state requires reconciliation", detail="possible write")
     if not ok:
         fail("reconcile_required", "Deployment state requires reconciliation", detail="possible write")
-    if not verify_deploy(api, args.app_name, ssh_cmd, baseline=baseline):
+    if args.selected_method == "playwright":
+        source_observed = False
+        try:
+            observed = api.get_app_definition(args.app_name)
+            api._validate_app_definition(observed, args.app_name)
+            source_observed = CapRoverAPI._has_deployment_evidence(
+                observed,
+                CapRoverAPI._baseline_version(baseline),
+                args.expected_source_id,
+            )
+        except Exception:
+            source_observed = False
+        if source_observed:
+            print("Observed a newer generation with the expected source identity")
+        else:
+            print("Expected source identity was not observed during reconciliation")
+        fail(
+            "reconcile_required",
+            "Force Build was acknowledged but scheduling remains unconfirmed",
+            detail="acknowledged but unconfirmed",
+        )
+    if not verify_deploy(
+        api,
+        args.app_name,
+        ssh_cmd,
+        baseline=baseline,
+        expected_source_id=args.expected_source_id,
+    ):
         fail("reconcile_required", "Deployment evidence was not verified", detail="possible write")
     print("deployment_evidence_verified")
     return 0

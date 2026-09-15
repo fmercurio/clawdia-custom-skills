@@ -14,7 +14,7 @@ metadata:
 
 ## Overview
 
-This version is intentionally narrower than 1.x. It validates the target, intent, source, selected method, and local capability before credential access. Without `--apply`, it prints a plan and performs no credential lookup, login, API request, or deployment.
+This version is intentionally narrower than 1.x. It validates the target, intent, source, selected method, and static local capability before credential access. Without `--apply`, it prints a plan and performs no browser launch, credential lookup, session read, login, API request, or deployment. A Playwright apply separately launches and prepares its local browser resources without navigation before credentials or controller mutations.
 
 ## When to Use
 
@@ -27,7 +27,7 @@ This version is intentionally narrower than 1.x. It validates the target, intent
 | Intent | Method | Result |
 |---|---|---|
 | `--tarball FILE` | CLI | Uploads the explicit local tarball |
-| `--source-dir DIR --branch BRANCH` | CLI | Archives the explicit local checkout/branch and uploads it |
+| `--source-dir DIR --branch BRANCH` | CLI | Resolves the branch once, archives that immutable commit, and uploads it |
 | `--repo URL --branch BRANCH --configure-only` | API | Configures remote Git and reports `configured_not_deployed` |
 | `--repo URL --branch BRANCH` | Playwright | Preserving API config, then one authenticated Force Build |
 | `--rebuild-only` | Playwright | One authenticated Force Build for an existing app |
@@ -39,6 +39,8 @@ API tarball upload and API Git-build triggering are not implemented. HTTPS and W
 ## Safe plan and apply
 
 All non-local examples use an exact target assertion. Replace placeholders with protected local paths; do not put tokens or passwords in arguments.
+
+Before each action, verify that an explicit, current and sufficient authorization grant covers its exact scope. Reuse standing or session grants within their scope, and request a new decision when the scope is new, insufficient or ambiguous. Credential access does not authorize deployment, restart or deletion. Follow the companion operations skill's canonical [authorization gates](../caprover-operations/SKILL.md#authorization-gates); these sufficiency checks do not weaken `--apply`, `--allow-login`, `--allow-create`, exact-target, recovery, readback or reconciliation gates.
 
 ```bash
 # Safe plan: validates intent and API capability without credentials or HTTP.
@@ -88,6 +90,7 @@ Apply follows this order:
 
 ```text
 validate intent/source/method/capability
+  → for Playwright apply, prepare local browser resources without navigation
   → authenticate one way
   → strict system/app preflight
   → optional approved create + readback
@@ -98,13 +101,13 @@ validate intent/source/method/capability
   → verify changed generation/image evidence and optional exact replicas
 ```
 
-CLI return zero, an accepted POST, or a clicked Force Build is not deployment verification. Success is reported only as `deployment_evidence_verified`. This does not prove application or endpoint health. A timeout or failure after a possible write reports `reconcile_required` and is never retried through another method.
+CLI return zero, an asynchronous upload acknowledgment, or a clicked Force Build is not deployment verification. Guarded CLI upload succeeds only after the exact synchronous upload returns status `100` and the expected source is observed. Success is reported only as `deployment_evidence_verified`; it does not prove application or endpoint health. The reviewed webhook protocol cannot prove scheduling, so Playwright Force Build always reports an acknowledged-but-unconfirmed `reconcile_required` outcome after a possible click, even when the expected source is later observed. A timeout or failure after a possible write is never retried through another method.
 
 ## Request-boundary limits
 
 Python API requests disable inherited proxies and reject every redirect while carrying CapRover credentials. Browser navigation separately permits only the configured origin.
 
-CLI deployment uses a mandatory, hash-pinned `deployment_guard.cjs`. With the pinned CLI layout it permits only the two app inventory reads used by CLI 2.4.4, one multipart POST to the selected app's exact detached `appData` endpoint, and bounded build-status reads for that same app. It validates credential headers, source stream shape, destination, method, path, response size, and redirects. Login, token renewal, proxies, alternate apps, and arbitrary API methods/paths are blocked.
+CLI deployment uses a mandatory, hash-pinned `deployment_guard.cjs`. With the pinned CLI layout it permits only the two app inventory reads used by CLI 2.4.4, one multipart POST for the selected app, and bounded build-status reads for that same app. At the controller boundary, the guard validates the CLI's exact `?detached=1` request and removes that query parameter from the actual outgoing request so the reviewed server waits for `scheduleDeployNewVersion`; it never sends `detached=0`. The guard requires status `100` from that exact upload and validates credential headers, a private source snapshot/immutable commit, destination, method, path, response size, and redirects. Login, token renewal, proxies, alternate apps, and arbitrary API methods/paths are blocked.
 
 The guard is a narrow request interlock, not a general Node sandbox. Support is limited to the pinned official CLI 2.4.4 layout. That layout was tested with Node 26.7.0; this is not a claim that every CLI command or every Node 26 release works.
 
@@ -119,7 +122,7 @@ See `references/api-v2-endpoints.md`, `references/playwright-deploy-pattern.md`,
 
 ## Verification Checklist
 
-- [ ] Intent, target, source, method and authentication grants are explicit.
+- [ ] Intent, target, source, method and authentication grants are explicit, current, sufficient and within scope.
 - [ ] Protected state remains outside Git and secrets are absent from arguments/output.
 - [ ] Creation and configuration changes have their own readbacks.
 - [ ] Build evidence is newer than the pre-trigger baseline and expected replicas are exact when checked.

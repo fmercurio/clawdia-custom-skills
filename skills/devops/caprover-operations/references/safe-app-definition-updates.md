@@ -1,6 +1,6 @@
 # Safe application-definition updates
 
-An app configuration operation is not a deployment. Require configuration-write authorization even when deployment was separately approved.
+An app configuration operation is not a deployment. Verify that explicit, current and sufficient configuration-write authorization covers the exact target and change, even when deployment was separately approved. Reuse a standing or session grant only within its scope; request a new decision when that scope is new, insufficient or ambiguous.
 
 1. Fetch the current complete app definition immediately before the change and save a private, access-restricted recovery snapshot outside Git and reports.
 2. Construct the supported full POST update from that read: send only the endpoint's writable allowlist and preserve every writable field not intentionally changed. Newer server versions also expose a partial PATCH handler, but that is a separate versioned API contract, not a reason to treat the full POST as partial or assume older-server support.
@@ -9,4 +9,4 @@ An app configuration operation is not a deployment. Require configuration-write 
 
 The review must account for environment variables, ports, volumes, replica count, base/custom domains and SSL, WebSocket support, Git settings, custom Nginx, pre-deploy behavior, node/service placement, and other supported service overrides. Do not log secret environment values. Preserve omitted-but-supported fields from the fetched definition; do not manufacture defaults.
 
-If a request times out, assume it may have applied. Fetch current state, compare it with both the intended state and private snapshot, and determine health before seeking authorization to retry or compensate.
+If a request times out, assume it may have applied. Fetch current state, compare it with both the intended state and private snapshot, and determine health before retrying or compensating. Request a new decision when the existing grant does not clearly and sufficiently cover that next action.

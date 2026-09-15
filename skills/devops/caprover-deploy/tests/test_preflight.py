@@ -178,6 +178,7 @@ class TestUrlSafety:
             "--expected-host", "attacker.example",
             "--app-name", "my-app",
             "--rebuild-only",
+            "--git-sha", "1" * 40,
             "--method", "playwright",
             "--apply",
             "--allow-login",
