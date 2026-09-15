@@ -11,6 +11,7 @@ import subprocess
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import threading
+import time
 
 import pytest
 
@@ -227,6 +228,55 @@ def capture_server():
         server.server_close()
 
 
+@pytest.fixture
+def stalled_loopback_server():
+    """Hold an observed request open until the owning test releases it."""
+    requests: list[tuple[str, str, str | None]] = []
+    request_received = threading.Event()
+    response_release = threading.Event()
+
+    class StalledHandler(BaseHTTPRequestHandler):
+        def _record_and_stall(self, method: str) -> None:
+            requests.append((method, self.path, self.headers.get("x-captain-auth")))
+            request_received.set()
+            if not response_release.wait(5):
+                return
+            body = json.dumps({"status": 100, "data": {"appDefinitions": []}}).encode()
+            try:
+                self.send_response(200)
+                self.send_header("content-type", "application/json")
+                self.send_header("content-length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                return
+
+        def do_GET(self) -> None:  # noqa: N802 - stdlib interface
+            self._record_and_stall("GET")
+
+        def do_POST(self) -> None:  # noqa: N802 - stdlib interface
+            self._record_and_stall("POST")
+
+        def log_message(self, *_args: object) -> None:
+            return
+
+    class StalledThreadingHTTPServer(ThreadingHTTPServer):
+        # ThreadingHTTPServer normally daemonizes handlers.  This fixture owns a
+        # deliberately stalled handler, so server_close() must join it at teardown.
+        daemon_threads = False
+
+    server = StalledThreadingHTTPServer(("127.0.0.1", 0), StalledHandler)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    try:
+        yield server, requests, request_received, response_release
+    finally:
+        response_release.set()
+        server.shutdown()
+        thread.join()
+        server.server_close()
+
+
 def protected_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value), encoding="utf-8")
     path.chmod(0o600)
@@ -405,6 +455,45 @@ def terminate_probe_process(process: subprocess.Popen[str]) -> None:
         process.wait(timeout=5)
 
 
+def delayed_node_shim(tmp_path: Path, node: str) -> str:
+    """Delay only guarded CLI startup, then replace this process with real Node."""
+    shim = tmp_path / "delayed-node"
+    shim.write_text(
+        f"""#!{sys.executable}
+import os
+import sys
+import time
+
+REAL_NODE = {str(Path(node).resolve())!r}
+arguments = sys.argv[1:]
+if "--require" in arguments:
+    time.sleep(0.6)
+os.execv(REAL_NODE, [REAL_NODE, *arguments])
+""",
+        encoding="utf-8",
+    )
+    shim.chmod(0o700)
+    return str(shim)
+
+
+def wait_for_request_and_child(
+    process: subprocess.Popen[str], request_received: threading.Event, timeout: float
+) -> list[int]:
+    deadline = time.monotonic() + timeout
+    observed_children: list[int] = []
+    waiter = threading.Event()
+    while time.monotonic() < deadline:
+        observed_children = child_pids(process.pid)
+        if request_received.is_set() and observed_children:
+            return observed_children
+        waiter.wait(min(0.02, max(0.0, deadline - time.monotonic())))
+    raise AssertionError(
+        "timed out waiting for stalled request and CLI child "
+        f"(request_received={request_received.is_set()}, children={observed_children}, "
+        f"probe_returncode={process.poll()})"
+    )
+
+
 def test_interrupt_reaps_cli_process_group_and_stops_requests(
     tmp_path: Path, cli_root: Path, node: str, loopback_server
 ) -> None:
@@ -440,33 +529,26 @@ def test_interrupt_reaps_cli_process_group_and_stops_requests(
 
 
 def test_timeout_reaps_cli_process_group_and_stops_requests(
-    tmp_path: Path, cli_root: Path, node: str, loopback_server
+    tmp_path: Path, cli_root: Path, node: str, stalled_loopback_server
 ) -> None:
-    server, requests = loopback_server
-    FixtureHandler.mode = "timeout"
+    server, requests, request_received, response_release = stalled_loopback_server
     origin = f"http://127.0.0.1:{server.server_port}"
+    delayed_node = delayed_node_shim(tmp_path, node)
     command = [
         sys.executable, str(PROBE),
-        *probe_args(tmp_path, cli_root, node, origin, "timeout-token"),
-        "--timeout", "0.3",
+        *probe_args(tmp_path, cli_root, delayed_node, origin, "timeout-token"),
+        "--timeout", "3",
     ]
     process = subprocess.Popen(
         command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         text=True, env=clean_env(),
     )
     try:
-        observed_children: list[int] = []
-        waiter = threading.Event()
-        for _ in range(100):
-            observed_children = child_pids(process.pid)
-            if requests and observed_children:
-                break
-            waiter.wait(0.01)
-        assert requests
-        assert observed_children
+        observed_children = wait_for_request_and_child(process, request_received, timeout=5)
+        assert requests == [("GET", "/api/v2/user/apps/appDefinitions", "timeout-token")]
         stdout, stderr = process.communicate(timeout=5)
         request_count = len(requests)
-        waiter.wait(0.3)
+        threading.Event().wait(0.3)
         assert process.returncode == 1
         assert json.loads(stdout)["reason"] == "timeout"
         assert stderr == ""
@@ -474,6 +556,7 @@ def test_timeout_reaps_cli_process_group_and_stops_requests(
         assert not any(process_exists(pid) for pid in observed_children)
     finally:
         terminate_probe_process(process)
+        response_release.set()
 
 
 @pytest.mark.parametrize("case,reason", [

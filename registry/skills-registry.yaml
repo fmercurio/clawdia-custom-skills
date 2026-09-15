@@ -452,6 +452,8 @@ skills:
       findings:
       - 83 local unit and actual official-CLI fixture tests passed without skips; synthetic credentials only,
         no live CapRover session.
+      - Timeout cleanup fixture covers controlled CLI cold start and an observed in-flight request held until
+        teardown; process cleanup and absence of further requests are asserted.
       - Protected exact alias/origin binding, selected-session snapshot, request-time guard and pinned official
         CLI/Node layout.
       - Unexpected public exceptions become fixed inconclusive/internal_error responses; interruption and process-exit
@@ -502,7 +504,7 @@ skills:
       size_bytes: 134
       status: new
     - path: tests/test_probe.py
-      size_bytes: 38895
+      size_bytes: 42029
       status: new
     - path: tests/test_probe_public_errors.py
       size_bytes: 6465
