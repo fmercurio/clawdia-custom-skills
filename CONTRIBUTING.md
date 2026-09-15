@@ -73,6 +73,45 @@ Rode também os testes relevantes à área modificada. Quando houver testes Pyte
 python3 -m pytest caminho/para/tests
 ```
 
+### Validação semântica de workflows
+
+O CI usa `actionlint` 1.7.12 para validar a sintaxe, o schema e os contextos de
+expressões em todos os workflows. Para usar localmente a versão Linux amd64
+verificada a partir do [release oficial](https://github.com/rhysd/actionlint/releases/tag/v1.7.12),
+execute este bloco. Ele deixa o arquivo e o binário somente em um diretório
+temporário e imprime o caminho efetivo de `ACTIONLINT_BIN`:
+
+```bash
+set -euo pipefail
+actionlint_dir="$(mktemp -d)"
+(
+  set -euo pipefail
+  archive="$actionlint_dir/actionlint_1.7.12_linux_amd64.tar.gz"
+  actionlint="$actionlint_dir/actionlint"
+  curl --fail --show-error --location --output "$archive" \
+    https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+  printf '%s  %s\n' \
+    8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8 \
+    "$archive" | sha256sum --check --status
+  tar -xzf "$archive" -C "$actionlint_dir" actionlint
+  test -x "$actionlint"
+  actionlint_version="$("$actionlint" -version | sed -n '1p')"
+  test "$actionlint_version" = "1.7.12"
+  printf 'ACTIONLINT_BIN=%s\n' "$actionlint"
+)
+ACTIONLINT_BIN="$actionlint_dir/actionlint"
+"$ACTIONLINT_BIN" -oneline -shellcheck= -pyflakes=
+PYTHONDONTWRITEBYTECODE=1 ACTIONLINT_BIN="$ACTIONLINT_BIN" \
+  python3 -m unittest tools.tests.test_caprover_candidates_workflow -v
+rm -rf "$actionlint_dir"
+```
+
+Esta validação deliberadamente desabilita as integrações opcionais ShellCheck e
+Pyflakes para manter o lint determinístico. Ela não valida a semântica completa
+de shell ou Python, execução remota, nem a cadeia inteira de dependências. Sem
+arquivos como argumentos, `actionlint` descobre o diretório `.github/workflows`
+mais próximo e valida workflows com extensões `.yml` e `.yaml`.
+
 Antes de enviar:
 
 ```bash
