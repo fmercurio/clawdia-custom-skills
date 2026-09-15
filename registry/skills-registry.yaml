@@ -506,77 +506,111 @@ skills:
 
   - name: caprover-deploy
     status: candidate
-    version: 1.0.0
+    version: 2.0.0
     category: devops
-    description: >
-      Automated CapRover deployment via CLI → API → Playwright fallback.
-      Handles app creation, GitHub repo config, build triggering, HTTPS/WebSocket
-      enablement, and post-deploy verification. Generic — no instance-specific data.
+    description: Plan-first, single-method CapRover deployment or Git configuration with frozen saved sessions,
+      explicit mutation grants, preserving updates/readback and post-trigger evidence. No automatic fallback
+      after possible writes.
     source:
       type: internal
-      origin: "Created by another Hermes profile (FMercurio HQ)"
-      author: "Hermes Agent (TG 2709 profile)"
-      created: "2026-06-16"
+      origin: Created by another Hermes profile (FMercurio HQ)
+      author: Hermes Agent (TG 2709 profile)
+      created: '2026-06-16'
       approved: null
       approved_by: null
       repository_url: null
-      no_repository_reason: "Skill interna, tested against live CapRover 1.14.1"
+      no_repository_reason: Originally authored internally. Current candidate was hardened from official
+        public contracts and verified only with local synthetic fixtures; historical live validation is
+        not renewed.
     installation:
       runtime_path: null
-      repo_path: "skills/devops/caprover-deploy/"
+      repo_path: skills/devops/caprover-deploy/
       installed_date: null
       installed_by: null
-      note: "Action-focused deploy skill. Companion to caprover-operations (server ops)."
+      note: Repository-only candidate; not approved or installed. Action-focused companion to the caprover-operations
+        read-only probe and safety runbooks.
     audit:
-      security_review: "2026-06-24"
-      security_status: "passed"
+      security_review: '2026-09-15'
+      security_status: passed
       findings:
-        - "Zero hardcoded secrets, paths, or tenant-specific data"
-        - "Passwords never accepted as CLI args (env var, KeePass, or interactive only)"
-        - "KeePass optional — requires KEEPASS_DB and KEEPASS_KEY env vars, no hardcoded paths"
-        - "GitHub token via gh CLI or env var only"
-        - "CapRover URL requires HTTPS by default; --allow-insecure is explicit local/dev only"
-        - "Non-local CapRover URLs require --expected-host before credentials are resolved"
-        - "subprocess.run uses list args, never shell=True"
-        - "Playwright login failure detected via URL check"
+      - Local unit and actual pinned-CLI loopback fixtures passed; no real credentials, CapRover, browser,
+        SSH or production deployment was exercised.
+      - Plan-only default; explicit apply/login/create grants; method and source capability checked before
+        credentials; no blind method fallback.
+      - Frozen owner-only saved-session binding outside Git; mandatory hashed request guard; no token/password
+        arguments or inherited proxies.
+      - Full app-definition projection preserves current writable settings, creates a protected recovery
+        snapshot and verifies readback; concurrent writers require serialization.
+      - Changed generation/image evidence is mandatory; expected replicas must match exactly when checked;
+        application health is a separate validation.
+      - Browser TLS verification remains enabled; cross-origin requests stop the flow; ambiguous trigger
+        or earlier mutation requires reconciliation.
+      - Public marker scan passed; no private paths or client-specific source was introduced into the packages.
       frontmatter_valid: true
       company_agnostic: true
       pitfalls_documented: true
       fixes_applied:
-        - "Fixed argparse bug: --enable-https/--enable-websocket store_true with default=True (always True). Replaced with --no-https/--no-websocket store_false."
-        - "Removed hardcoded KeePassXC default paths. Now env-only."
-        - "Removed --caprover-password and --github-token CLI args (visible in ps aux)."
-        - "Removed unnecessary try/except for stdlib urllib import."
-        - "Added Playwright login verification (URL check after submit)."
-        - "Generalized TOTVS/Protheus references in nginx template to ERP."
+      - Removed implicit creation, no-op CLI success, empty-Git-hash build claims and automatic post-write
+        fallback.
+      - Replaced default-filled updates with typed preservation/readback and strict build schemas.
+      - Bounded CLI process groups and trusted system Git lookup; portable real-CLI integration fixtures.
+      - Made unsupported HTTPS/WebSocket changes fail before writes instead of silently enabling them.
+      - Removed unsafe partial update examples and preserved typed authentication/network failures.
     files:
-      - path: "SKILL.md"
-        size_bytes: 4836
-        status: "new"
-        note: "Action-focused deploy automation. Clarified auth (no CLI passwords), KeePass optional"
-      - path: "scripts/caprover_deploy.py"
-        size_bytes: 21607
-        status: "new"
-        note: "533→500+ lines. CLI→API→Playwright fallback. KeePass optional via env. No password CLI args."
-      - path: "references/api-v2-endpoints.md"
-        size_bytes: 2347
-        status: "new"
-      - path: "references/playwright-deploy-pattern.md"
-        size_bytes: 2915
-        status: "new"
-      - path: "templates/nginx-proxy.conf"
-        size_bytes: 3505
-        status: "new"
-        note: "WebSocket support, ERP buffer sizes, envsubst pattern. Generalized from tenant-specific refs."
+    - path: README.md
+      size_bytes: 3370
+      status: new
+    - path: SKILL.md
+      size_bytes: 7829
+      status: modified
+    - path: references/api-v2-endpoints.md
+      size_bytes: 3223
+      status: modified
+    - path: references/playwright-deploy-pattern.md
+      size_bytes: 1134
+      status: modified
+    - path: references/provenance.md
+      size_bytes: 2456
+      status: new
+    - path: scripts/caprover_deploy.py
+      size_bytes: 83649
+      status: modified
+    - path: scripts/deployment_guard.cjs
+      size_bytes: 9366
+      status: new
+    - path: templates/nginx-proxy.conf
+      size_bytes: 3721
+      status: unchanged
+    - path: tests/test_cli_local_integration.py
+      size_bytes: 12239
+      status: new
+    - path: tests/test_deployment_control_flow.py
+      size_bytes: 39427
+      status: new
+    - path: tests/test_preflight.py
+      size_bytes: 23062
+      status: modified
+    - path: tests/test_safe_api_update_and_verification.py
+      size_bytes: 21174
+      status: new
+    - path: MANIFEST.sha256
+      size_bytes: 1135
+      status: new
     changelog:
-      - date: "2026-06-16"
-        action: "created + reviewed"
-        details: >
-          Created by TG 2709 profile. Reviewed and fixed by Skills Lab:
-          argparse bug (store_true default=True), removed hardcoded KeePass paths,
-          removed password CLI args, removed unnecessary urllib try/except,
-          added Playwright login verification, generalized nginx template.
-          5 files, ~25KB total. Status: candidate — pending Felippe approval.
+    - date: '2026-06-16'
+      action: created + reviewed
+      details: 'Created by TG 2709 profile. Reviewed and fixed by Skills Lab: argparse bug (store_true default=True),
+        removed hardcoded KeePass paths, removed password CLI args, removed unnecessary urllib try/except,
+        added Playwright login verification, generalized nginx template. 5 files, ~25KB total. Status: candidate
+        — pending Felippe approval.
+
+        '
+    - date: '2026-09-15'
+      action: hardened as version 2.0.0 candidate
+      details: 'Breaking safe-default contract: plan-only unless explicitly applied; one intent-compatible
+        method; saved-session isolation; preserving full updates/readback; strict deployment evidence and
+        reconciliation. Public documentation and real-CLI loopback regressions added. No approval, publication
+        or runtime installation.'
 
   - name: topic-channel-soul-routing
     status: candidate

@@ -9,6 +9,7 @@ Covers:
 - fail() exits with correct code and sanitized message
 """
 import importlib.util
+import inspect
 import json
 import re
 import sys
@@ -31,10 +32,18 @@ def make_api(system_status=100, app_exists=True):
 
     def fake_request(method, path, payload=None):
         if path == "/api/v2/user/system/info/":
-            return {"status": system_status, "data": {"ok": True}}
+            return {
+                "status": system_status,
+                "data": {
+                    "hasRootSsl": True,
+                    "forceSsl": True,
+                    "rootDomain": "example.com",
+                    "captainSubDomain": "captain",
+                },
+            }
         if path == "/api/v2/user/apps/appDefinitions/":
             defs = [{"appName": "my-app"}] if app_exists else []
-            return {"data": {"appDefinitions": defs}}
+            return {"status": 100, "data": {"appDefinitions": defs}}
         return {}
 
     api._request = fake_request
@@ -52,11 +61,11 @@ class TestPreflight:
             api.preflight("my-app")
         assert exc.value.code == "caprover_auth_blocked"
 
-    def test_auth_blocked_403(self):
+    def test_authorization_blocked_403(self):
         api = make_api(system_status=403, app_exists=True)
         with pytest.raises(CapRoverDeployError) as exc:
             api.preflight("my-app")
-        assert exc.value.code == "caprover_auth_blocked"
+        assert exc.value.code == "caprover_authorization_blocked"
 
     def test_network_blocked(self):
         api = make_api(system_status=-1, app_exists=True)
@@ -75,6 +84,10 @@ class TestPreflight:
         with pytest.raises(CapRoverDeployError) as exc:
             api.preflight("my-app")
         assert exc.value.code == "caprover_config_invalid"
+
+    def test_authorized_create_mode_reports_missing_without_write(self):
+        api = make_api(system_status=100, app_exists=False)
+        assert api.preflight("my-app", allow_create=True) is False
 
 
 class TestFail:
@@ -158,11 +171,16 @@ class TestUrlSafety:
 
     def test_main_rejects_unbound_remote_origin_before_password_resolution(self, monkeypatch, capsys):
         monkeypatch.delenv("CAPROVER_CREDENTIAL_ORIGIN", raising=False)
+        monkeypatch.setattr(cd.importlib.util, "find_spec", lambda name: object())
         monkeypatch.setattr(sys, "argv", [
             "caprover_deploy.py",
             "--caprover-url", "https://attacker.example",
             "--expected-host", "attacker.example",
             "--app-name", "my-app",
+            "--rebuild-only",
+            "--method", "playwright",
+            "--apply",
+            "--allow-login",
         ])
         monkeypatch.setattr(cd, "get_password", lambda args: pytest.fail("password was resolved"))
 
@@ -447,7 +465,7 @@ class TestRepoSafety:
         with pytest.raises(CapRoverDeployError, match="does not match"):
             cd.get_github_creds(args)
 
-    def test_main_rejects_custom_repo_missing_token_env_before_password_resolution(self, monkeypatch, capsys):
+    def test_main_rejects_custom_repo_missing_token_env_before_password_resolution(self, monkeypatch, tmp_path, capsys):
         monkeypatch.setenv("GITHUB_TOKEN", "generic-github-token")
         monkeypatch.setenv("CAPROVER_CREDENTIAL_ORIGIN", "https://captain.example.com")
         monkeypatch.setattr(sys, "argv", [
@@ -457,6 +475,12 @@ class TestRepoSafety:
             "--app-name", "my-app",
             "--repo", "https://git.example.com/org/repo",
             "--expected-repo-host", "git.example.com",
+            "--branch", "main",
+            "--configure-only",
+            "--method", "api",
+            "--apply",
+            "--allow-login",
+            "--recovery-snapshot", str(tmp_path / "recovery.json"),
         ])
         monkeypatch.setattr(cd, "get_password", lambda args: pytest.fail("password was resolved"))
 
@@ -472,69 +496,36 @@ class TestRepoSafety:
 class TestResponseLimits:
     def test_api_rejects_oversized_success_response_before_json_decode(self, monkeypatch):
         class Response:
+            closed = False
+
             def read(self, _limit):
                 return b"x" * (cd.MAX_API_RESPONSE_BYTES + 1)
+
+            def close(self):
+                self.closed = True
+
+        response = Response()
 
         class Opener:
             def open(self, _request, timeout):
                 assert timeout == 30
-                return Response()
+                return response
 
         monkeypatch.setattr(cd.urllib.request, "build_opener", lambda *_args: Opener())
 
         result = CapRoverAPI("https://captain.example.com")._request("GET", "/api/v2/test")
 
-        assert result["status"] == -1
-        assert "byte limit" in result["description"]
+        assert result == {"status": -2, "failure": "response"}
+        assert response.closed is True
 
 
 class TestCliDeploySafety:
-    def test_cli_deploy_binds_target_app_and_password_env(self, monkeypatch):
-        calls = []
-
-        def fake_run(cmd, **kwargs):
-            calls.append((cmd, kwargs))
-            if cmd == ["caprover", "--version"]:
-                return SimpleNamespace(returncode=0, stdout="2.3.1", stderr="")
-            if cmd == ["node", "--version"]:
-                return SimpleNamespace(returncode=0, stdout="v24.0.0", stderr="")
-            return SimpleNamespace(returncode=0, stdout="ok", stderr="")
-
-        monkeypatch.setattr(cd.subprocess, "run", fake_run)
-        monkeypatch.setenv("CAPROVER_CONFIG_FILE", "/tmp/stale.yaml")
-        monkeypatch.setenv("CAPROVER_NAME", "stale-machine")
-        monkeypatch.setenv("CAPROVER_APP_TOKEN", "stale-token")
-
-        args = SimpleNamespace(
-            app_name="my-app",
-            branch="main",
-            caprover_url="https://captain.example.com",
-            tarball=None,
-        )
-
-        assert cd.try_cli_deploy(args, "captain-secret") is True
-
-        deploy_cmd, deploy_kwargs = calls[-1]
-        assert deploy_cmd == [
-            "caprover",
-            "deploy",
-            "--caproverUrl",
-            "https://captain.example.com",
-            "--caproverApp",
-            "my-app",
-            "--branch",
-            "main",
-        ]
-        assert "captain-secret" not in deploy_cmd
-
-        deploy_env = deploy_kwargs["env"]
-        assert deploy_env["CAPROVER_PASSWORD"] == "captain-secret"
-        assert deploy_env["CAPROVER_URL"] == "https://captain.example.com"
-        assert deploy_env["CAPROVER_APP"] == "my-app"
-        assert deploy_env["CAPROVER_BRANCH"] == "main"
-        assert "CAPROVER_CONFIG_FILE" not in deploy_env
-        assert "CAPROVER_NAME" not in deploy_env
-        assert "CAPROVER_APP_TOKEN" not in deploy_env
+    def test_cli_deploy_interface_accepts_frozen_session_not_password(self):
+        assert list(inspect.signature(cd.try_cli_deploy).parameters) == ["args", "session"]
+        source = inspect.getsource(cd.try_cli_deploy)
+        assert "CAPROVER_PASSWORD" not in source
+        assert "--caproverUrl" not in source
+        assert '"caprover", "deploy"' not in source
 
 
 class TestSecretSources:

@@ -1,7 +1,7 @@
 ---
 name: caprover-deploy
-description: "Deploy apps to CapRover with a sanitized preflight and method selection (CLI → API → Playwright). Handles app creation, GitHub repo setup, build triggering, HTTPS/WebSocket config, and post-deploy verification. Generic — no instance-specific data."
-version: 1.0.0
+description: "Use when planning or applying a CapRover deployment. Select one bounded method, preserve app state, and verify evidence; plan-only is the default."
+version: 2.0.0
 author: FMercurio Tech
 license: MIT
 metadata:
@@ -14,150 +14,113 @@ metadata:
 
 ## Overview
 
-Automated CapRover deployment that tries three methods in order of preference:
-
-1. **CapRover CLI** (`caprover deploy`) — fastest, works when CLI is installed and not broken
-2. **REST API v2** — programmatic, good for creating apps and setting config
-3. **Playwright** — browser automation, most reliable for Force Build + HTTPS toggles
-
-The deploy script (`scripts/caprover_deploy.py`) handles the full lifecycle:
-
-```
-authenticate → create app (if needed) → configure GitHub repo →
-trigger build → poll until done → enable HTTPS + WebSocket → verify
-```
+This version is intentionally narrower than 1.x. It validates the target, intent, source, selected method, and local capability before credential access. Without `--apply`, it prints a plan and performs no credential lookup, login, API request, or deployment.
 
 ## When to Use
 
-- Deploy a new app to CapRover from a GitHub repo
-- Force rebuild an existing app after pushing code
-- Enable HTTPS / WebSocket on an app
-- Automate CapRover deploy in CI/CD or from an agent
+- Plan or explicitly apply a local artifact upload, remote Git configuration, or dashboard Force Build.
+- Diagnose a saved CLI session with the companion `caprover-operations` probe first when session state is uncertain.
+- Do not use this helper for server maintenance, backups, deletion, networking, HTTPS/WebSocket changes, or unapproved credential renewal.
 
-## Prerequisites
+## Supported operations
 
-- **CapRover URL** (e.g. `https://captain.example.com`)
-- **CapRover password** — via env var, KeePass, or interactive prompt; never CLI args
-- **Git repo token** — `github.com` uses `GITHUB_TOKEN` or `gh auth token`; non-`github.com` hosts require a protected exact host-to-token binding
-- **Python 3.9+** with `requests` (or `urllib` fallback)
-- **Playwright** (optional, for method 3) — `pip install playwright && playwright install chromium`
+| Intent | Method | Result |
+|---|---|---|
+| `--tarball FILE` | CLI | Uploads the explicit local tarball |
+| `--source-dir DIR --branch BRANCH` | CLI | Archives the explicit local checkout/branch and uploads it |
+| `--repo URL --branch BRANCH --configure-only` | API | Configures remote Git and reports `configured_not_deployed` |
+| `--repo URL --branch BRANCH` | Playwright | Preserving API config, then one authenticated Force Build |
+| `--rebuild-only` | Playwright | One authenticated Force Build for an existing app |
 
-## Quick Start
+`--method auto` selects one capable method before any write. It never changes method after a mutation is attempted. Explicit methods never fall back. A remote `--repo` is never interpreted as the current local skill checkout.
+
+API tarball upload and API Git-build triggering are not implemented. HTTPS and WebSocket changes are also not implemented here; `--enable-https` and `--enable-websocket` fail with `capability_unavailable` before any write. Use a separately reviewed and authorized operations workflow for those settings.
+
+## Safe plan and apply
+
+All non-local examples use an exact target assertion. Replace placeholders with protected local paths; do not put tokens or passwords in arguments.
 
 ```bash
-# Bind the reusable credential to this exact remote origin in the protected environment.
-export CAPROVER_CREDENTIAL_ORIGIN=https://captain.example.com
-# Bind each non-github.com host in the protected job environment, not the CLI.
-export CAPROVER_REPO_TOKEN_BINDINGS='{"git.example.com":"GIT_EXAMPLE_TOKEN"}'
-
-# Full deploy from GitHub repo
+# Safe plan: validates intent and API capability without credentials or HTTP.
 python3 scripts/caprover_deploy.py \
   --caprover-url https://captain.example.com \
   --expected-host captain.example.com \
   --app-name my-app \
   --repo https://github.com/org/repo \
-  --branch main
-
-# Full deploy from a trusted GitHub Enterprise/custom host
-python3 scripts/caprover_deploy.py \
-  --caprover-url https://captain.example.com \
-  --expected-host captain.example.com \
-  --app-name my-app \
-  --repo https://git.example.com/org/repo \
-  --expected-repo-host git.example.com \
-  --branch main
-
-# Force rebuild existing app
-python3 scripts/caprover_deploy.py \
-  --caprover-url https://captain.example.com \
-  --expected-host captain.example.com \
-  --app-name my-app \
-  --rebuild-only
-
-# Deploy tarball (no GitHub)
-python3 scripts/caprover_deploy.py \
-  --caprover-url https://captain.example.com \
-  --expected-host captain.example.com \
-  --app-name my-app \
-  --tarball ./project.tar
+  --branch main \
+  --configure-only \
+  --recovery-snapshot /secure/recovery/my-app-before-config.json
 ```
+
+Saved-session CLI apply (preferred):
+
+```bash
+python3 scripts/caprover_deploy.py \
+  --caprover-url https://captain.example.com \
+  --expected-host captain.example.com \
+  --app-name my-app \
+  --tarball /work/releases/my-app.tar \
+  --method cli --apply \
+  --caprover-name production \
+  --targets /secure/caprover-targets.json \
+  --registry /secure/caprover-registry.json \
+  --cli-root /trusted/caprover-2.4.4 \
+  --node /trusted/node
+```
+
+Remote Git configuration requires `--recovery-snapshot` even in plan mode. The path must be absolute, new, have an existing parent, and be outside every Git tree. Apply creates it with mode `0600` before changing configuration and never prints its contents.
+
+Add `--allow-create` only when creating a missing app is part of the approval. Creation occurs once and must pass an app-definition readback before configuration or deployment continues.
 
 ## Authentication
 
-The script tries these in order:
+A complete saved session is selected by all five arguments: `--caprover-name`, `--targets`, `--registry`, `--cli-root`, and `--node`. The protected files must be owner-only regular files. Their target alias and registry machine must uniquely agree on the exact normalized origin, which must also match `--caprover-url`.
 
-1. `CAPROVER_PASSWORD` env var
-2. `--keepass-entry "/Caprover - MyOrg"` (requires `KEEPASS_DB` and `KEEPASS_KEY`)
-3. Interactive prompt
+The selected token is loaded once, frozen in memory, and used for preflight and execution. The CLI receives only that selected session in a private ephemeral HOME/XDG store. Caller CapRover/proxy configuration is not inherited. Tokens and passwords are absent from CLI arguments and environment. An expired session stops nonzero; it never falls back to login.
 
-GitHub token for `github.com` repos:
+Password authentication is separate and requires `--allow-login`. Before `get_password()` or `api.login()`, `CAPROVER_CREDENTIAL_ORIGIN` must exactly match the validated CapRover origin. Password lookup then uses `CAPROVER_PASSWORD`, an explicitly requested KeePass entry, or an interactive prompt. A valid saved CLI session never performs password lookup or login.
 
-1. `GITHUB_TOKEN` env var
-2. `gh auth token` (if GitHub CLI is installed)
+Git credentials are resolved only for `--repo` configuration. `github.com` may use `GITHUB_TOKEN` or `gh auth token`. Other hosts require `--expected-repo-host` and an exact host-specific binding in `CAPROVER_REPO_TOKEN_BINDINGS`; generic GitHub tokens are not used for custom hosts.
 
-Git token for non-`github.com` repos:
+## Lifecycle and evidence
 
-1. Pass `--expected-repo-host git.example.com`
-2. Set `CAPROVER_REPO_TOKEN_BINDINGS` in the protected job environment, for example `{"git.example.com":"GIT_EXAMPLE_TOKEN"}`
-3. Export the referenced host-specific token environment variable before running the script
+Apply follows this order:
 
-The CLI cannot select a token environment variable. `--repo-token-env` is optional only as an assertion that must match the protected binding. The script does not use generic `GITHUB_TOKEN` or `gh auth token` for custom Git hosts.
+```text
+validate intent/source/method/capability
+  → authenticate one way
+  → strict system/app preflight
+  → optional approved create + readback
+  → optional 0600 config recovery snapshot + preserving update/readback
+  → capture build baseline immediately before the selected trigger
+  → trigger once
+  → poll against the baseline
+  → verify changed generation/image evidence and optional exact replicas
+```
 
-Do not pass passwords or tokens through CLI arguments; process arguments are visible to local process inspection on many systems.
+CLI return zero, an accepted POST, or a clicked Force Build is not deployment verification. Success is reported only as `deployment_evidence_verified`. This does not prove application or endpoint health. A timeout or failure after a possible write reports `reconcile_required` and is never retried through another method.
 
-## URL Safety
+## Request-boundary limits
 
-- Use `https://` CapRover dashboard URLs by default.
-- Pass `--expected-host captain.example.com` for every non-local target. Include the port in `--expected-host` when the CapRover URL uses a non-default port.
-- Set `CAPROVER_CREDENTIAL_ORIGIN` in the protected job or secret environment to the exact origin associated with the CapRover credential, for example `https://captain.example.com` (or the exact local `http://127.0.0.1:port` development origin). The script checks this binding before resolving the password; a matching CLI `--expected-host` alone is not sufficient.
-- Git repo URLs default to `https://github.com/org/repo`. For GitHub Enterprise or another trusted Git host, pass `--expected-repo-host git.example.com` before using `--repo`. Include the port in `--expected-repo-host` when the repo URL uses one.
-- Git credentials are resolved only after the repo URL host is validated. Non-`github.com` repo hosts must have an exact protected `CAPROVER_REPO_TOKEN_BINDINGS` entry; `GITHUB_TOKEN` and `gh auth token` are reserved for `github.com`.
-- `--allow-insecure` is only for local/dev targets and makes Playwright tolerate certificate errors for that run.
+Python API requests disable inherited proxies and reject every redirect while carrying CapRover credentials. Browser navigation separately permits only the configured origin.
 
-## CLI Safety
+CLI deployment uses a mandatory, hash-pinned `deployment_guard.cjs`. With the pinned CLI layout it permits only the two app inventory reads used by CLI 2.4.4, one multipart POST to the selected app's exact detached `appData` endpoint, and bounded build-status reads for that same app. It validates credential headers, source stream shape, destination, method, path, response size, and redirects. Login, token renewal, proxies, alternate apps, and arbitrary API methods/paths are blocked.
 
-- CLI deployments pass the validated `--caproverUrl`, `--caproverApp`, and `--branch`/`--tarFile` explicitly.
-- CapRover passwords are provided through `CAPROVER_PASSWORD` in the subprocess environment, never through CLI arguments.
-- Ambient CapRover CLI config such as `CAPROVER_CONFIG_FILE`, saved machine names, app tokens, stale app names, or stale branches is ignored for the deploy subprocess.
+The guard is a narrow request interlock, not a general Node sandbox. Support is limited to the pinned official CLI 2.4.4 layout. That layout was tested with Node 26.7.0; this is not a claim that every CLI command or every Node 26 release works.
 
-## Method Selection
+See `references/api-v2-endpoints.md`, `references/playwright-deploy-pattern.md`, and `references/provenance.md`.
 
-| Scenario | Best method |
-|---|---|
-| CLI installed, Node.js < 26 | CLI (`caprover deploy`) |
-| Headless / no browser | API v2 (limited — see pitfalls) |
-| API returns errors, need Force Build | Playwright |
-| CI/CD pipeline | API for config + Playwright for build |
+## Common Pitfalls
 
-The script auto-detects and falls back. Override with `--method cli|api|playwright|auto`.
-
-## Key Pitfalls (learned the hard way)
-
-1. **CLI crashes on Node.js 26** — `ERR_USE_AFTER_CLOSE` on all interactive commands. Use API/Playwright.
-2. **API `appData/{app}/` returns 500** for tarball/inline deploy on CapRover 1.14.x. Use Playwright Force Build.
-3. **Git repo config requires credentials** even for public repos — `repoInfo` needs `user` + `password` (PAT). For non-`github.com` hosts, use a host-specific token env var. Without credentials: `status=1110`.
-4. **`{gitHash: ""}` does NOT trigger a Git build** via API — only tarball/Dockerfile inline work. Use dashboard "Force build".
-5. **Ant Design buttons** in the dashboard may not respond to standard clicks. Playwright with `locator().click()` works; browser automation tools may need JS fallback.
-6. **HTTPS provisioning takes 10-30s** (Let's Encrypt cert generation). The script waits automatically.
-
-## Nginx Reverse Proxy Template
-
-If deploying an Nginx reverse proxy app, see `templates/nginx-proxy.conf` for a battle-tested template with:
-- WebSocket support
-- Self-signed upstream SSL
-- Proper buffer sizes for ERP/large responses
-- Healthcheck endpoint with correct Content-Type
-
-## Reference
-
-- `references/api-v2-endpoints.md` — CapRover REST API v2 quick reference
-- `references/playwright-deploy-pattern.md` — Playwright dashboard automation details
+- A full update is not a partial patch. Preserve the current writable definition; never replace it with example defaults.
+- Serialize app configuration changes. The API does not make the read/update/readback sequence atomic against concurrent writers.
+- Do not infer health from a CLI zero exit, an accepted request, or an idle build. Require changed deployment evidence, then obtain application-specific health evidence separately.
+- Never switch methods after a possible write. Reconcile the observed state before seeking approval for another attempt.
 
 ## Verification Checklist
 
-- [ ] App exists in CapRover dashboard
-- [ ] Build completed without errors
-- [ ] HTTPS enabled (if needed)
-- [ ] WebSocket support enabled (if needed)
-- [ ] App responds to healthcheck (`/healthz` or equivalent)
-- [ ] Container shows 1/1 replicas (`docker service ls | grep <app>`)
+- [ ] Intent, target, source, method and authentication grants are explicit.
+- [ ] Protected state remains outside Git and secrets are absent from arguments/output.
+- [ ] Creation and configuration changes have their own readbacks.
+- [ ] Build evidence is newer than the pre-trigger baseline and expected replicas are exact when checked.
+- [ ] An inconclusive result exits nonzero; live health and runtime promotion are not inferred from fixtures.
