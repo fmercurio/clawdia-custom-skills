@@ -424,6 +424,86 @@ skills:
           new pitfall #8, expanded verification checklist. 5 files, ~16KB total.
           Status: candidate — awaiting Felippe approval.
 
+  - name: caprover-operations
+    status: candidate
+    version: 0.1.0
+    category: devops
+    description: Guarded read-only CapRover CLI session diagnosis and explicit operational gates for safe configuration, rollback, scaling and retirement.
+    source:
+      type: internal
+      origin: Original reauthoring from an authorized public specification and official CapRover CLI/API references
+      author: ClawdIA contributors
+      created: '2026-09-15'
+      approved: null
+      approved_by: null
+      repository_url: null
+      no_repository_reason: Original internal skill, not imported from a third-party skill package; immutable official dependency references and licenses are recorded in references/provenance.md
+    installation:
+      runtime_path: null
+      repo_path: skills/devops/caprover-operations/
+      installed_date: null
+      installed_by: null
+      note: Repo-only candidate; source acceptance does not authorize installation, login renewal or server operations.
+    audit:
+      security_review: '2026-09-15'
+      security_status: passed
+      findings:
+      - 67 local unit and real-CLI fixture tests passed with no skips; no live CapRover or real credentials used.
+      - Protected exact alias/origin binding, selected-session snapshot, request-time guard and pinned official CLI/Node layout.
+      - Login, writes, redirects, unexpected destinations, environment pollution and unknown schemas fail closed.
+      - Bounded output/events/time and process cleanup; reports exclude raw server or CLI payloads and credentials.
+      - Guard is a narrow interlock for trusted code, not an OS sandbox or proof of application health.
+      frontmatter_valid: true
+      company_agnostic: true
+      pitfalls_documented: true
+    files:
+    - path: README.md
+      size_bytes: 3465
+      status: new
+    - path: SKILL.md
+      size_bytes: 4593
+      status: new
+    - path: references/app-lifecycle-and-retirement.md
+      size_bytes: 1302
+      status: new
+    - path: references/cli-session-and-auth.md
+      size_bytes: 2313
+      status: new
+    - path: references/deployment-provenance-and-rollback.md
+      size_bytes: 1304
+      status: new
+    - path: references/provenance.md
+      size_bytes: 2247
+      status: new
+    - path: references/safe-app-definition-updates.md
+      size_bytes: 1597
+      status: new
+    - path: scripts/probe.py
+      size_bytes: 26233
+      status: new
+    - path: scripts/readonly_guard.cjs
+      size_bytes: 10660
+      status: new
+    - path: templates/operation-report.md
+      size_bytes: 1017
+      status: new
+    - path: templates/targets.example.json
+      size_bytes: 134
+      status: new
+    - path: tests/test_probe.py
+      size_bytes: 32236
+      status: new
+    - path: tests/test_public_contract.py
+      size_bytes: 1892
+      status: new
+    - path: MANIFEST.sha256
+      size_bytes: 1226
+      status: new
+    changelog:
+    - date: '2026-09-15'
+      action: reauthored as repo-only candidate
+      details: Original guarded probe, synthetic fixtures, public operational references and explicit authorization/readback boundaries. No private source copied and no runtime installation or promotion.
+
   - name: caprover-deploy
     status: candidate
     version: 1.0.0
