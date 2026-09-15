@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "targets": [
+    {
+      "alias": "example-production",
+      "origin": "https://captain.example.com"
+    }
+  ]
+}

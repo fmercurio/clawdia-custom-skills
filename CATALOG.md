@@ -9,14 +9,14 @@
 ### Por tipo de artefato
 | Tipo de artefato | Quantidade |
 | --- | ---: |
-| skill | 18 |
+| skill | 19 |
 | package | 1 |
 
 ### Por status
 | Status | Quantidade |
 | --- | ---: |
 | approved | 5 |
-| candidate | 14 |
+| candidate | 15 |
 | draft | 0 |
 | profile-overlay | 0 |
 | deprecated | 0 |
@@ -36,7 +36,8 @@
 
 | Categoria | Nome | Status | Descrição pública | Link |
 | --- | --- | --- | --- | --- |
-| devops | caprover-deploy | candidate | Automated CapRover deployment via CLI → API → Playwright fallback. Handles app creation, GitHub repo config, build triggering, HTTPS/WebSocket enablement, and post-deploy verification. Generic — no instance-specific data. | [caprover-deploy](skills/devops/caprover-deploy/SKILL.md) |
+| devops | caprover-deploy | candidate | Plan-first, single-method CapRover deployment or Git configuration with frozen saved sessions, explicit mutation grants, preserving updates/readback and post-trigger evidence. No automatic fallback after possible writes. | [caprover-deploy](skills/devops/caprover-deploy/SKILL.md) |
+| devops | caprover-operations | candidate | Guarded read-only CapRover CLI session diagnosis and explicit operational gates for safe configuration, rollback, scaling and retirement. | [caprover-operations](skills/devops/caprover-operations/SKILL.md) |
 | mcp | docs-mcp-server-operations | candidate | Generic public skill for deploying and maintaining a shared Docs MCP Server for Hermes, Codex, or other MCP clients. Covers persistent Docker/CapRover deployment, safe public/read-only exposure, embedding provider decisions, dependency scanning, staleness reports, and quality gates against shallow documentation indexes. | [docs-mcp-server-operations](skills/mcp/docs-mcp-server-operations/SKILL.md) |
 | note-taking | brain-search | candidate | Generic template — FTS5 + semantic search engine for a PARA-first Second Brain vault. Concept-level queries, keyword search, vault exploration, and index management. Customize vault path and embedding model per deployment. | [brain-search](skills/note-taking/brain-search/SKILL.md) |
 | note-taking | markdown-knowledge-vaults | candidate | Class-level workflow for inspecting, validating, and operating Markdown knowledge vaults in Hermes through durable source handling, inspect-first gates, schema and retrieval validation, explicit apply controls, and rollback-safe lifecycle management. | [markdown-knowledge-vaults](skills/note-taking/markdown-knowledge-vaults/SKILL.md) |
