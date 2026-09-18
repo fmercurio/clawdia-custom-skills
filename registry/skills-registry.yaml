@@ -3,6 +3,55 @@
 # Status: draft | candidate | approved | profile-overlay | deprecated | rejected
 
 skills:
+  - name: vaultwarden-operations
+    status: candidate
+    version: 0.1.0
+    category: devops
+    description: >
+      Deploys and operates Vaultwarden with explicit approval gates, protected
+      configuration, narrow ephemeral agent secret access, and restore-drill
+      verification. Company-agnostic and safe by default.
+    source:
+      type: internal
+      origin: "Generalized from a reviewed self-hosted Vaultwarden implementation"
+      author: "Felippe M. + Hermes Agent"
+      created: "2026-09-16"
+      approved: null
+      approved_by: null
+      repository_url: null
+      no_repository_reason: "New portable candidate authored for this repository"
+    installation:
+      runtime_path: "~/.hermes/skills/devops/vaultwarden-operations/"
+      repo_path: "skills/devops/vaultwarden-operations/"
+      installed_date: null
+      installed_by: null
+      note: "Candidate only; not installed or enabled by this change"
+    audit:
+      security_review: "2026-09-16"
+      security_status: "pending_human_review"
+      findings:
+        - "No secrets, tokens, private domains, tenant identifiers, or local paths"
+        - "No executable scripts; documented writes require explicit approval and readback"
+        - "Vault access limited to exact-item, ephemeral child-process operations"
+        - "Explicitly forbids export, broad inventory, long-lived sessions, and secret output"
+      frontmatter_valid: true
+      company_agnostic: true
+      pitfalls_documented: true
+    files:
+      - path: "SKILL.md"
+        status: "new"
+      - path: "references/vaultwarden-implementation.md"
+        status: "new"
+      - path: "templates/vaultwarden.env.example"
+        status: "new"
+    changelog:
+      - date: "2026-09-16"
+        action: "initial candidate"
+        details: >
+          Portable implementation and operations capability for a self-hosted
+          Vaultwarden service. Covers deployment gates, secret boundaries,
+          health checks, backups, isolated restore drills, and upgrades.
+
   - name: agilize-contabil-ops
     status: approved
     version: 1.0.0
