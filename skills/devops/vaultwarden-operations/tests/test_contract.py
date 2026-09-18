@@ -1,0 +1,107 @@
+"""Offline source-contract regressions, NOT runtime or credential-safety proof."""
+import re
+import unittest
+from pathlib import Path
+from urllib.parse import urlsplit
+
+ROOT = Path(__file__).resolve().parents[1]
+REPO = ROOT.parents[2]
+SKILL = ROOT / "SKILL.md"
+REFERENCE = ROOT / "references/vaultwarden-implementation.md"
+TEMPLATE = ROOT / "templates/vaultwarden.env.example"
+
+
+def active_settings(text):
+    result = {}
+    for line in text.splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        key, value = line.split("=", 1)
+        if key in result:
+            raise ValueError("duplicate configuration key")
+        result[key] = value
+    return result
+
+
+class ContractTests(unittest.TestCase):
+    def test_approved_procedure_keeps_installation_separate(self):
+        front = SKILL.read_text().split("---", 2)[1]
+        self.assertRegex(front, r"(?m)^status: approved$")
+        self.assertRegex(front, r"(?m)^version: 0\.1\.0$")
+        self.assertIn('author: "Repository contributors + Hermes Agent"', front)
+        registry = (REPO / "registry/skills-registry.yaml").read_text()
+        entry = registry.split("  - name: vaultwarden-operations\n", 1)[1].split("\n  - name:", 1)[0]
+        for field in ("runtime_path", "installed_date", "installed_by"):
+            self.assertRegex(entry, rf"(?m)^\s+{field}: null$")
+        self.assertRegex(entry, r"(?m)^    status: approved$")
+        self.assertRegex(entry, r'(?m)^      approved: "[0-9]{4}-[0-9]{2}-[0-9]{2}"$')
+        self.assertIn('approved_by: "Repository maintainer (explicit authorization)"', entry)
+
+    def test_only_explicit_nonsecret_defaults(self):
+        values = active_settings(TEMPLATE.read_text())
+        self.assertEqual(values, {
+            "DOMAIN": "https://vault.example.com",
+            "DATA_FOLDER": "/data",
+            "SIGNUPS_ALLOWED": "false",
+            "SIGNUPS_DOMAINS_WHITELIST": "",
+            "INVITATIONS_ALLOWED": "false",
+        })
+        for key in ("ADMIN_TOKEN", "SMTP_PASSWORD", "SMTP_USERNAME", "BW_SESSION"):
+            self.assertNotIn(key, values)
+
+    def test_parser_rejects_duplicate_settings(self):
+        with self.assertRaises(ValueError):
+            active_settings("SIGNUPS_ALLOWED=false\nSIGNUPS_ALLOWED=true")
+
+    def test_caprover_is_explicit_and_fail_closed(self):
+        text = REFERENCE.read_text()
+        for phrase in ("## 2. CapRover deployment sequence", "vaultwarden/server@sha256:<reviewed-image-digest>",
+                       "one deployment method", "no multi-writer rollout", "does not implement HTTPS/WebSocket",
+                       "not a secret manager", "config.json", "before exposure", "ordinary environment",
+                       "no automatic onboarding path", "image may not read a migrated database"):
+            self.assertIn(phrase, text)
+
+    def test_credential_contract_states_real_cli_limits(self):
+        text = REFERENCE.read_text()
+        for phrase in ("`bw sync` has no per-item filter", "BITWARDENCLI_APPDATA_DIR",
+                       "do not copy the parent's", "exact ID", "bw list items", "bw export",
+                       "raw item JSON", "unauthenticated", "all worker descendants",
+                       "timeout or interruption", "session-token revocation", "independent review"):
+            self.assertIn(phrase.lower(), text.lower())
+        self.assertIn("No operational wrapper is included or claimed tested", text)
+        self.assertIn("Do not pass unlock material or `BW_SESSION` to that consumer", text)
+
+    def test_recovery_and_authorization_are_distinct(self):
+        text = REFERENCE.read_text()
+        for phrase in ("Backups and restore drills each require specific authorization", "WAL consistency",
+                       "Block production SMTP", "representative restored file integrity",
+                       "independent recovery-key custody", "Cleanup is also an approved write",
+                       "A credential-read grant is not an external write grant"):
+            self.assertIn(phrase, text)
+
+    def test_only_expected_python_test_and_no_scripts_directory(self):
+        self.assertFalse((ROOT / "scripts").exists())
+        self.assertEqual({p.relative_to(ROOT).as_posix() for p in ROOT.rglob("*.py")},
+                         {"tests/test_contract.py"})
+
+    def test_public_documentation_and_links(self):
+        allowed_hosts = {"vault.example.com", "github.com", "bitwarden.com", "caprover.com"}
+        for path in (SKILL, REFERENCE, TEMPLATE):
+            text = path.read_text()
+            with self.subTest(file=path.name):
+                # Check only contract sources, never print matching sensitive text.
+                forbidden = (r"/(?:root|home|Users)/", r"~[/\\]", r"\b(?:\d{1,3}\.){3}\d{1,3}\b",
+                             r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----",
+                             r"\b[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\b")
+                for pattern in forbidden:
+                    self.assertIsNone(re.search(pattern, text), "non-neutral source marker detected")
+                for url in re.findall(r"https?://[^\s)<>`]+", text):
+                    self.assertIn(urlsplit(url).hostname, allowed_hosts)
+                    self.assertIsNone(urlsplit(url).username)
+                for link in re.findall(r"\]\(([^)]+)\)", text):
+                    if not link.startswith("https://"):
+                        self.assertTrue((path.parent / link).is_file(), "broken relative reference")
+
+
+if __name__ == "__main__":
+    unittest.main()

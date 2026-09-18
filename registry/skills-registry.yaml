@@ -4,35 +4,35 @@
 
 skills:
   - name: vaultwarden-operations
-    status: candidate
+    status: approved
     version: 0.1.0
     category: devops
     description: >
-      Deploys and operates Vaultwarden with explicit approval gates, protected
+      Plans CapRover-based Vaultwarden operations with explicit approval gates, protected
       configuration, narrow ephemeral agent secret access, and restore-drill
       verification. Company-agnostic and safe by default.
     source:
       type: internal
       origin: "Generalized from a reviewed self-hosted Vaultwarden implementation"
-      author: "Felippe M. + Hermes Agent"
+      author: "Repository contributors + Hermes Agent"
       created: "2026-09-16"
-      approved: null
-      approved_by: null
+      approved: "2026-09-18"
+      approved_by: "Repository maintainer (explicit authorization)"
       repository_url: null
       no_repository_reason: "New portable candidate authored for this repository"
     installation:
-      runtime_path: "~/.hermes/skills/devops/vaultwarden-operations/"
+      runtime_path: null
       repo_path: "skills/devops/vaultwarden-operations/"
       installed_date: null
       installed_by: null
-      note: "Candidate only; not installed or enabled by this change"
+      note: "Procedural skill approved; deployment records are operator-local, not public installation state"
     audit:
       security_review: "2026-09-16"
-      security_status: "pending_human_review"
+      security_status: "passed"
       findings:
-        - "No secrets, tokens, private domains, tenant identifiers, or local paths"
-        - "No executable scripts; documented writes require explicit approval and readback"
-        - "Vault access limited to exact-item, ephemeral child-process operations"
+        - "Candidate author identity and proposed runtime path generalized; public placeholders only"
+        - "No operational scripts; offline contract tests do not prove live deployment or wrapper safety"
+        - "Exact-item worker contract requires isolated CLI state and restricted-account sync; no per-item sync claimed"
         - "Explicitly forbids export, broad inventory, long-lived sessions, and secret output"
       frontmatter_valid: true
       company_agnostic: true
@@ -44,6 +44,8 @@ skills:
         status: "new"
       - path: "templates/vaultwarden.env.example"
         status: "new"
+      - path: "tests/test_contract.py"
+        status: "new"
     changelog:
       - date: "2026-09-16"
         action: "initial candidate"
@@ -51,6 +53,21 @@ skills:
           Portable implementation and operations capability for a self-hosted
           Vaultwarden service. Covers deployment gates, secret boundaries,
           health checks, backups, isolated restore drills, and upgrades.
+
+      - date: "2026-09-18"
+        action: "local candidate review; no publication or installation"
+        details: >
+          Added CapRover sequencing, effective-policy readback, secret-store limits,
+          fail-closed isolated credential-worker requirements and offline contract tests.
+          Candidate remains pending human review; no live infrastructure or credential use.
+
+      - date: "2026-09-18"
+        action: "maintainer-authorized promotion"
+        details: >
+          Explicit maintainer authorization covers commit, PR update, promotion and
+          a separately verified runtime installation. Approval is limited to the
+          procedural skill; live deployment remains deferred and no credential
+          wrapper, live service or restore drill is claimed verified.
 
   - name: agilize-contabil-ops
     status: approved
