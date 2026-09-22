@@ -209,20 +209,46 @@ def gate_artifact_checksums(root: Path) -> dict:
     for logical_name in CHECKSUM_FILES:
         artifact = root / logical_name
         sidecar = artifact.with_suffix(".json.sha256")
-        if (not _bounded_contract_file(root, artifact)
-                or not _bounded_contract_file(root, sidecar)):
-            return _result("artifact-checksums", False, "invalid-artifact", CHECKSUM_FILES)
+        sidecar_name = logical_name + ".sha256"
+        if not _bounded_contract_file(root, artifact):
+            return _result(
+                "artifact-checksums", False, "invalid-artifact", [logical_name]
+            )
+        if not _bounded_contract_file(root, sidecar):
+            return _result(
+                "artifact-checksums",
+                False,
+                "invalid-artifact",
+                [sidecar_name],
+            )
         try:
             data = artifact.read_bytes()
+        except OSError:
+            return _result(
+                "artifact-checksums", False, "invalid-artifact", [logical_name]
+            )
+        try:
             checksum = sidecar.read_bytes()
         except OSError:
-            return _result("artifact-checksums", False, "invalid-artifact", CHECKSUM_FILES)
+            return _result(
+                "artifact-checksums", False, "invalid-artifact", [sidecar_name]
+            )
         expected_line = hashlib.sha256(data).hexdigest().encode("ascii")
         basename = artifact.name.encode("ascii")
-        if not re.fullmatch(rb"[0-9a-f]{64}  [A-Za-z0-9._-]+\n", checksum):
-            return _result("artifact-checksums", False, "invalid-checksum", CHECKSUM_FILES)
-        if checksum != expected_line + b"  " + basename + b"\n":
-            return _result("artifact-checksums", False, "invalid-checksum", CHECKSUM_FILES)
+        parsed = re.fullmatch(
+            rb"([0-9a-f]{64})  ([A-Za-z0-9._-]+)\n", checksum
+        )
+        if parsed is None or parsed.group(2) != basename:
+            return _result(
+                "artifact-checksums", False, "invalid-checksum", [sidecar_name]
+            )
+        if parsed.group(1) != expected_line:
+            return _result(
+                "artifact-checksums",
+                False,
+                "invalid-checksum",
+                [logical_name, sidecar_name],
+            )
     return _result("artifact-checksums", True, "ok", CHECKSUM_FILES)
 
 
@@ -522,13 +548,21 @@ def gate_generated_drift(root: Path) -> dict:
             generated_root = Path(temp_dir)
             _write_snapshot(snapshot, generated_root)
             expected = _generate_disposable(generated_root, False)
-        for relative in GENERATED_FILES:
-            current = root / relative
-            if (not _bounded_contract_file(root, current)
-                    or current.read_bytes() != expected[relative]):
-                raise ValueError
     except (ImportError, OSError, UnicodeError, ValueError, RecursionError):
         return _result("generated-drift", False, "generated-output-drift", files)
+    for relative in GENERATED_FILES:
+        current = root / relative
+        try:
+            matches = (
+                _bounded_contract_file(root, current)
+                and current.read_bytes() == expected[relative]
+            )
+        except OSError:
+            matches = False
+        if not matches:
+            return _result(
+                "generated-drift", False, "generated-output-drift", [relative]
+            )
     return _result("generated-drift", True, "ok", files)
 
 

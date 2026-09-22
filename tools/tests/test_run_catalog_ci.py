@@ -103,7 +103,75 @@ class CatalogCIRunnerTests(unittest.TestCase):
             }],
         )
 
+    def test_checksum_gate_attributes_each_invalid_contract_file(self) -> None:
+        for logical_name in catalog_ci.CHECKSUM_FILES:
+            for suffix in ("", ".sha256"):
+                relative = logical_name + suffix
+                for failure in ("missing", "nonregular", "oversized"):
+                    with (
+                        self.subTest(
+                            logical_name=logical_name,
+                            suffix=suffix,
+                            failure=failure,
+                        ),
+                        tempfile.TemporaryDirectory() as temp_dir,
+                    ):
+                        root = Path(temp_dir)
+                        (root / "registry").mkdir()
+                        shutil.copy2(
+                            REPO_ROOT / "registry" / "skills-registry.yaml",
+                            root / "registry" / "skills-registry.yaml",
+                        )
+                        copy_dist(root)
+                        target = root / relative
+                        target.unlink()
+                        if failure == "nonregular":
+                            target.mkdir()
+                        elif failure == "oversized":
+                            target.write_bytes(
+                                b"x" * (catalog_ci.MAX_DATA_FILE_BYTES + 1)
+                            )
+
+                        result = run_ci(
+                            "--root", str(root), "--gate", "artifact-checksums"
+                        )
+
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertEqual(result.stderr, "")
+                    gate = json.loads(result.stdout)["gates"][0]
+                    self.assertEqual(gate["code"], "invalid-artifact")
+                    self.assertEqual(gate["files"], [relative])
+
+    def test_checksum_gate_attributes_sanitized_read_errors(self) -> None:
+        marker = "PRIVATE-READ-ERROR-MUST-NOT-LEAK"
+        original_read_bytes = Path.read_bytes
+        for logical_name in catalog_ci.CHECKSUM_FILES:
+            for suffix in ("", ".sha256"):
+                relative = logical_name + suffix
+                with (
+                    self.subTest(logical_name=logical_name, suffix=suffix),
+                    tempfile.TemporaryDirectory() as temp_dir,
+                ):
+                    root = Path(temp_dir)
+                    copy_dist(root)
+                    target = root / relative
+
+                    def forced_read(path: Path) -> bytes:
+                        if path == target:
+                            raise OSError(marker)
+                        return original_read_bytes(path)
+
+                    with mock.patch.object(Path, "read_bytes", forced_read):
+                        gate = catalog_ci.gate_artifact_checksums(root)
+
+                rendered = json.dumps(gate)
+                self.assertNotIn(marker, rendered)
+                self.assertEqual(gate["status"], "failed")
+                self.assertEqual(gate["code"], "invalid-artifact")
+                self.assertEqual(gate["files"], [relative])
+
     def test_checksum_gate_rejects_symlinked_ancestor(self) -> None:
+        marker = "HOSTILE-TARGET-MUST-NOT-LEAK"
         with tempfile.TemporaryDirectory() as temp_dir:
             base = Path(temp_dir)
             root = base / "candidate"
@@ -113,71 +181,92 @@ class CatalogCIRunnerTests(unittest.TestCase):
                 REPO_ROOT / "registry" / "skills-registry.yaml",
                 root / "registry" / "skills-registry.yaml",
             )
-            shutil.copytree(REPO_ROOT / "dist", base / "outside-dist")
-            (root / "dist").symlink_to(base / "outside-dist", target_is_directory=True)
+            outside = base / marker
+            shutil.copytree(REPO_ROOT / "dist", outside)
+            (root / "dist").symlink_to(outside, target_is_directory=True)
 
             result = run_ci("--root", str(root), "--gate", "artifact-checksums")
 
         self.assertNotEqual(result.returncode, 0)
-        self.assertNotIn(str(base), result.stdout + result.stderr)
+        self.assertEqual(result.stderr, "")
+        self.assertNotIn(marker, result.stdout)
         gate = json.loads(result.stdout)["gates"][0]
         self.assertEqual(gate["status"], "failed")
         self.assertEqual(gate["code"], "invalid-artifact")
+        self.assertEqual(gate["files"], ["dist/catalog.v1.json"])
 
     def test_checksum_sidecars_have_exact_syntax_and_basename(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            (root / "registry").mkdir()
-            shutil.copy2(
-                REPO_ROOT / "registry" / "skills-registry.yaml",
-                root / "registry" / "skills-registry.yaml",
-            )
-            copy_dist(root)
-            sidecar = root / "dist" / "catalog.v1.json.sha256"
-            original = sidecar.read_bytes()
-            digest = original[:64]
-            invalid_lines = (
-                digest + b"  catalog.preview.v1.json\n",
-                original + b"trailing-garbage\n",
-                digest.upper() + b"  catalog.v1.json\n",
-                digest + b" catalog.v1.json\n",
-                digest + b"  catalog.v1.json",
-            )
-            for invalid in invalid_lines:
-                with self.subTest(invalid=invalid[-8:]):
-                    sidecar.write_bytes(invalid)
-                    result = run_ci(
-                        "--root", str(root), "--gate", "artifact-checksums"
-                    )
-                    self.assertNotEqual(result.returncode, 0)
-                    self.assertNotIn(digest.decode(), result.stdout + result.stderr)
+        for logical_name in catalog_ci.CHECKSUM_FILES:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                (root / "registry").mkdir()
+                shutil.copy2(
+                    REPO_ROOT / "registry" / "skills-registry.yaml",
+                    root / "registry" / "skills-registry.yaml",
+                )
+                copy_dist(root)
+                artifact = root / logical_name
+                sidecar = root / (logical_name + ".sha256")
+                original = sidecar.read_bytes()
+                digest = original[:64]
+                marker = "HOSTILE-SIDECAR-NAME-MUST-NOT-LEAK"
+                invalid_lines = (
+                    digest + b"  " + marker.encode("ascii") + b"\n",
+                    original + b"trailing-garbage\n",
+                    digest.upper() + b"  " + artifact.name.encode("ascii") + b"\n",
+                    digest + b" " + artifact.name.encode("ascii") + b"\n",
+                    digest + b"  " + artifact.name.encode("ascii"),
+                )
+                for invalid in invalid_lines:
+                    with self.subTest(logical_name=logical_name, invalid=invalid[-8:]):
+                        sidecar.write_bytes(invalid)
+                        result = run_ci(
+                            "--root", str(root), "--gate", "artifact-checksums"
+                        )
+                        self.assertNotEqual(result.returncode, 0)
+                        self.assertEqual(result.stderr, "")
+                        self.assertNotIn(digest.decode(), result.stdout)
+                        self.assertNotIn(marker, result.stdout)
+                        gate = json.loads(result.stdout)["gates"][0]
+                        self.assertEqual(gate["code"], "invalid-checksum")
+                        self.assertEqual(gate["files"], [logical_name + ".sha256"])
 
     def test_checksum_gate_rejects_artifact_mutation_without_resigning(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            (root / "registry").mkdir()
-            shutil.copy2(
-                REPO_ROOT / "registry" / "skills-registry.yaml",
-                root / "registry" / "skills-registry.yaml",
-            )
-            copy_dist(root)
-            baseline = run_ci("--root", str(root), "--gate", "artifact-checksums")
-            self.assertEqual(baseline.returncode, 0, baseline.stdout)
+        for logical_name in catalog_ci.CHECKSUM_FILES:
+            with (
+                self.subTest(logical_name=logical_name),
+                tempfile.TemporaryDirectory() as temp_dir,
+            ):
+                root = Path(temp_dir)
+                (root / "registry").mkdir()
+                shutil.copy2(
+                    REPO_ROOT / "registry" / "skills-registry.yaml",
+                    root / "registry" / "skills-registry.yaml",
+                )
+                copy_dist(root)
+                baseline = run_ci(
+                    "--root", str(root), "--gate", "artifact-checksums"
+                )
+                self.assertEqual(baseline.returncode, 0, baseline.stdout)
 
-            artifact = root / "dist/catalog.v1.json"
-            sidecar = artifact.with_suffix(".json.sha256")
-            checksum_before = sidecar.read_bytes()
-            mutated = bytearray(artifact.read_bytes())
-            mutated[-2] ^= 1
-            artifact.write_bytes(mutated)
-            result = run_ci("--root", str(root), "--gate", "artifact-checksums")
+                artifact = root / logical_name
+                sidecar = root / (logical_name + ".sha256")
+                checksum_before = sidecar.read_bytes()
+                mutated = bytearray(artifact.read_bytes())
+                mutated[-2] ^= 1
+                artifact.write_bytes(mutated)
+                result = run_ci(
+                    "--root", str(root), "--gate", "artifact-checksums"
+                )
 
-            self.assertEqual(sidecar.read_bytes(), checksum_before)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertEqual(result.stderr, "")
-            self.assertEqual(
-                json.loads(result.stdout)["gates"][0]["code"], "invalid-checksum"
-            )
+                self.assertEqual(sidecar.read_bytes(), checksum_before)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.stderr, "")
+                gate = json.loads(result.stdout)["gates"][0]
+                self.assertEqual(gate["code"], "invalid-checksum")
+                self.assertEqual(
+                    gate["files"], [logical_name, logical_name + ".sha256"]
+                )
 
     def test_all_reports_fixed_unprovisioned_private_gate(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -550,8 +639,95 @@ class CatalogCIRunnerTests(unittest.TestCase):
             result = run_ci("--root", str(root), "--gate", "generated-drift")
 
         self.assertNotEqual(result.returncode, 0)
+        gate = json.loads(result.stdout)["gates"][0]
+        self.assertEqual(gate["code"], "generated-output-drift")
+        self.assertEqual(gate["files"], ["CATALOG.md"])
+
+    def test_generated_drift_attributes_known_output_beyond_catalog(self) -> None:
+        relative = "schemas/capability-catalog/v1/catalog-projection.schema.json"
+        for failure in ("mismatch", "missing"):
+            with (
+                self.subTest(failure=failure),
+                tempfile.TemporaryDirectory() as temp_dir,
+            ):
+                root = Path(temp_dir)
+                copy_generation_inputs(root)
+                copy_generated_outputs(root)
+                baseline = run_ci(
+                    "--root", str(root), "--gate", "generated-drift"
+                )
+                self.assertEqual(baseline.returncode, 0, baseline.stdout)
+                target = root / relative
+                if failure == "mismatch":
+                    target.write_bytes(b"{}\n")
+                else:
+                    target.unlink()
+
+                result = run_ci(
+                    "--root", str(root), "--gate", "generated-drift"
+                )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(result.stderr, "")
+            gate = json.loads(result.stdout)["gates"][0]
+            self.assertEqual(gate["code"], "generated-output-drift")
+            self.assertEqual(gate["files"], [relative])
+
+    def test_generated_drift_attributes_sanitized_output_read_error(self) -> None:
+        marker = "PRIVATE-DRIFT-READ-ERROR-MUST-NOT-LEAK"
+        original_read_bytes = Path.read_bytes
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            copy_generation_inputs(root)
+            copy_generated_outputs(root)
+            target = root / "CATALOG.md"
+            target_reads = 0
+
+            def forced_read(path: Path) -> bytes:
+                nonlocal target_reads
+                if path == target:
+                    target_reads += 1
+                    if target_reads > 1:
+                        raise OSError(marker)
+                return original_read_bytes(path)
+
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with (
+                mock.patch.object(Path, "read_bytes", forced_read),
+                redirect_stdout(stdout),
+                redirect_stderr(stderr),
+            ):
+                return_code = catalog_ci.main(
+                    ["--root", str(root), "--gate", "generated-drift"]
+                )
+
+        self.assertEqual(return_code, 1)
+        self.assertEqual(stderr.getvalue(), "")
+        self.assertNotIn(marker, stdout.getvalue())
+        gate = json.loads(stdout.getvalue())["gates"][0]
+        self.assertEqual(gate["status"], "failed")
+        self.assertEqual(gate["code"], "generated-output-drift")
+        self.assertEqual(gate["files"], ["CATALOG.md"])
+
+    def test_generated_drift_keeps_preidentification_failure_generic(self) -> None:
+        marker = "HOSTILE-SNAPSHOT-TARGET-MUST-NOT-LEAK"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            copy_generation_inputs(root)
+            copy_generated_outputs(root)
+            (root / "skills" / "hostile-link").symlink_to(root / marker)
+
+            result = run_ci("--root", str(root), "--gate", "generated-drift")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stderr, "")
+        self.assertNotIn(marker, result.stdout)
+        gate = json.loads(result.stdout)["gates"][0]
+        self.assertEqual(gate["code"], "generated-output-drift")
         self.assertEqual(
-            json.loads(result.stdout)["gates"][0]["code"], "generated-output-drift"
+            gate["files"],
+            ["registry/skills-registry.yaml", "generated-outputs"],
         )
 
     def test_skill_contract_reads_but_does_not_execute_candidate_files(self) -> None:

@@ -78,8 +78,19 @@ bytes; snapshots têm no máximo 4.096 arquivos, 64.000.000 bytes no total e cam
 relativos de até 512 bytes. Cada uma das três suítes de `unit-contract` tem timeout
 de 120 segundos. Seu log combinado de stdout/stderr é aceito até 1.000.000 bytes e
 o processo recebe limite de tamanho de arquivo de 8.388.609 bytes. O relatório usa
-nomes lógicos como `generated-outputs` e `public-unit-suites`; eles identificam
-grupos e não necessariamente o arquivo exato que causou a falha.
+diagnósticos de caminho específico quando a causa já corresponde a uma entrada
+fixa conhecida. Em `generated-drift`, output ausente, ilegível ou divergente informa
+o primeiro caminho de `GENERATED_FILES` que falhou. Em `artifact-checksums`, falhas
+estruturais ou de leitura informam o artefato ou sidecar fixo, e sintaxe ou basename
+inválido informa somente o sidecar. Quando a sintaxe e o basename são válidos mas o
+digest diverge, não é possível atribuir a causa a um dos dois bytes de entrada; o
+diagnóstico informa o par `[artefato, sidecar]`, nessa ordem. Conteúdo do sidecar,
+targets de symlink, exceções e hashes observados nunca fornecem nomes ao relatório.
+
+Outros gates e falhas anteriores à identificação causal, como snapshot ou geração,
+continuam usando nomes lógicos como `generated-outputs` e `public-unit-suites`; eles
+identificam grupos e não necessariamente o arquivo exato que causou a falha. Em
+sucesso, as listas de arquivos permanecem as listas lógicas originais do contrato.
 
 ## Limite privado e bloqueio intencional
 
@@ -102,6 +113,9 @@ Ainda faltam, em infraestrutura protegida e separada:
    fingerprints, identificadores de origem ou caminhos de máquina, usuário ou
    tenant;
 4. emitir o resultado requerido por um workflow não modificável pelo candidato.
+
+A integração geral A5 e a integração privada continuam abertas; esta fatia E1a não
+as implementa nem altera seu estado.
 
 Os testes públicos existentes do scanner usam políticas e achados sintéticos. Eles
 não são um scan privado desta nova árvore. Testes contra PR hostil precisam de um
