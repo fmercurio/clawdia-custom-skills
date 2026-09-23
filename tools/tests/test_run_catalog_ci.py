@@ -8,6 +8,7 @@ import importlib.util
 import io
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -84,6 +85,244 @@ def write_tiny_unit_suites(root: Path) -> None:
 
 
 class CatalogCIRunnerTests(unittest.TestCase):
+    def test_unit_contract_rejects_altered_actionlint_before_suite_execution(self) -> None:
+        source = Path(os.environ["ACTIONLINT_BIN"])
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            test_dir = root / "tools" / "tests"
+            test_dir.mkdir(parents=True)
+            sentinel = root / "suite-executed"
+            (test_dir / "test_must_not_run.py").write_text(
+                "from pathlib import Path\n"
+                "import unittest\n"
+                "class MustNotRunTest(unittest.TestCase):\n"
+                "    def test_sentinel(self):\n"
+                f"        Path({str(sentinel)!r}).touch()\n",
+                encoding="utf-8",
+            )
+            altered = root / "altered-actionlint"
+            altered_bytes = bytearray(source.read_bytes())
+            altered_bytes[-1] ^= 1
+            altered.write_bytes(altered_bytes)
+            altered.chmod(0o755)
+
+            with (
+                mock.patch.object(
+                    catalog_ci, "UNIT_SUITES", (("tools/tests", "test_*.py"),)
+                ),
+                mock.patch.dict(
+                    os.environ,
+                    {
+                        "ACTIONLINT_BIN": str(altered),
+                        "ACTIONLINT_SHA256": hashlib.sha256(
+                            altered_bytes
+                        ).hexdigest(),
+                    },
+                    clear=False,
+                ),
+            ):
+                result = catalog_ci.gate_unit_contract(root)
+
+            self.assertEqual(result["status"], "failed")
+            self.assertEqual(result["code"], "public-unit-failure")
+            self.assertFalse(sentinel.exists())
+
+    def test_unit_contract_runs_suites_with_only_staged_verified_actionlint(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            test_dir = root / "tools" / "tests"
+            test_dir.mkdir(parents=True)
+            (test_dir / "test_actionlint_environment.py").write_text(
+                "import os\n"
+                "from pathlib import Path\n"
+                "import subprocess\n"
+                "import unittest\n"
+                "class ActionlintEnvironmentTest(unittest.TestCase):\n"
+                "    def test_verified_staged_tool_and_sanitized_environment(self):\n"
+                "        tool = Path(os.environ['ACTIONLINT_BIN'])\n"
+                "        self.assertEqual(tool, Path(os.environ['TMPDIR']) / 'actionlint')\n"
+                "        self.assertEqual(os.environ['PATH'], '/usr/bin:/bin')\n"
+                "        self.assertNotIn('UNTRUSTED_AMBIENT_VALUE', os.environ)\n"
+                "        completed = subprocess.run(\n"
+                "            [tool, '-version'], capture_output=True, text=True, timeout=5\n"
+                "        )\n"
+                "        self.assertEqual(completed.returncode, 0)\n"
+                "        self.assertEqual(completed.stdout.splitlines()[0], '1.7.12')\n",
+                encoding="utf-8",
+            )
+
+            with (
+                mock.patch.object(
+                    catalog_ci,
+                    "UNIT_SUITES",
+                    (("tools/tests", "test_actionlint_environment.py"),),
+                ),
+                mock.patch.dict(
+                    os.environ, {"UNTRUSTED_AMBIENT_VALUE": "must-not-pass"}
+                ),
+            ):
+                result = catalog_ci.gate_unit_contract(root)
+
+        self.assertEqual(result["status"], "passed")
+
+    def test_unit_contract_does_not_execute_unverified_tool_for_version(self) -> None:
+        identity = (catalog_ci.platform.system(), catalog_ci.platform.machine())
+        expected_size, _ = catalog_ci.ACTIONLINT_BINARIES[identity]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            version_sentinel = root / "version-executed"
+            suite_sentinel = root / "suite-executed"
+            test_dir = root / "tools" / "tests"
+            test_dir.mkdir(parents=True)
+            (test_dir / "test_must_not_run.py").write_text(
+                "from pathlib import Path\n"
+                "import unittest\n"
+                "class MustNotRunTest(unittest.TestCase):\n"
+                "    def test_sentinel(self):\n"
+                f"        Path({str(suite_sentinel)!r}).touch()\n",
+                encoding="utf-8",
+            )
+            executable = root / "unverified-actionlint"
+            script = (
+                "#!/bin/sh\n"
+                f"touch {shlex.quote(str(version_sentinel))}\n"
+                "printf '1.7.12\\n'\n"
+                "exit 0\n"
+                "#"
+            ).encode("utf-8")
+            self.assertLess(len(script), expected_size)
+            executable.write_bytes(script + b"x" * (expected_size - len(script)))
+            executable.chmod(0o755)
+
+            with (
+                mock.patch.object(
+                    catalog_ci, "UNIT_SUITES", (("tools/tests", "test_*.py"),)
+                ),
+                mock.patch.dict(
+                    os.environ, {"ACTIONLINT_BIN": str(executable)}, clear=False
+                ),
+            ):
+                result = catalog_ci.gate_unit_contract(root)
+
+            self.assertEqual(result["status"], "failed")
+            self.assertFalse(version_sentinel.exists())
+            self.assertFalse(suite_sentinel.exists())
+
+    def test_unit_contract_has_no_actionlint_path_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            fake_bin = root / "bin"
+            fake_bin.mkdir()
+            version_sentinel = root / "path-tool-executed"
+            suite_sentinel = root / "suite-executed"
+            actionlint = fake_bin / "actionlint"
+            actionlint.write_text(
+                "#!/bin/sh\n"
+                f"touch {shlex.quote(str(version_sentinel))}\n"
+                "printf '1.7.12\\n'\n",
+                encoding="utf-8",
+            )
+            actionlint.chmod(0o755)
+            test_dir = root / "tools" / "tests"
+            test_dir.mkdir(parents=True)
+            (test_dir / "test_must_not_run.py").write_text(
+                "from pathlib import Path\n"
+                "import unittest\n"
+                "class MustNotRunTest(unittest.TestCase):\n"
+                "    def test_sentinel(self):\n"
+                f"        Path({str(suite_sentinel)!r}).touch()\n",
+                encoding="utf-8",
+            )
+
+            with (
+                mock.patch.object(
+                    catalog_ci, "UNIT_SUITES", (("tools/tests", "test_*.py"),)
+                ),
+                mock.patch.dict(os.environ, {"PATH": str(fake_bin)}, clear=False),
+            ):
+                os.environ.pop("ACTIONLINT_BIN", None)
+                result = catalog_ci.gate_unit_contract(root)
+
+            self.assertEqual(result["status"], "failed")
+            self.assertFalse(version_sentinel.exists())
+            self.assertFalse(suite_sentinel.exists())
+
+    def test_unit_contract_rejects_special_actionlint_before_open(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            special = root / "actionlint-fifo"
+            os.mkfifo(special)
+            real_open = os.open
+
+            def reject_special_open(path: object, *args: object, **kwargs: object) -> int:
+                if Path(path) == special:
+                    raise AssertionError("special ACTIONLINT_BIN was opened")
+                return real_open(path, *args, **kwargs)
+
+            with (
+                mock.patch.dict(
+                    os.environ, {"ACTIONLINT_BIN": str(special)}, clear=False
+                ),
+                mock.patch.object(catalog_ci.os, "open", side_effect=reject_special_open),
+            ):
+                result = catalog_ci.gate_unit_contract(root)
+
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["code"], "public-unit-failure")
+
+    def test_unit_contract_rejects_synthetic_version_and_tool_failures(self) -> None:
+        failures = (
+            ("wrong-version", "#!/bin/sh\nprintf '1.7.11\\n'\n"),
+            ("tool-failure", "#!/bin/sh\nexit 23\n"),
+        )
+        for label, script in failures:
+            with self.subTest(failure=label), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                suite_sentinel = root / "suite-executed"
+                test_dir = root / "tools" / "tests"
+                test_dir.mkdir(parents=True)
+                (test_dir / "test_must_not_run.py").write_text(
+                    "from pathlib import Path\n"
+                    "import unittest\n"
+                    "class MustNotRunTest(unittest.TestCase):\n"
+                    "    def test_sentinel(self):\n"
+                    f"        Path({str(suite_sentinel)!r}).touch()\n",
+                    encoding="utf-8",
+                )
+                executable = root / "synthetic-actionlint"
+                executable_bytes = script.encode("utf-8")
+                executable.write_bytes(executable_bytes)
+                executable.chmod(0o755)
+                identity = ("SyntheticOS", "synthetic-arch")
+                specification = {
+                    identity: (
+                        len(executable_bytes),
+                        hashlib.sha256(executable_bytes).hexdigest(),
+                    )
+                }
+
+                with (
+                    mock.patch.object(
+                        catalog_ci, "UNIT_SUITES", (("tools/tests", "test_*.py"),)
+                    ),
+                    mock.patch.object(
+                        catalog_ci, "ACTIONLINT_BINARIES", specification
+                    ),
+                    mock.patch.object(
+                        catalog_ci.platform, "system", return_value=identity[0]
+                    ),
+                    mock.patch.object(
+                        catalog_ci.platform, "machine", return_value=identity[1]
+                    ),
+                    mock.patch.dict(
+                        os.environ, {"ACTIONLINT_BIN": str(executable)}, clear=False
+                    ),
+                ):
+                    result = catalog_ci.gate_unit_contract(root)
+
+                self.assertEqual(result["status"], "failed")
+                self.assertFalse(suite_sentinel.exists())
+
     def test_real_cli_runs_one_public_gate(self) -> None:
         result = run_ci("--root", str(REPO_ROOT), "--gate", "artifact-checksums")
 

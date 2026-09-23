@@ -424,79 +424,221 @@ skills:
           new pitfall #8, expanded verification checklist. 5 files, ~16KB total.
           Status: candidate — awaiting Felippe approval.
 
-  - name: caprover-deploy
+  - name: caprover-operations
     status: candidate
-    version: 1.0.0
+    version: 0.1.0
     category: devops
-    description: >
-      Automated CapRover deployment via CLI → API → Playwright fallback.
-      Handles app creation, GitHub repo config, build triggering, HTTPS/WebSocket
-      enablement, and post-deploy verification. Generic — no instance-specific data.
+    description: Guarded read-only CapRover CLI session diagnosis and explicit operational gates for safe configuration,
+      rollback, scaling and retirement.
     source:
       type: internal
-      origin: "Created by another Hermes profile (FMercurio HQ)"
-      author: "Hermes Agent (TG 2709 profile)"
-      created: "2026-06-16"
+      origin: Original reauthoring from an authorized public specification and official CapRover CLI/API references
+      author: ClawdIA contributors
+      created: '2026-09-15'
       approved: null
       approved_by: null
       repository_url: null
-      no_repository_reason: "Skill interna, tested against live CapRover 1.14.1"
+      no_repository_reason: Original internal skill, not imported from a third-party skill package; immutable
+        official dependency references and licenses are recorded in references/provenance.md
     installation:
       runtime_path: null
-      repo_path: "skills/devops/caprover-deploy/"
+      repo_path: skills/devops/caprover-operations/
       installed_date: null
       installed_by: null
-      note: "Action-focused deploy skill. Companion to caprover-operations (server ops)."
+      note: Repo-only candidate; source acceptance does not authorize installation, login renewal or server operations.
     audit:
-      security_review: "2026-06-24"
-      security_status: "passed"
+      security_review: '2026-09-15'
+      security_status: passed
       findings:
-        - "Zero hardcoded secrets, paths, or tenant-specific data"
-        - "Passwords never accepted as CLI args (env var, KeePass, or interactive only)"
-        - "KeePass optional — requires KEEPASS_DB and KEEPASS_KEY env vars, no hardcoded paths"
-        - "GitHub token via gh CLI or env var only"
-        - "CapRover URL requires HTTPS by default; --allow-insecure is explicit local/dev only"
-        - "Non-local CapRover URLs require --expected-host before credentials are resolved"
-        - "subprocess.run uses list args, never shell=True"
-        - "Playwright login failure detected via URL check"
+      - 83 local unit and actual official-CLI fixture tests passed without skips; synthetic credentials only,
+        no live CapRover session.
+      - Timeout cleanup fixture covers controlled CLI cold start and an observed in-flight request held until
+        teardown; process cleanup and absence of further requests are asserted.
+      - Protected exact alias/origin binding, selected-session snapshot, request-time guard and pinned official
+        CLI/Node layout.
+      - Unexpected public exceptions become fixed inconclusive/internal_error responses; interruption and process-exit
+        semantics remain distinct.
+      - Both descriptor-bound source witnesses are rechecked read-only after the query; source changes dominate
+        authentication evidence as inconclusive/source_changed without redirect or restoration.
+      - Login, writes, redirects, unexpected destinations, environment pollution and unknown schemas fail closed;
+        output excludes raw payloads and credentials.
+      - Explicit current sufficient grants may be reused only within scope; credential access never authorizes
+        deployment, restart or deletion.
+      - Guard is a narrow interlock for trusted code, not an OS sandbox, continuous source monitor or proof of
+        application health.
+      frontmatter_valid: true
+      company_agnostic: true
+      pitfalls_documented: true
+    files:
+    - path: README.md
+      size_bytes: 4811
+      status: new
+    - path: SKILL.md
+      size_bytes: 5375
+      status: new
+    - path: references/app-lifecycle-and-retirement.md
+      size_bytes: 1593
+      status: new
+    - path: references/cli-session-and-auth.md
+      size_bytes: 3636
+      status: new
+    - path: references/deployment-provenance-and-rollback.md
+      size_bytes: 1497
+      status: new
+    - path: references/provenance.md
+      size_bytes: 2247
+      status: new
+    - path: references/safe-app-definition-updates.md
+      size_bytes: 1886
+      status: new
+    - path: scripts/probe.py
+      size_bytes: 28341
+      status: new
+    - path: scripts/readonly_guard.cjs
+      size_bytes: 10660
+      status: new
+    - path: templates/operation-report.md
+      size_bytes: 1017
+      status: new
+    - path: templates/targets.example.json
+      size_bytes: 134
+      status: new
+    - path: tests/test_probe.py
+      size_bytes: 42029
+      status: new
+    - path: tests/test_probe_public_errors.py
+      size_bytes: 6465
+      status: new
+    - path: tests/test_public_contract.py
+      size_bytes: 3255
+      status: new
+    - path: MANIFEST.sha256
+      size_bytes: 1326
+      status: new
+    changelog:
+    - date: '2026-09-15'
+      action: reauthored as repo-only candidate
+      details: Original guarded probe, synthetic fixtures, public operational references and explicit authorization/readback
+        boundaries. No private source copied and no runtime installation or promotion.
+    - date: '2026-09-15'
+      action: review findings corrected; remains candidate
+      details: F1-F6 corrections and scoped-authorization/CI consolidation validated with synthetic local fixtures.
+        Checksums and complete byte inventories refreshed. Unreleased candidate version retained; no approval,
+        publication or runtime installation.
+
+  - name: caprover-deploy
+    status: candidate
+    version: 2.0.0
+    category: devops
+    description: Plan-first, single-method CapRover deployment or Git configuration with frozen saved sessions,
+      explicit mutation grants, preserving updates/readback and post-trigger evidence. No automatic fallback
+      after possible writes.
+    source:
+      type: internal
+      origin: Originally authored internally; reworked from official public CapRover contracts
+      author: Hermes Agent
+      created: '2026-06-16'
+      approved: null
+      approved_by: null
+      repository_url: null
+      no_repository_reason: Originally authored internally. Current candidate was hardened from official public
+        contracts and verified only with local synthetic fixtures; historical live validation is not renewed.
+    installation:
+      runtime_path: null
+      repo_path: skills/devops/caprover-deploy/
+      installed_date: null
+      installed_by: null
+      note: Repository-only candidate; not approved or installed. Action-focused companion to the caprover-operations
+        read-only probe and safety runbooks.
+    audit:
+      security_review: '2026-09-15'
+      security_status: passed
+      findings:
+      - 191 local unit, actual pinned-CLI and actual Chromium loopback fixture tests passed without skips; synthetic
+        credentials only, no live CapRover, real SSH/Docker or application deployment.
+      - Plan-only default; explicit apply/login/create gates; one method/source selection before credentials;
+        no blind fallback after possible writes.
+      - CLI confirmation requires the exact awaited synchronous Captain status 100 plus expected source; detached
+        101 or unrelated later generation is insufficient.
+      - Force Build observes the exact request, HTTP response and complete body before cleanup but its webhook
+        acknowledgement remains nonzero reconcile_required, not attributed scheduling.
+      - Apply prepares and reuses local Chromium before credentials or controller writes; plan-only remains static.
+      - Full app-definition projection preserves writable settings, captures protected recovery and verifies
+        readback; concurrent configuration writers still require serialization.
+      - SSH receives one quoted remote command; modern/legacy mapping and exactly one healthy exact-name row
+        are required while legitimate prefix siblings are ignored.
+      - Application health and representative live validation are separate; no source review or merge installs
+        or activates a runtime.
       frontmatter_valid: true
       company_agnostic: true
       pitfalls_documented: true
       fixes_applied:
-        - "Fixed argparse bug: --enable-https/--enable-websocket store_true with default=True (always True). Replaced with --no-https/--no-websocket store_false."
-        - "Removed hardcoded KeePassXC default paths. Now env-only."
-        - "Removed --caprover-password and --github-token CLI args (visible in ps aux)."
-        - "Removed unnecessary try/except for stdlib urllib import."
-        - "Added Playwright login verification (URL check after submit)."
-        - "Generalized TOTVS/Protheus references in nginx template to ERP."
+      - Removed implicit creation, no-op CLI success, empty-Git-hash build claims and automatic post-write fallback.
+      - Replaced default-filled updates with typed preservation/readback and strict build schemas.
+      - Bounded CLI process groups and trusted system Git lookup; portable real-CLI integration fixtures.
+      - Made unsupported HTTPS/WebSocket changes fail before writes instead of silently enabling them.
+      - Removed unsafe partial update examples and preserved typed authentication/network failures.
+      - Correlated trigger/source evidence; awaited browser request/response/body; pre-write browser preparation;
+        exact quoted SSH replica observation; scoped reusable authorization and mandatory Chromium CI fixtures.
     files:
-      - path: "SKILL.md"
-        size_bytes: 4836
-        status: "new"
-        note: "Action-focused deploy automation. Clarified auth (no CLI passwords), KeePass optional"
-      - path: "scripts/caprover_deploy.py"
-        size_bytes: 21607
-        status: "new"
-        note: "533→500+ lines. CLI→API→Playwright fallback. KeePass optional via env. No password CLI args."
-      - path: "references/api-v2-endpoints.md"
-        size_bytes: 2347
-        status: "new"
-      - path: "references/playwright-deploy-pattern.md"
-        size_bytes: 2915
-        status: "new"
-      - path: "templates/nginx-proxy.conf"
-        size_bytes: 3505
-        status: "new"
-        note: "WebSocket support, ERP buffer sizes, envsubst pattern. Generalized from tenant-specific refs."
+    - path: README.md
+      size_bytes: 4416
+      status: new
+    - path: SKILL.md
+      size_bytes: 9350
+      status: modified
+    - path: references/api-v2-endpoints.md
+      size_bytes: 5819
+      status: modified
+    - path: references/playwright-deploy-pattern.md
+      size_bytes: 2960
+      status: modified
+    - path: references/provenance.md
+      size_bytes: 2722
+      status: new
+    - path: scripts/caprover_deploy.py
+      size_bytes: 95239
+      status: modified
+    - path: scripts/deployment_guard.cjs
+      size_bytes: 10837
+      status: new
+    - path: templates/nginx-proxy.conf
+      size_bytes: 3721
+      status: unchanged
+    - path: tests/test_cli_local_integration.py
+      size_bytes: 15685
+      status: new
+    - path: tests/test_deployment_control_flow.py
+      size_bytes: 69849
+      status: new
+    - path: tests/test_playwright_loopback_integration.py
+      size_bytes: 4848
+      status: new
+    - path: tests/test_preflight.py
+      size_bytes: 23097
+      status: modified
+    - path: tests/test_safe_api_update_and_verification.py
+      size_bytes: 28320
+      status: new
+    - path: MANIFEST.sha256
+      size_bytes: 1247
+      status: new
     changelog:
-      - date: "2026-06-16"
-        action: "created + reviewed"
-        details: >
-          Created by TG 2709 profile. Reviewed and fixed by Skills Lab:
-          argparse bug (store_true default=True), removed hardcoded KeePass paths,
-          removed password CLI args, removed unnecessary urllib try/except,
-          added Playwright login verification, generalized nginx template.
-          5 files, ~25KB total. Status: candidate — pending Felippe approval.
+    - date: '2026-06-16'
+      action: created + reviewed
+      details: Originally authored internally. Review corrected argparse defaults, removed hardcoded credential
+        paths and password arguments, verified login handling and generalized the nginx template. Historical
+        candidate review only; maintainer approval remained pending.
+    - date: '2026-09-15'
+      action: hardened as version 2.0.0 candidate
+      details: 'Breaking safe-default contract: plan-only unless explicitly applied; one intent-compatible method;
+        saved-session isolation; preserving full updates/readback; strict deployment evidence and reconciliation.
+        Public documentation and real-CLI loopback regressions added. No approval, publication or runtime installation.'
+    - date: '2026-09-15'
+      action: review findings corrected; remains candidate
+      details: F1-F6 corrections and scoped-authorization/CI consolidation validated with synthetic local fixtures.
+        Checksums and complete byte inventories refreshed. Unreleased candidate version retained; no approval,
+        publication or runtime installation.
 
   - name: topic-channel-soul-routing
     status: candidate

@@ -9,6 +9,7 @@ import hashlib
 import io
 import json
 import os
+import platform
 import re
 import resource
 import stat
@@ -107,6 +108,19 @@ UNIT_SUITES = (
     ("tools/skill_deploy/tests", "test_*.py"),
 )
 UNIT_TIMEOUT_SECONDS = 120
+ACTIONLINT_VERSION = "1.7.12"
+ACTIONLINT_VERSION_TIMEOUT_SECONDS = 30
+MAX_ACTIONLINT_VERSION_OUTPUT_BYTES = 4_096
+ACTIONLINT_BINARIES = {
+    ("Linux", "x86_64"): (
+        6_074_530,
+        "c872d6db8c6bf83a8eaa704fc93999f027d55dffbc63b8a6abdccb47df5f4cd4",
+    ),
+    ("Darwin", "arm64"): (
+        5_829_842,
+        "8db11704dc296f096216db4db65d86cd7f0ebfdf4c38453a1da276b137b88388",
+    ),
+}
 UNIT_HARNESS = """
 import io
 import pathlib
@@ -598,6 +612,98 @@ def _limit_unit_process() -> None:
     )
 
 
+def _read_verified_actionlint() -> bytes:
+    candidate_value = os.environ.get("ACTIONLINT_BIN")
+    expected = ACTIONLINT_BINARIES.get((platform.system(), platform.machine()))
+    if not candidate_value or expected is None:
+        raise ValueError
+    candidate = Path(candidate_value)
+    if not candidate.is_absolute():
+        raise ValueError
+
+    expected_size, expected_digest = expected
+    current = Path(candidate.anchor)
+    try:
+        candidate_metadata = os.lstat(current)
+        for part in candidate.parts[1:]:
+            current /= part
+            candidate_metadata = os.lstat(current)
+            if stat.S_ISLNK(candidate_metadata.st_mode):
+                raise ValueError
+        if (
+            not stat.S_ISREG(candidate_metadata.st_mode)
+            or not candidate_metadata.st_mode & 0o111
+            or candidate_metadata.st_size != expected_size
+        ):
+            raise ValueError
+        descriptor = os.open(
+            candidate,
+            os.O_RDONLY
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_NONBLOCK", 0),
+        )
+    except OSError as error:
+        raise ValueError from error
+
+    try:
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or not metadata.st_mode & 0o111
+            or metadata.st_size != expected_size
+            or metadata.st_dev != candidate_metadata.st_dev
+            or metadata.st_ino != candidate_metadata.st_ino
+        ):
+            raise ValueError
+        chunks = []
+        remaining = expected_size + 1
+        while remaining:
+            chunk = os.read(descriptor, min(64 * 1024, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        binary = b"".join(chunks)
+    finally:
+        os.close(descriptor)
+    if len(binary) != expected_size:
+        raise ValueError
+    if hashlib.sha256(binary).hexdigest() != expected_digest:
+        raise ValueError
+    return binary
+
+
+def _stage_verified_actionlint(public_root: Path, environment: dict[str, str]) -> Path:
+    binary = _read_verified_actionlint()
+    staged = public_root / "actionlint"
+    descriptor = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o500)
+    try:
+        written = 0
+        while written < len(binary):
+            written += os.write(descriptor, binary[written:])
+    finally:
+        os.close(descriptor)
+    staged.chmod(0o500)
+
+    completed = subprocess.run(
+        [str(staged), "-version"],
+        cwd=public_root,
+        env=environment,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+        timeout=ACTIONLINT_VERSION_TIMEOUT_SECONDS,
+    )
+    if (
+        completed.returncode != 0
+        or len(completed.stdout) > MAX_ACTIONLINT_VERSION_OUTPUT_BYTES
+        or completed.stdout.splitlines()[:1] != [ACTIONLINT_VERSION.encode("ascii")]
+    ):
+        raise ValueError
+    return staged
+
+
 def gate_unit_contract(root: Path) -> dict:
     files = ["public-unit-suites"]
     try:
@@ -620,6 +726,8 @@ def gate_unit_contract(root: Path) -> dict:
                 "ALL_PROXY": "http://127.0.0.1:9",
                 "NO_PROXY": "",
             }
+            actionlint = _stage_verified_actionlint(public_root, environment)
+            environment["ACTIONLINT_BIN"] = str(actionlint)
             total_output_bytes = 0
             unit_index = 0
             for relative, pattern in UNIT_SUITES:

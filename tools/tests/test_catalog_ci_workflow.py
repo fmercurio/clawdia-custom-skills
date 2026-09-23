@@ -31,6 +31,38 @@ CHECKOUT_ACTION = (
 SETUP_PYTHON_ACTION = (
     "actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065"
 )
+ACTIONLINT_STEP = {
+    "name": "Install, verify, and run actionlint 1.7.12",
+    "shell": "bash",
+    "env": {
+        "ACTIONLINT_VERSION": "1.7.12",
+        "ACTIONLINT_LINUX_URL": (
+            "https://github.com/rhysd/actionlint/releases/download/v1.7.12/"
+            "actionlint_1.7.12_linux_amd64.tar.gz"
+        ),
+        "ACTIONLINT_LINUX_SHA256": (
+            "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+        ),
+    },
+    "run": (
+        "set -euo pipefail\n"
+        'archive="$RUNNER_TEMP/actionlint_1.7.12_linux_amd64.tar.gz"\n'
+        'actionlint_dir="$RUNNER_TEMP/actionlint-1.7.12"\n'
+        'actionlint="$actionlint_dir/actionlint"\n'
+        'mkdir -p "$actionlint_dir"\n'
+        "curl --fail --show-error --location --output \"$archive\" "
+        '"$ACTIONLINT_LINUX_URL"\n'
+        "printf '%s  %s\\n' \"$ACTIONLINT_LINUX_SHA256\" \"$archive\" | "
+        "sha256sum --check --status\n"
+        'tar -xzf "$archive" -C "$actionlint_dir" actionlint\n'
+        'test -x "$actionlint"\n'
+        'actionlint_version="$("$actionlint" -version | sed -n \'1p\')"\n'
+        'test "$actionlint_version" = "$ACTIONLINT_VERSION"\n'
+        '"$actionlint" -oneline -shellcheck= -pyflakes=\n'
+        "printf '%s\\n' \"$actionlint_dir\" >> \"$GITHUB_PATH\"\n"
+        "printf 'ACTIONLINT_BIN=%s\\n' \"$actionlint\" >> \"$GITHUB_ENV\"\n"
+    ),
+}
 
 
 def load_workflow() -> dict[str, object]:
@@ -78,18 +110,30 @@ def validate_workflow(workflow: dict[str, object]) -> None:
         "catalog-validation",
     }:
         raise AssertionError("unexpected job set")
+    public_steps = jobs["public-gates"].get("steps", [])
+    actionlint_positions = [
+        index
+        for index, step in enumerate(public_steps)
+        if step.get("name") == ACTIONLINT_STEP["name"]
+    ]
+    if actionlint_positions and actionlint_positions != [2]:
+        raise AssertionError("actionlint order changed")
 
-    def reject_unsafe_channels(value: object) -> None:
+    allowed_environment_path = ("jobs", "public-gates", "steps", 2, "env")
+
+    def reject_unsafe_channels(value: object, path: tuple[object, ...] = ()) -> None:
         if isinstance(value, dict):
             for key, child in value.items():
                 if key in {"env", "environment", "secrets"}:
-                    raise AssertionError("environment or secret injection")
+                    child_path = path + (key,)
+                    if child_path != allowed_environment_path:
+                        raise AssertionError("environment or secret injection")
                 if key == "continue-on-error":
                     raise AssertionError("continue-on-error is forbidden")
-                reject_unsafe_channels(child)
+                reject_unsafe_channels(child, path + (key,))
         elif isinstance(value, list):
-            for child in value:
-                reject_unsafe_channels(child)
+            for index, child in enumerate(value):
+                reject_unsafe_channels(child, path + (index,))
         elif isinstance(value, str) and "${{ secrets." in value:
             raise AssertionError("secret expression is forbidden")
 
@@ -131,8 +175,8 @@ def validate_workflow(workflow: dict[str, object]) -> None:
         raise AssertionError("unexpected public matrix strategy")
 
     steps = public_job["steps"]
-    if len(steps) != 4:
-        raise AssertionError("public job must contain exactly four steps")
+    if len(steps) != 5:
+        raise AssertionError("public job must contain exactly five steps")
     action_uses = [step["uses"] for step in steps if "uses" in step]
     if action_uses != [CHECKOUT_ACTION, SETUP_PYTHON_ACTION]:
         raise AssertionError("actions must use the reviewed immutable pins")
@@ -148,7 +192,38 @@ def validate_workflow(workflow: dict[str, object]) -> None:
         "with": {"python-version": "3.12"},
     }:
         raise AssertionError("setup-python must select Python 3.12")
-    if steps[2] != {
+    actionlint = steps[2]
+    if set(actionlint) != {"name", "shell", "env", "run"}:
+        raise AssertionError("actionlint bootstrap changed")
+    if (
+        actionlint["name"] != ACTIONLINT_STEP["name"]
+        or actionlint["shell"] != ACTIONLINT_STEP["shell"]
+    ):
+        raise AssertionError("actionlint bootstrap changed")
+    actionlint_environment = actionlint["env"]
+    expected_environment = ACTIONLINT_STEP["env"]
+    if not isinstance(actionlint_environment, dict) or set(
+        actionlint_environment
+    ) != set(expected_environment):
+        raise AssertionError("environment or secret injection")
+    if (
+        actionlint_environment["ACTIONLINT_VERSION"]
+        != expected_environment["ACTIONLINT_VERSION"]
+    ):
+        raise AssertionError("actionlint version changed")
+    if (
+        actionlint_environment["ACTIONLINT_LINUX_URL"]
+        != expected_environment["ACTIONLINT_LINUX_URL"]
+    ):
+        raise AssertionError("actionlint URL changed")
+    if (
+        actionlint_environment["ACTIONLINT_LINUX_SHA256"]
+        != expected_environment["ACTIONLINT_LINUX_SHA256"]
+    ):
+        raise AssertionError("actionlint checksum changed")
+    if actionlint["run"] != ACTIONLINT_STEP["run"]:
+        raise AssertionError("actionlint command changed")
+    if steps[3] != {
         "name": "Bootstrap declared test dependencies",
         "run": (
             "python3 -m pip install --disable-pip-version-check "
@@ -156,7 +231,7 @@ def validate_workflow(workflow: dict[str, object]) -> None:
         ),
     }:
         raise AssertionError("bootstrap must use only requirements-dev.txt")
-    if steps[3] != {
+    if steps[4] != {
         "name": "Run public catalog gate",
         "run": "python3 -B tools/run_catalog_ci.py --gate ${{ matrix.gate }}",
     }:
@@ -198,6 +273,14 @@ class CatalogCIWorkflowTests(unittest.TestCase):
     def test_exact_workflow_obeys_the_reviewed_contract(self) -> None:
         validate_workflow(load_workflow())
 
+    def test_reviewed_actionlint_step_is_the_only_allowed_environment(self) -> None:
+        candidate = load_workflow()
+        candidate["jobs"]["public-gates"]["steps"][2] = copy.deepcopy(
+            ACTIONLINT_STEP
+        )
+
+        validate_workflow(candidate)
+
     def test_unsafe_deep_copy_mutations_are_causally_rejected(self) -> None:
         mutations = (
             ("removed gate", "public gate matrix", self._remove_gate),
@@ -215,6 +298,48 @@ class CatalogCIWorkflowTests(unittest.TestCase):
             ("job permission", "job permissions", self._add_job_scope),
             ("unpinned action", "immutable pins", self._unpin_checkout),
             ("credentials", "credential persistence", self._persist_credentials),
+            ("actionlint version", "actionlint version", self._change_actionlint_version),
+            ("actionlint URL", "actionlint URL", self._change_actionlint_url),
+            (
+                "actionlint checksum",
+                "actionlint checksum",
+                self._change_actionlint_checksum,
+            ),
+            (
+                "actionlint command",
+                "actionlint command",
+                self._change_actionlint_command,
+            ),
+            (
+                "actionlint bypass",
+                "actionlint command",
+                self._bypass_actionlint,
+            ),
+            (
+                "actionlint authority",
+                "actionlint command",
+                self._change_actionlint_authority,
+            ),
+            (
+                "actionlint extra env",
+                "environment or secret",
+                self._add_actionlint_environment,
+            ),
+            (
+                "actionlint secret expression",
+                "secret expression",
+                self._inject_actionlint_secret,
+            ),
+            (
+                "actionlint conditional",
+                "step-level conditional",
+                self._conditionally_skip_actionlint,
+            ),
+            (
+                "actionlint order",
+                "actionlint order",
+                self._reorder_actionlint,
+            ),
             ("env secret", "environment or secret", self._inject_secret_env),
             ("aggregate identity", "aggregate contract", self._rename_aggregate),
             ("aggregate dependency", "aggregate contract", self._drop_dependency),
@@ -284,6 +409,60 @@ class CatalogCIWorkflowTests(unittest.TestCase):
     def _persist_credentials(workflow: dict[str, object]) -> None:
         checkout = workflow["jobs"]["public-gates"]["steps"][0]
         checkout["with"]["persist-credentials"] = "true"
+
+    @staticmethod
+    def _change_actionlint_version(workflow: dict[str, object]) -> None:
+        actionlint = workflow["jobs"]["public-gates"]["steps"][2]
+        actionlint["env"]["ACTIONLINT_VERSION"] = "1.7.11"
+
+    @staticmethod
+    def _change_actionlint_url(workflow: dict[str, object]) -> None:
+        actionlint = workflow["jobs"]["public-gates"]["steps"][2]
+        actionlint["env"]["ACTIONLINT_LINUX_URL"] += ".changed"
+
+    @staticmethod
+    def _change_actionlint_checksum(workflow: dict[str, object]) -> None:
+        actionlint = workflow["jobs"]["public-gates"]["steps"][2]
+        actionlint["env"]["ACTIONLINT_LINUX_SHA256"] = "0" * 64
+
+    @staticmethod
+    def _change_actionlint_command(workflow: dict[str, object]) -> None:
+        actionlint = workflow["jobs"]["public-gates"]["steps"][2]
+        actionlint["run"] = actionlint["run"].replace(
+            "sha256sum --check --status", "sha256sum --status"
+        )
+
+    @staticmethod
+    def _bypass_actionlint(workflow: dict[str, object]) -> None:
+        workflow["jobs"]["public-gates"]["steps"][2]["run"] = "true\n"
+
+    @staticmethod
+    def _change_actionlint_authority(workflow: dict[str, object]) -> None:
+        actionlint = workflow["jobs"]["public-gates"]["steps"][2]
+        actionlint["run"] = actionlint["run"].replace(
+            '>> "$GITHUB_ENV"', '>> "$GITHUB_OUTPUT"'
+        )
+
+    @staticmethod
+    def _add_actionlint_environment(workflow: dict[str, object]) -> None:
+        actionlint = workflow["jobs"]["public-gates"]["steps"][2]
+        actionlint["env"]["EXTRA"] = "unexpected"
+
+    @staticmethod
+    def _inject_actionlint_secret(workflow: dict[str, object]) -> None:
+        actionlint = workflow["jobs"]["public-gates"]["steps"][2]
+        actionlint["env"]["ACTIONLINT_VERSION"] = (
+            "${{ " + "secrets." + "ACTIONLINT_VERSION" + " }}"
+        )
+
+    @staticmethod
+    def _conditionally_skip_actionlint(workflow: dict[str, object]) -> None:
+        workflow["jobs"]["public-gates"]["steps"][2]["if"] = "${{ success() }}"
+
+    @staticmethod
+    def _reorder_actionlint(workflow: dict[str, object]) -> None:
+        steps = workflow["jobs"]["public-gates"]["steps"]
+        steps[2], steps[3] = steps[3], steps[2]
 
     def _inject_secret_env(self, workflow: dict[str, object]) -> None:
         injected_environment = {

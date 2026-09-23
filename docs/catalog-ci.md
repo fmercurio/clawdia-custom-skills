@@ -5,7 +5,14 @@ em uma matriz com `fail-fast: false`. Ele roda somente em `pull_request` e em
 `push` para `main`, em runners GitHub-hosted `ubuntu-latest`, com permissão global
 `contents: read`. O checkout não persiste credenciais. Cada job tem timeout finito.
 
-O bootstrap instala somente as versões declaradas em `requirements-dev.txt`:
+Antes dos gates, o workflow baixa o archive Linux amd64 oficial do `actionlint`
+1.7.12 por URL fixa, confere o SHA-256 fixado antes de extrair ou executar,
+confirma a versão, executa a descoberta padrão de workflows com
+`-oneline -shellcheck= -pyflakes=` e publica o caminho verificado em
+`ACTIONLINT_BIN` para os passos seguintes. O contrato do workflow aceita `env`
+somente nesse passo e somente com a versão, URL e checksum revisados.
+
+O bootstrap Python instala somente as versões declaradas em `requirements-dev.txt`:
 
 ```bash
 python3 -m pip install --disable-pip-version-check -r requirements-dev.txt
@@ -64,9 +71,14 @@ fixado, sem importar ou executar ferramentas vindas dela.
   dois JSONs em `dist`.
 - `skill-contract`: valida os `SKILL.md` encontrados sob `skills` e `packages` em
   uma cópia temporária.
-- `unit-contract`: descobre as suítes públicas em `tools/tests`, no teste do
-  validador `llm-wiki` e em `tools/skill_deploy/tests`, exigindo pelo menos um teste
-  por suíte e sucesso de todas elas.
+- `unit-contract`: exige `ACTIONLINT_BIN` absoluto, regular e executável, rejeita
+  symlinks e confere tamanho e SHA-256 contra identidades binárias fixas para Linux
+  amd64 e Darwin arm64. Somente depois copia exatamente os bytes verificados para o
+  diretório temporário controlado pelo gate, confere a versão 1.7.12 nessa cópia e
+  passa apenas esse caminho staged às suítes públicas em `tools/tests`, ao teste do
+  validador `llm-wiki` e a `tools/skill_deploy/tests`, exigindo pelo menos um teste
+  por suíte e sucesso de todas elas. Não há busca de fallback em `PATH`, nem checksum
+  fornecido pelo chamador, nem herança do ambiente externo.
 
 Esses gates verificam dados, metadados, geração e testes públicos. Um resultado
 público verde não é inspeção clean-room da fonte, não examina o archive real a ser
@@ -122,6 +134,12 @@ não são um scan privado desta nova árvore. Testes contra PR hostil precisam d
 runner de sistema operacional realmente descartável e sem secrets. Limpar variáveis
 de ambiente ou apontar proxies para um endpoint inválido não constitui sandbox de
 filesystem nem de rede.
+
+Em particular, `unit-contract` executa tooling e testes públicos do candidato. Seus
+limites de ambiente, tempo, output e artefatos reduzem exposição acidental, mas não
+formam um sandbox para código hostil e não conferem autoridade privada. A cópia
+verificada de `actionlint` autentica somente esse executável; ela não transforma o
+restante do candidato em código confiável nem substitui a inspeção clean-room.
 
 Nada nesta fatia publica releases ou archives, faz deploy/instalação, promove
 artefatos de `candidate` para `approved` ou autoriza merge. Esses passos continuam
