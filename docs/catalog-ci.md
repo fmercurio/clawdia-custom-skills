@@ -60,7 +60,9 @@ fixado, sem importar ou executar ferramentas vindas dela.
 ## Inventário público implementado
 
 - `schema-fixtures`: valida os schemas fechados e o corpus público fixo de fixtures
-  válidas e inválidas, sem referências externas.
+  válidas e inválidas, sem referências externas. Para uma falha que possa ser
+  atribuída sem ambiguidade, informa somente o caminho relativo fixo do schema ou
+  fixture presente nas tabelas estáticas do gate.
 - `deterministic-generation`: gera em duas cópias temporárias, incluindo uma entrada
   com coleções reordenadas, e exige os mesmos seis outputs.
 - `generated-drift`: regenera em cópia temporária e compara byte a byte os seis
@@ -99,6 +101,20 @@ digest diverge, não é possível atribuir a causa a um dos dois bytes de entrad
 diagnóstico informa o par `[artefato, sidecar]`, nessa ordem. Conteúdo do sidecar,
 targets de symlink, exceções e hashes observados nunca fornecem nomes ao relatório.
 
+Em `schema-fixtures`, invalidez estrutural, ausência, leitura impossível ou falha
+da propriedade de fechamento de um schema fixo informa somente o schema. Ausência,
+symlink/não-regular, corrupção JSON estrutural ou falha de leitura de uma fixture
+fixa informa somente a fixture. Já uma comparação semântica schema↔fixture — fixture
+válida que falha ou fixture negativa que passa — ou uma exceção durante essa
+validação informa o par fixo `[schema, fixture]`, nessa ordem. Assim, uma alteração
+semanticamente válida do schema, por exemplo remover um `required` que faz uma
+fixture negativa passar, não é atribuída falsamente só à fixture. A enumeração do
+corpus só atribui uma ausência quando exatamente uma entrada permitida está faltando
+e não há entradas extras. Arquivo extra, múltiplas ausências, diretório
+estruturalmente inválido, import/ambiente e outros erros sem atribuição determinável
+preservam o alias `["schemas", "contract-fixtures"]`; nomes, caminhos e conteúdo
+recebidos do input nunca passam para o relatório.
+
 Outros gates e falhas anteriores à identificação causal, como snapshot ou geração,
 continuam usando nomes lógicos como `generated-outputs` e `public-unit-suites`; eles
 identificam grupos e não necessariamente o arquivo exato que causou a falha. Em
@@ -126,8 +142,8 @@ Ainda faltam, em infraestrutura protegida e separada:
    tenant;
 4. emitir o resultado requerido por um workflow não modificável pelo candidato.
 
-A integração geral A5 e a integração privada continuam abertas; esta fatia E1a não
-as implementa nem altera seu estado.
+A integração geral A5 e a integração privada continuam abertas; esta fatia E1b de
+`schema-fixtures` não as implementa nem altera seu estado.
 
 Os testes públicos existentes do scanner usam políticas e achados sintéticos. Eles
 não são um scan privado desta nova árvore. Testes contra PR hostil precisam de um

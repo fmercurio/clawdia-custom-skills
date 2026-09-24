@@ -569,6 +569,141 @@ class CatalogCIRunnerTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertEqual(json.loads(result.stdout)["gates"][0]["status"], "passed")
 
+    def test_schema_gate_reports_the_fixed_schema_that_is_not_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            copy_catalog_contract(root)
+            schema_path = (
+                root / "schemas/capability-catalog/v1/capability.schema.json"
+            )
+            schema = json.loads(schema_path.read_bytes())
+            schema["additionalProperties"] = True
+            schema_path.write_text(json.dumps(schema), encoding="utf-8")
+            result = run_ci("--root", str(root), "--gate", "schema-fixtures")
+
+        self.assertNotEqual(result.returncode, 0)
+        gate = json.loads(result.stdout)["gates"][0]
+        self.assertEqual(gate["code"], "invalid-schema-fixtures")
+        self.assertEqual(
+            gate["files"],
+            ["schemas/capability-catalog/v1/capability.schema.json"],
+        )
+
+    def test_schema_gate_reports_the_fixed_invalid_fixture_that_was_altered(self) -> None:
+        schema_relative = "schemas/capability-catalog/v1/capability.schema.json"
+        relative = (
+            "tools/tests/fixtures/capability_catalog/v1/invalid/"
+            "capability-unknown-field.json"
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            copy_catalog_contract(root)
+            fixture = root / relative
+            fixture.write_bytes(
+                (
+                    root
+                    / "tools/tests/fixtures/capability_catalog/v1/valid/capability.json"
+                ).read_bytes()
+            )
+            result = run_ci("--root", str(root), "--gate", "schema-fixtures")
+
+        self.assertNotEqual(result.returncode, 0)
+        gate = json.loads(result.stdout)["gates"][0]
+        self.assertEqual(gate["code"], "invalid-schema-fixtures")
+        self.assertEqual(gate["files"], [schema_relative, relative])
+
+    def test_schema_gate_reports_schema_and_negative_fixture_for_semantic_schema_change(self) -> None:
+        schema_relative = "schemas/capability-catalog/v1/capability.schema.json"
+        fixture_relative = (
+            "tools/tests/fixtures/capability_catalog/v1/invalid/"
+            "capability-missing-approval.json"
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            copy_catalog_contract(root)
+            schema_path = root / schema_relative
+            schema = json.loads(schema_path.read_bytes())
+            schema["required"].remove("requires_approval")
+            schema_path.write_text(json.dumps(schema), encoding="utf-8")
+            result = run_ci("--root", str(root), "--gate", "schema-fixtures")
+
+        self.assertNotEqual(result.returncode, 0)
+        gate = json.loads(result.stdout)["gates"][0]
+        self.assertEqual(gate["code"], "invalid-schema-fixtures")
+        self.assertEqual(gate["files"], [schema_relative, fixture_relative])
+
+    def test_schema_gate_reports_schema_and_valid_fixture_for_semantic_schema_change(self) -> None:
+        schema_relative = "schemas/capability-catalog/v1/capability.schema.json"
+        fixture_relative = (
+            "tools/tests/fixtures/capability_catalog/v1/valid/capability.json"
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            copy_catalog_contract(root)
+            schema_path = root / schema_relative
+            schema = json.loads(schema_path.read_bytes())
+            schema["properties"]["id"]["const"] = "another-capability"
+            schema_path.write_text(json.dumps(schema), encoding="utf-8")
+            result = run_ci("--root", str(root), "--gate", "schema-fixtures")
+
+        self.assertNotEqual(result.returncode, 0)
+        gate = json.loads(result.stdout)["gates"][0]
+        self.assertEqual(gate["code"], "invalid-schema-fixtures")
+        self.assertEqual(gate["files"], [schema_relative, fixture_relative])
+
+    def test_schema_gate_reports_schema_and_fixture_when_validation_raises(self) -> None:
+        schema_relative = "schemas/capability-catalog/v1/capability.schema.json"
+        fixture_relative = (
+            "tools/tests/fixtures/capability_catalog/v1/valid/capability.json"
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            copy_catalog_contract(root)
+            schema_path = root / schema_relative
+            schema = json.loads(schema_path.read_bytes())
+            schema["allOf"].append({"$ref": "#"})
+            schema_path.write_text(json.dumps(schema), encoding="utf-8")
+            result = run_ci("--root", str(root), "--gate", "schema-fixtures")
+
+        self.assertNotEqual(result.returncode, 0)
+        gate = json.loads(result.stdout)["gates"][0]
+        self.assertEqual(gate["code"], "invalid-schema-fixtures")
+        self.assertEqual(gate["files"], [schema_relative, fixture_relative])
+
+    def test_schema_gate_reports_the_fixed_fixture_that_is_missing(self) -> None:
+        relative = (
+            "tools/tests/fixtures/capability_catalog/v1/valid/capability.json"
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            copy_catalog_contract(root)
+            (root / relative).unlink()
+            result = run_ci("--root", str(root), "--gate", "schema-fixtures")
+
+        self.assertNotEqual(result.returncode, 0)
+        gate = json.loads(result.stdout)["gates"][0]
+        self.assertEqual(gate["code"], "invalid-schema-fixtures")
+        self.assertEqual(gate["files"], [relative])
+
+    def test_schema_gate_keeps_the_group_for_an_unlisted_fixture_file(self) -> None:
+        marker = "UNLISTED-FIXTURE-MUST-NOT-LEAK"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            copy_catalog_contract(root)
+            extra = (
+                root
+                / "tools/tests/fixtures/capability_catalog/v1/valid"
+                / marker
+            )
+            extra.write_text("{}", encoding="utf-8")
+            result = run_ci("--root", str(root), "--gate", "schema-fixtures")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn(marker, result.stdout + result.stderr)
+        gate = json.loads(result.stdout)["gates"][0]
+        self.assertEqual(gate["code"], "invalid-schema-fixtures")
+        self.assertEqual(gate["files"], ["schemas", "contract-fixtures"])
+
     def test_schema_gate_uses_immutable_negative_expectations(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -589,6 +724,10 @@ class CatalogCIRunnerTests(unittest.TestCase):
         )
 
     def test_schema_gate_rejects_truncated_normal_negative_fixture(self) -> None:
+        relative = (
+            "tools/tests/fixtures/capability_catalog/v1/invalid/"
+            "capability-unknown-field.json"
+        )
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             copy_catalog_contract(root)
@@ -603,9 +742,9 @@ class CatalogCIRunnerTests(unittest.TestCase):
             result = run_ci("--root", str(root), "--gate", "schema-fixtures")
 
         self.assertNotEqual(result.returncode, 0)
-        self.assertEqual(
-            json.loads(result.stdout)["gates"][0]["code"], "invalid-schema-fixtures"
-        )
+        gate = json.loads(result.stdout)["gates"][0]
+        self.assertEqual(gate["code"], "invalid-schema-fixtures")
+        self.assertEqual(gate["files"], [relative])
 
     def test_schema_gate_rejects_nonparseable_normal_negative_fixtures(self) -> None:
         mutations = {

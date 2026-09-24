@@ -87,6 +87,24 @@ INVALID_FIXTURES = {
     "release-missing-checksums.json": "release",
     "release-unknown-field.json": "release",
 }
+SCHEMA_DIAGNOSTIC_FILES = {
+    schema_id: f"schemas/capability-catalog/v1/{name}"
+    for schema_id, name in SCHEMA_FILES.items()
+}
+VALID_FIXTURE_DIAGNOSTIC_FILES = {
+    name: f"tools/tests/fixtures/capability_catalog/v1/valid/{name}"
+    for name in VALID_FIXTURES
+}
+INVALID_FIXTURE_DIAGNOSTIC_FILES = {
+    name: f"tools/tests/fixtures/capability_catalog/v1/invalid/{name}"
+    for name in INVALID_FIXTURES
+}
+SCHEMA_FIXTURE_GROUP_FILES = ("schemas", "contract-fixtures")
+SCHEMA_FIXTURE_DIAGNOSTIC_FILES = frozenset(
+    (*SCHEMA_DIAGNOSTIC_FILES.values(),
+     *VALID_FIXTURE_DIAGNOSTIC_FILES.values(),
+     *INVALID_FIXTURE_DIAGNOSTIC_FILES.values())
+)
 MAX_DATA_FILE_BYTES = 1_000_000
 MAX_SNAPSHOT_FILES = 4_096
 MAX_SNAPSHOT_BYTES = 64_000_000
@@ -328,8 +346,32 @@ def _load_expected_duplicate_fixture(
     return first, last
 
 
+def _schema_fixture_failure(causal_file: str | None = None) -> dict:
+    files = (
+        [causal_file]
+        if causal_file in SCHEMA_FIXTURE_DIAGNOSTIC_FILES
+        else list(SCHEMA_FIXTURE_GROUP_FILES)
+    )
+    return _result("schema-fixtures", False, "invalid-schema-fixtures", files)
+
+
+def _schema_fixture_validation_failure(schema_id: str, fixture_file: str) -> dict:
+    schema_file = SCHEMA_DIAGNOSTIC_FILES.get(schema_id)
+    fixture_files = (
+        *VALID_FIXTURE_DIAGNOSTIC_FILES.values(),
+        *INVALID_FIXTURE_DIAGNOSTIC_FILES.values(),
+    )
+    if schema_file and fixture_file in fixture_files:
+        return _result(
+            "schema-fixtures",
+            False,
+            "invalid-schema-fixtures",
+            [schema_file, fixture_file],
+        )
+    return _schema_fixture_failure()
+
+
 def gate_schema_fixtures(root: Path) -> dict:
-    files = ["schemas", "contract-fixtures"]
     schema_dir = root / "schemas" / "capability-catalog" / "v1"
     fixture_dir = root / "tools" / "tests" / "fixtures" / "capability_catalog" / "v1"
     valid_dir = fixture_dir / "valid"
@@ -343,70 +385,105 @@ def gate_schema_fixtures(root: Path) -> dict:
             reject_external_schema_references,
             validate_document,
         )
+    except (ImportError, OSError, UnicodeError, ValueError, RecursionError):
+        return _schema_fixture_failure()
 
-        schemas = {}
-        for schema_id, name in SCHEMA_FILES.items():
-            path = schema_dir / name
-            if not _bounded_contract_file(root, path):
-                raise ValueError
+    if not _safe_directory(root, schema_dir):
+        return _schema_fixture_failure()
+    schemas = {}
+    for schema_id, name in SCHEMA_FILES.items():
+        path = schema_dir / name
+        causal_file = SCHEMA_DIAGNOSTIC_FILES[schema_id]
+        if not _bounded_contract_file(root, path):
+            return _schema_fixture_failure(causal_file)
+        try:
             schema = load_json(path)
             reject_external_schema_references(schema)
             Draft202012Validator.check_schema(schema)
-            if not _closed_object_schemas(schema):
-                raise ValueError
-            schemas[schema_id] = schema
+        except (OSError, UnicodeError, ValueError, RecursionError, SchemaError):
+            return _schema_fixture_failure(causal_file)
+        if not _closed_object_schemas(schema):
+            return _schema_fixture_failure(causal_file)
+        schemas[schema_id] = schema
 
-        for directory, expected in (
-            (valid_dir, VALID_FIXTURES),
-            (invalid_dir, INVALID_FIXTURES),
-        ):
-            if not _safe_directory(root, directory):
-                raise ValueError
+    for directory, expected, diagnostic_files in (
+        (valid_dir, VALID_FIXTURES, VALID_FIXTURE_DIAGNOSTIC_FILES),
+        (invalid_dir, INVALID_FIXTURES, INVALID_FIXTURE_DIAGNOSTIC_FILES),
+    ):
+        if not _safe_directory(root, directory):
+            return _schema_fixture_failure()
+        try:
             actual = {entry.name for entry in directory.iterdir()}
-            if actual != set(expected):
-                raise ValueError
+        except OSError:
+            return _schema_fixture_failure()
+        unexpected = actual - set(expected)
+        missing = set(expected) - actual
+        if unexpected or missing:
+            if not unexpected and len(missing) == 1:
+                return _schema_fixture_failure(
+                    diagnostic_files[next(iter(missing))]
+                )
+            return _schema_fixture_failure()
 
-        for name, schema_id in VALID_FIXTURES.items():
-            path = valid_dir / name
-            if not _bounded_contract_file(root, path):
-                raise ValueError
+    for name, schema_id in VALID_FIXTURES.items():
+        path = valid_dir / name
+        causal_file = VALID_FIXTURE_DIAGNOSTIC_FILES[name]
+        if not _bounded_contract_file(root, path):
+            return _schema_fixture_failure(causal_file)
+        try:
             document = load_json(path)
+        except (OSError, UnicodeError, ValueError, RecursionError, SchemaError):
+            return _schema_fixture_failure(causal_file)
+        try:
             if validate_document(document, schemas[schema_id], SCHEMA_FILES[schema_id], path):
-                raise ValueError
+                return _schema_fixture_validation_failure(schema_id, causal_file)
             if not isinstance(document, dict):
-                raise ValueError
+                return _schema_fixture_validation_failure(schema_id, causal_file)
             synthetic = dict(document)
             synthetic["__unexpected_public_ci_field__"] = True
             if not validate_document(
                 synthetic, schemas[schema_id], SCHEMA_FILES[schema_id], path
             ):
-                raise ValueError
+                return _schema_fixture_validation_failure(schema_id, causal_file)
+        except (OSError, UnicodeError, ValueError, RecursionError, SchemaError):
+            return _schema_fixture_validation_failure(schema_id, causal_file)
 
-        for name, schema_id in INVALID_FIXTURES.items():
-            path = invalid_dir / name
-            if not _bounded_contract_file(root, path):
-                raise ValueError
-            if name == "capability-duplicate-key.json":
+    for name, schema_id in INVALID_FIXTURES.items():
+        path = invalid_dir / name
+        causal_file = INVALID_FIXTURE_DIAGNOSTIC_FILES[name]
+        if not _bounded_contract_file(root, path):
+            return _schema_fixture_failure(causal_file)
+        if name == "capability-duplicate-key.json":
+            try:
                 alternatives = _load_expected_duplicate_fixture(
                     path, "description", reject_non_finite_number
                 )
+            except (OSError, UnicodeError, ValueError, RecursionError, SchemaError):
+                return _schema_fixture_failure(causal_file)
+            try:
                 if any(
                     validate_document(
                         document, schemas[schema_id], SCHEMA_FILES[schema_id], path
                     )
                     for document in alternatives
                 ):
-                    raise ValueError
-                continue
+                    return _schema_fixture_validation_failure(schema_id, causal_file)
+            except (OSError, UnicodeError, ValueError, RecursionError, SchemaError):
+                return _schema_fixture_validation_failure(schema_id, causal_file)
+            continue
+        try:
             document = load_json(path)
+        except (OSError, UnicodeError, ValueError, RecursionError, SchemaError):
+            return _schema_fixture_failure(causal_file)
+        try:
             errors = validate_document(
                 document, schemas[schema_id], SCHEMA_FILES[schema_id], path
             )
             if not errors:
-                raise ValueError
-    except (ImportError, OSError, UnicodeError, ValueError, RecursionError, SchemaError):
-        return _result("schema-fixtures", False, "invalid-schema-fixtures", files)
-    return _result("schema-fixtures", True, "ok", files)
+                return _schema_fixture_validation_failure(schema_id, causal_file)
+        except (OSError, UnicodeError, ValueError, RecursionError, SchemaError):
+            return _schema_fixture_validation_failure(schema_id, causal_file)
+    return _result("schema-fixtures", True, "ok", SCHEMA_FIXTURE_GROUP_FILES)
 
 
 def gate_stable_preview(root: Path) -> dict:
