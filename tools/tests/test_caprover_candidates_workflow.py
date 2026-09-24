@@ -29,9 +29,7 @@ class CapRoverCandidatesWorkflowContractTests(unittest.TestCase):
         cls.catalog_workflow = yaml.safe_load(
             CATALOG_WORKFLOW.read_text(encoding="utf-8")
         )
-        cls.catalog_steps = cls.catalog_workflow["jobs"]["catalog-validation"][
-            "steps"
-        ]
+        cls.catalog_steps = cls.catalog_workflow["jobs"]["public-gates"]["steps"]
         cls.catalog_steps_by_name = {
             step.get("name"): step for step in cls.catalog_steps
         }
@@ -161,6 +159,10 @@ class CapRoverCandidatesWorkflowContractTests(unittest.TestCase):
         self.assertIn('"$actionlint" -version', gate_run)
         self.assertIn('>> "$GITHUB_PATH"', gate_run)
         self.assertIn(
+            'printf \'ACTIONLINT_BIN=%s\\n\' "$actionlint" >> "$GITHUB_ENV"',
+            gate_run,
+        )
+        self.assertIn(
             '"$actionlint" -oneline -shellcheck= -pyflakes=', gate_run.splitlines()
         )
         self.assertNotIn(".github/workflows/*.yml", gate_run)
@@ -172,7 +174,7 @@ class CapRoverCandidatesWorkflowContractTests(unittest.TestCase):
         self.assertLess(
             self.catalog_steps.index(gate),
             self.catalog_steps.index(
-                self.catalog_steps_by_name["Run repository tooling unit tests"]
+                self.catalog_steps_by_name["Run public catalog gate"]
             ),
         )
 
