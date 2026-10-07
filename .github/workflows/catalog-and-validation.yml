@@ -49,6 +49,10 @@ jobs:
       - name: Run repository tooling unit tests
         run: python3 -m unittest discover -s tools/tests -p "test_*.py" -v
 
+      # Fixed repository-owned command; no interpolation of PR-controlled input.
+      - name: Run Vaultwarden documentary contract tests
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s skills/devops/vaultwarden-operations/tests -p "test_*.py" -v
+
       - name: Run llm-wiki staging validator tests
         run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest skills/research/llm-wiki/tests/test_validate_staging.py -v
 
