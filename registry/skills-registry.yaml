@@ -5,12 +5,12 @@
 skills:
   - name: vaultwarden-operations
     status: approved
-    version: 0.1.0
+    version: 0.2.0
     category: devops
     description: >
-      Plans CapRover-based Vaultwarden operations with explicit approval gates, protected
-      configuration, narrow ephemeral agent secret access, and restore-drill
-      verification. Company-agnostic and safe by default.
+      Plans CapRover or Coolify Vaultwarden operations with explicit approval gates,
+      protected configuration, separately reviewed agent integration and encrypted
+      off-host recovery. Portable procedural contract; no credential executor.
     source:
       type: internal
       origin: "Generalized from a reviewed self-hosted Vaultwarden implementation"
@@ -27,26 +27,60 @@ skills:
       installed_by: null
       note: "Procedural skill approved; deployment records are operator-local, not public installation state"
     audit:
-      security_review: "2026-09-16"
+      security_review: "2026-10-07"
       security_status: "passed"
       findings:
         - "Candidate author identity and proposed runtime path generalized; public placeholders only"
         - "No operational scripts; offline contract tests do not prove live deployment or wrapper safety"
         - "Exact-item worker contract requires isolated CLI state and restricted-account sync; no per-item sync claimed"
         - "Explicitly forbids export, broad inventory, long-lived sessions, and secret output"
+        - "Distinct CapRover/Coolify native paths; encrypted mount and independent recovery gate first start"
+        - "Integration separates discovery, private results, writer layers, autofill and caller/session authority"
+        - "Bounded untrusted-backup validation and executor failure-causality matrix remain documentary requirements"
       frontmatter_valid: true
       company_agnostic: true
       pitfalls_documented: true
     files:
+      - path: "MANIFEST.sha256"
+        size_bytes: 843
+        status: "new"
+      - path: "README.md"
+        size_bytes: 4677
+        status: "new"
       - path: "SKILL.md"
+        size_bytes: 11897
+        status: "new"
+      - path: "references/coolify-deployment.md"
+        size_bytes: 14162
+        status: "new"
+      - path: "references/hermes-integration.md"
+        size_bytes: 9105
         status: "new"
       - path: "references/vaultwarden-implementation.md"
+        size_bytes: 21233
+        status: "new"
+      - path: "templates/coolify.compose.yaml"
+        size_bytes: 1580
         status: "new"
       - path: "templates/vaultwarden.env.example"
+        size_bytes: 1774
         status: "new"
       - path: "tests/test_contract.py"
+        size_bytes: 5623
+        status: "new"
+      - path: "tests/test_integration_contract.py"
+        size_bytes: 8832
         status: "new"
     changelog:
+      - date: "2026-10-07"
+        action: "dual-platform and secure integration contract"
+        details: >
+          Preserved CapRover and added native Coolify deployment, non-secret Compose,
+          private-consumption/writer/autofill/session boundaries, bounded recovery
+          validation, operator handoff, manifest and documentary regressions.
+          Source validation and isolated synthetic image checks do not establish
+          live encryption, human-client acceptance, credential-worker safety or recovery.
+          No runtime installation, account migration or agent grant is inferred.
       - date: "2026-09-16"
         action: "initial candidate"
         details: >

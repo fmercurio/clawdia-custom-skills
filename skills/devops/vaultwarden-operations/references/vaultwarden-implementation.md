@@ -1,6 +1,6 @@
 # Vaultwarden implementation reference
 
-This company-neutral procedural skill specifies a CapRover deployment path. It is not a production manifest or executable credential wrapper. No current installation, secret, account or infrastructure setting is an input to repository examples. Defaults are plan-only/read-only; writes require exact-target owner authorization, explicit confirmation, readback and verification. Maintainer approval to install/promote/publish is separate.
+This company-neutral procedural skill specifies distinct CapRover and [Coolify](coolify-deployment.md) deployment paths. Choose the owner's actual platform; do not mix their controllers. It is not a production manifest or executable credential wrapper. No current installation, secret, account or infrastructure setting is an input to repository examples. Defaults are plan-only/read-only; writes require exact-target owner authorization, explicit confirmation, readback and verification. Maintainer approval to install/promote/publish is separate.
 
 ## 1. Architecture and gates
 
@@ -8,7 +8,7 @@ Record protected decisions outside Git and public reports. Use aliases/booleans 
 
 | Decision | Required evidence before apply |
 |---|---|
-| Target | Exact approved CapRover controller origin, app and public vault origin; no inferred destination. |
+| Target | Exact approved CapRover controller/app or Coolify server/project/environment/resource and public vault origin; no inferred destination. |
 | Image | Official `vaultwarden/server` release and immutable digest, supported platform and migration review. |
 | Persistence | Encrypted persistent data volume; or supported external database plus persistent non-database files. |
 | Encryption | Evidence for live storage and backups, key custody and recovery access independent of the vault. |
@@ -80,6 +80,8 @@ One ephemeral worker boundary may spawn only the reviewed CLI commands and a fix
 
 Output is limited to a fixed schema of booleans and fixed error codes, for example `item_found`, `required_field_present`, `operation_verified`, `vault_parent_locked`, `cleanup_verified`. Emit true only after observing that condition. No identifiers, titles, raw errors, paths or secret-bearing values. Never persist `BW_SESSION` in a file, shell profile, env file, service unit, log, agent memory or chat.
 
+Read [Hermes integration](hermes-integration.md) for discovery, model-visible output, four-layer writer authority, origin-bound autofill and real caller/session boundaries. Preserve the full account-scoped worker contract here; a different broker architecture needs independent review. Runtime executor tests belong to their component, not this documentary package.
+
 ### Required synthetic wrapper acceptance tests
 
 Before a wrapper is approved, independently test absent/expired grants; wrong origin/action; parent unlocked/unauthenticated; broad account visibility; sync failure; missing/duplicate title; exact-ID mismatch; missing field; attempted inventory/export; excessive output; secret-bearing stderr; consumer failure; redirect; timeout; interruption; lock failure; surviving descendants; concurrent workers; and final parent-state failure. Use public synthetic fixtures only, no real credentials. These are acceptance requirements, not claims about this documentation-only skill.
@@ -89,6 +91,17 @@ Before a wrapper is approved, independently test absent/expired grants; wrong or
 Backups and restore drills each require specific authorization and confirmation. A database-consistent backup must cover the selected release's database plus attachments, Sends, keys and required configuration; do not copy a live SQLite database while ignoring WAL consistency. Choose the documented online backup or approved quiescence method. External databases need their own consistent dump plus associated file storage. Protect backups with encryption, retention and independent recovery-key custody; raw dumps/configuration never belong in this repository.
 
 Run restore drills on isolated storage/database and an independently approved test route. Block production SMTP, notifications, webhooks and other outbound side effects; do not reuse the production domain or point a test instance at the live database. Restore secrets only through the protected recovery channel. Test TLS, startup, manually authorized test-account authentication, representative restored file integrity and effective registration/admin policy. Record sanitized pass/fail evidence, not account data. Cleanup is also an approved write, not an implicit deletion.
+
+### Bounded untrusted-backup verification
+
+Reading/verifying a backup does not authorize extraction, restoration, deletion or a live database connection. Start with synthetic fixtures and a verifier independently reviewed in its owning component; this package ships no archive parser or recovery executor.
+
+1. **Set budgets before reading.** Use a private supervised process with explicit input-byte, expanded-byte and wall-clock limits. Limit memory, total members, path lengths, metadata/PAX bytes and parser work before allocation; an internal progress callback alone is not a wall-clock boundary. No unbounded `read()`, automatic extraction or extension loading. A limit breach is failure, not permission to increase a production budget silently.
+2. **Validate compression completely before tar interpretation.** Consume and validate the complete gzip stream, including trailer/CRC and trailing/member policy, within expanded limits. Do not let early tar end markers skip validation of the remaining gzip bytes. Preserve the bounded validated byte stream for the next phase without exposing it or writing secret-bearing plaintext artifacts.
+3. **Count the physical archive, not only yielded logical files.** Account for physical headers and PAX records, their bytes, overrides and any skipped/padding/end material. Accept only the reviewed canonical POSIX path/type subset; reject absolute paths, empty or dot/traversal components, ambiguous normalization, duplicate entries, symlinks, hardlinks, devices, sparse encodings and unsupported metadata. Track every implicit parent as well as explicit directory/file entries: reject duplicate paths and file/directory or parent-child collisions, not merely repeated logical tar members.
+4. **Verify exact contents.** Require exact manifest members, supported names/types, declared sizes and streaming hashes; reject missing or unexpected files. Bind the manifest to the approved recovery unit and trusted provenance. Correct structure/checksums are not authenticity or recoverability: a self-consistent attacker-produced archive or arbitrary SHA is not trusted provenance.
+5. **Inspect SQLite only when required and authorized.** Prefer a bounded in-memory database constructed from validated synthetic/authorized bytes, not a live database or uncontrolled extraction. Enable query-only mode, disable extension loading and set `PRAGMA trusted_schema=OFF` before any approved fixed query. Verify library/version support; unsupported gates block instead of reverting to a writable file. Use a strict authorizer, instruction budget, bounded result counts and an external supervisor with process-level wall-clock/memory limits. Do not enumerate vault rows or print database/account contents; return only fixed integrity/count outcomes. An integrity check cannot validate users' decrypted vault/attachment behavior.
+6. **Separate the next permission.** After verification, obtain the specific isolated extraction/restore and outbound-isolation authorization. Never restore over live state or delete original recovery evidence automatically. Retain failed fixture evidence; exercise oversized expansion, malformed/truncated gzip, PAX work, duplicate paths, implicit parent collisions, manifest mismatch, malicious schema and supervisor timeout before real backup data.
 
 For upgrades, approve the exact release/digest and schema migration; capture consistent recovery evidence first. A previous image may not read a migrated database. If rollback needs restoring data, approve its downtime and possible loss of post-backup writes. Read back the exact deployed version and effective configuration, then verify health and authorized workflows. Do not combine enrollment/security-policy changes with an upgrade without distinct approval.
 

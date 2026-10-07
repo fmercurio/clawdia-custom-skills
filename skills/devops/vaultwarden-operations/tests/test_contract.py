@@ -27,7 +27,7 @@ class ContractTests(unittest.TestCase):
     def test_approved_procedure_keeps_installation_separate(self):
         front = SKILL.read_text().split("---", 2)[1]
         self.assertRegex(front, r"(?m)^status: approved$")
-        self.assertRegex(front, r"(?m)^version: 0\.1\.0$")
+        self.assertRegex(front, r"(?m)^version: 0\.2\.0$")
         self.assertIn('author: "Repository contributors + Hermes Agent"', front)
         registry = (REPO / "registry/skills-registry.yaml").read_text()
         entry = registry.split("  - name: vaultwarden-operations\n", 1)[1].split("\n  - name:", 1)[0]
@@ -82,7 +82,7 @@ class ContractTests(unittest.TestCase):
     def test_only_expected_python_test_and_no_scripts_directory(self):
         self.assertFalse((ROOT / "scripts").exists())
         self.assertEqual({p.relative_to(ROOT).as_posix() for p in ROOT.rglob("*.py")},
-                         {"tests/test_contract.py"})
+                         {"tests/test_contract.py", "tests/test_integration_contract.py"})
 
     def test_public_documentation_and_links(self):
         allowed_hosts = {"vault.example.com", "github.com", "bitwarden.com", "caprover.com"}

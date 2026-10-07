@@ -1,91 +1,97 @@
 ---
 name: vaultwarden-operations
 description: "Use when deploying or operating Vaultwarden safely."
-version: 0.1.0
+version: 0.2.0
 status: approved
 author: "Repository contributors + Hermes Agent"
 license: MIT
 metadata:
   hermes:
-    tags: [vaultwarden, bitwarden, secrets, caprover, operations]
+    tags: [vaultwarden, bitwarden, secrets, caprover, coolify, operations]
     related_skills: [caprover-operations, caprover-deploy]
 ---
 
 # Vaultwarden Operations
 
-Plan and review Vaultwarden operations through CapRover without turning an agent into a broad secret reader. This maintainer-approved skill is a procedural contract, not an executable credential integration or a tested credential wrapper. Approval of the skill does not authorize live deployment or secret access.
+Plan and review Vaultwarden operations through **CapRover or Coolify** without turning an agent into a broad secret reader. This maintainer-approved skill is a procedural contract, not an executable credential integration or a tested credential wrapper. Approval of the skill does not authorize live deployment, installation, enrollment or secret access.
 
 ## When to Use
 
-- Plan a single-tenant Vaultwarden deployment through CapRover.
+- Plan a single-tenant human Vaultwarden deployment through the owner's selected CapRover or Coolify platform.
 - Review an explicitly authorized upgrade, health diagnosis, backup or isolated restore drill.
-- Define bounded use of one credential for one named, authorized external operation.
+- Discover existing approved integration capabilities and define bounded use of one credential for one named authorized operation.
 - Do not use for unapproved retrieval, exports, inventory, arbitrary shell execution, account deletion or incident response.
 
 ## Prerequisites
 
-- Owner authorization names the exact external target, technical purpose, allowed reads/writes, time window, confirmation and rollback scope in protected operator context, never in public artifacts.
-- Maintainer approval is separately required before runtime installation, promotion, push or PR publication. The recorded approval covers this procedural skill only; additional installations and publications still need their own grant.
-- Read [implementation](references/vaultwarden-implementation.md) completely, including the CapRover and CLI limitations. Review the companion CapRover sources at the selected revision; references to candidates do not approve their installation or use.
-- Select the official `vaultwarden/server` image with a reviewed release and immutable digest. Check its configuration, database compatibility, migration and WebSocket behavior against official sources; do not resolve `latest` during deployment.
-- Identify canonical public HTTPS origin, encrypted persistent storage, supported database, secret-store integration and recovery design before any write.
-- Use [the environment template](templates/vaultwarden.env.example) only as a non-secret contract, never as a populated production file.
+- Owner authorization names the exact target, technical purpose, allowed effects, time window, confirmation and rollback in protected operator context, never public artifacts.
+- Maintainer approval for installation/promotion/publication and owner approval for live operations remain separate. Approval of source does not create a runtime grant.
+- Read [common implementation and CapRover](references/vaultwarden-implementation.md), including CLI limitations. For a Coolify target, also read [Coolify deployment](references/coolify-deployment.md); choose one platform path rather than combining controllers. Review companion capabilities at their exact selected revision; existence does not approve installation/use.
+- Read [Hermes integration boundaries](references/hermes-integration.md) before capability discovery, autofill or any proposed agent use. Discover existing reviewed connector/private consumer before inventing a wrapper; no secret reads merely to discover tooling.
+- Select the official `vaultwarden/server` image with a reviewed stable release and immutable digest; verify image/configuration/database/migration/notification contracts. Do not resolve `latest` during deployment.
+- Identify canonical HTTPS origin, encrypted persistent storage, host trust, supported database, protected delivery and independent recovery before first start.
+- Use [the environment checklist](templates/vaultwarden.env.example) and [Coolify candidate](templates/coolify.compose.yaml) only as non-secret contracts. Never populate a public file with live secrets/configuration. The [operator handoff](README.md) guides inspect → decisions → dry-run → apply.
 
 ## Authorization and privacy boundaries
 
-Every infrastructure, publication, DNS/domain, SMTP, database, backup, restore, upgrade, signup-policy, admin-token or user-account change needs explicit, specific owner authorization. An approved plan is not apply authorization. Possession of a credential does not authorize the external action it enables.
+Every infrastructure, publication, DNS/domain, SMTP, database, backup, restore, upgrade, signup-policy, admin-token or user-account change needs explicit, specific owner authorization. An approved plan is not apply authorization. Possession of a credential does not authorize its external effect.
 
-Never request or expose secret values in chat. Never include passwords, tokens, cookies, private keys, SMTP credentials, `ADMIN_TOKEN`, `BW_SESSION`, personal/customer data, real company names, private domains, internal addresses or host-local paths in repository content or reports. Examples use reserved domains and non-secret placeholders only. Do not copy an existing installation's configuration into this repository. Inspect protected live configuration inside a trusted boundary and return only allowlisted booleans/enums, not raw logs, app definitions, CLI status JSON or item JSON.
+Never request or expose secrets in chat, model-visible MCP/tool results, logs or history. Never put passwords, tokens, cookies, private keys, SMTP credentials, `ADMIN_TOKEN`, `BW_SESSION`, personal/customer data, real company names, private origins/addresses or host-local paths in repository examples/reports. Use reserved domains and non-secret placeholders. Do not copy an installation's configuration into this package. Inspect protected live configuration inside a trusted private boundary and return only allowlisted booleans/enums, never raw logs, definitions, CLI status or item JSON.
 
 ## Procedure
 
-1. **Classify and gate.** Default to plan-only/read-only. Separate installation, configuration, secret access, external credential use, email tests, account actions and recovery into named grants. Stop when a grant or exact target is missing.
-   - Completion: authorization covers the proposed effect, confirmation, verification and rollback; no credentials were read merely to plan.
-2. **Preflight CapRover.** Confirm the exact controller origin/app binding, selected deployment method, official image digest, container HTTP port, persistent data mount, encryption evidence, single-replica placement and existing-state preservation. Treat ordinary CapRover environment values as inspectable configuration, not a secret manager.
-   - Completion: a reviewed secret-injection method exists, or deployment is blocked; no app is created during preflight.
-3. **Deploy only with an apply grant.** Follow the CapRover sequence in the reference. Keep `DOMAIN` equal to the canonical HTTPS origin, `SIGNUPS_ALLOWED=false`, an empty signup-domain allowlist and invitations off unless separately approved. Do not configure administration or SMTP by default. Do not enable public signup to bootstrap the first account.
-   - Completion: one authorized deployment method was used; possible partial writes are reconciled before any retry, never via automatic fallback.
-4. **Read back effective state.** Verify image, canonical domain match, certificate validation, proxy route, WebSocket behavior for the chosen release, persistent mount/database, encryption evidence, replica count, effective registration/invitation policy and absence/restriction of admin access. Environment key names alone do not prove effective values: persisted admin settings may override environment variables.
-   - Completion: sanitized boolean/enum results match the approved design; account creation, email sending and persistence-write tests occur only if separately authorized.
-5. **Use a credential only through the bounded contract below.** No operational wrapper is shipped here. If no independently reviewed implementation can enforce the boundary, stop rather than constructing an ad hoc secret-reading shell command.
-   - Completion: exact-item and exact-target restrictions, child cleanup and parent lock verification all succeed without disclosing values.
-6. **Back up and prove recovery.** With distinct approvals, make database-consistent encrypted backups including required file storage and configuration; perform an isolated restore drill. Keep recovery key access independent of the failed vault.
-   - Completion: authorized test-account and file-integrity checks pass in isolation; a backup job alone is not recoverability.
-7. **Upgrade or modify narrowly.** Approve the exact image/configuration delta and rollback method, capture protected recovery evidence, apply once, read back and verify service behavior. Database migrations can make image-only rollback unsafe.
-   - Completion: health, state and policy match; unsupported rollback or missing restore evidence is reported, not assumed.
+1. **Classify and gate.** Default plan-only/read-only. Separate source installation/publication, platform apply, secret use, email/account actions, backup and restoration into exact named scopes.
+   - Completion: owner authorization covers the proposed effect, confirmation, verification and rollback; missing choices remain pending.
+2. **Preflight the selected platform.** Confirm exact controller/server/project/environment/app identity, supported method, immutable image, internal port, encrypted persistent mount, one SQLite writer, existing state and independent recovery custody. Privileged platform/host operators can inspect runtime state; a container is not their trust boundary.
+   - Completion: reviewed storage/secret-delivery and recovery exist, or first start is blocked; no resource is created merely to inspect capabilities.
+3. **Deploy only with an apply grant.** Follow the selected platform reference through its native supported control plane. Keep `DOMAIN` canonical, `SIGNUPS_ALLOWED=false`, signup-domain whitelist empty and invitations off unless separately approved. Administration and SMTP are not enabled by default; never use public signup as bootstrap.
+   - Completion: one authorized method applied; potentially partial writes reconciled through exact-target readback before retry/fallback.
+4. **Read back effective state.** Verify actual image/digest, canonical domain, TLS, proxy/notification behavior, encrypted mounted recovery unit/database, one writer, registration/invitations and absent/private administration. Persisted admin `config.json` may override env; key names alone prove nothing.
+   - Completion: fixed sanitized outcomes match the approved design; enrollment, SMTP/send, native-client and persistence-write tests remain separately scoped.
+5. **Evaluate integration separately.** Distinguish package presence, independently reviewed installation, session availability, active grants and effective destination permission. Read-only MCP or a generic denial cannot prove absence of a writer; unknown remains unknown. No operational wrapper ships here.
+   - Completion: private resolution/consumption, exact item/target and all worker cleanup/parent-lock gates independently tested before any real credential use. No broker or autofill fallback expands authority.
+6. **Back up and prove recovery.** Under specific approvals, make database-consistent encrypted off-host backups including required files/configuration; boundedly verify untrusted archives, then perform an isolated restore with no production outbound effects. Recovery key access must not depend on the failed vault/host.
+   - Completion: remote artifact/snapshot full check, database integrity and authorized representative restored data/files/workflows verified; a running job is not recovery evidence.
+7. **Complete human acceptance or modify narrowly.** Verify first-owner/MFA, org/collection permissions/revocation and native clients before real credentials. For changes/upgrades, approve exact delta and rollback, capture recovery first, apply once and verify. Migrations may make image-only rollback unsafe.
+   - Completion: report configuration, deployment, human workflow, persistence, backup and restore separately; no production-ready claim while a required gate is pending.
 
 ## Narrow Agent Secret-Access Contract
 
-- Require a named technical purpose, exact external origin/resource/action, exact item selector and minimal field allowlist before any unlock or sync. Titles and identifiers stay in protected context, not output or process arguments.
-- Keep the parent CLI locked with no `BW_SESSION`. A child process alone is not isolation: never share the parent's CLI application-data directory or unlock a broad personal vault.
-- Use one authorized ephemeral worker boundary with a dedicated least-privilege account and private isolated CLI state. It may spawn only reviewed CLI commands and the fixed allowlisted external operation. No arbitrary shell text, environment inheritance, tracing, crash dumps or unbounded output.
-- `bw sync` has no per-item filter. A "scoped sync" means one authorized sync within the dedicated account's server-side visibility, not selective sync of an item. If the account can access unrelated items, stop; do not claim command filtering restricts decryption authority.
-- Prefer the exact item ID. An exact title is acceptable only if the reviewed resolver proves a unique exact match without broad enumeration, substring search or exposing candidates; otherwise require a protected exact ID and stop. No first-match fallback.
-- Fetch only indispensable fields into worker memory and consume them inside that boundary. Prohibit `bw export`, `bw list items`, broad inventory, raw item JSON, clipboard access and secrets in CLI arguments. CLI field output must be captured privately, never relayed to tool stdout/stderr or chat.
-- `BW_SESSION` exists only in the ephemeral worker's memory/environment and its allowlisted CLI descendants. Never persist it in any file, shell profile, env file, service unit, log, agent memory or chat. Do not pass it to the external consumer or parent.
-- On success, failure, timeout or interruption, terminate/wait for all descendants, perform best-effort child lock, discard tokens and ephemeral state, then verify parent `bw status` is exactly `locked` with no session variable. Parse privately; never print the raw status payload. An unauthenticated, unlocked, unknown or unreachable parent is not a successful locked check.
-- Report only bounded metadata, such as `item_found=true`, `required_field_present=true`, `operation_verified=true`, `vault_parent_locked=true`, and fixed failure codes. A lock check does not prove revocation of a leaked token or zeroization; suspected leakage requires a separate incident-response grant.
+- Require purpose, exact external origin/resource/action, exact item selector, minimal fields and valid grant before unlock/sync. Selectors/identities remain in protected context, not output/argv.
+- Keep the parent CLI locked with no `BW_SESSION`. A process child using the same CLI data/cache is not isolation; never unlock a broad human vault.
+- Use one ephemeral reviewed worker, dedicated least-privilege account, private isolated state and fixed allowlisted consumer. No arbitrary shell, inherited environment/proxies, tracing/core dumps or unbounded output.
+- `bw sync` has no per-item filter. Account-scoped sync is not selective item decryption; unrelated visible items block this path. A shared broker is a different architecture requiring independent review, not a substitute for worker restrictions.
+- Prefer exact item ID. Exact title requires a reviewed unique exact-match resolver without enumeration/substring/first-match fallback; otherwise stop for a protected ID.
+- Resolve and consume indispensable fields **inside the private boundary**. Prohibit `bw export`, `bw list items`, broad inventory, raw item JSON, clipboard and credential-bearing argv. Do not return secret fields via MCP/tool output for later consumption; final-answer redaction does not undo exposure.
+- `BW_SESSION` exists only in ephemeral worker memory/environment and allowlisted CLI descendants. Never persist it in files, profiles, units, logs, agent memory/history or chat; never pass it to the external consumer or parent.
+- On success, error, timeout or interruption, supervise termination/wait of **all descendants**, best-effort child lock, state/token discard and exact parent `locked` verification without a session variable. An exited leader is not cleanup proof; unknown/unreachable/unlocked/unauthenticated parent is failure.
+- Report only bounded booleans/enums/fixed codes. Cleanup uncertainty blocks further work. Parent lock is not token revocation or zeroization; suspected exposure requires a separate incident-response grant.
 
 ## Pitfalls
 
-- A login page, health response, attached volume or passing static test proves neither recoverability nor encryption at rest.
-- External SQL does not remove persistent attachment/Send/key-storage requirements for the selected release.
-- CapRover-managed storage is not automatically encrypted. Its controller/Swarm administrators can inspect ordinary environment variables.
-- An admin token is not a routine agent credential; configure it only if necessary and approved, in a reviewed secret store with network/proxy restrictions.
-- Signup-domain allowlists and persisted admin overrides can defeat an apparent environment-only signup policy.
-- Disabled signups do not themselves implement safe first-account onboarding; invitations and account creation are separate writes.
-- The companion deployment helper does not implement HTTPS/WebSocket changes. Use an independently reviewed, authorized operation instead of inventing helper flags or silently editing generated proxy files.
+- HTTP health, a UI resource, an attached volume or passing text test proves neither encryption, native-client compatibility nor recovery.
+- Both platform administrators can inspect runtime environment. A named volume, E2EE payload or encrypted mounted filesystem is not host-admin isolation or whole-recovery-unit encryption evidence.
+- External SQL still requires persistent attachments/Sends/keys/configuration.
+- Signup-domain allowlists and persisted admin settings can defeat env-only policy. Disabled signups are not first-owner enrollment; private bootstrap, invite/account and MFA are separate scopes.
+- An admin token is not an agent credential. Enable only when necessary/approved, hashed and privately restricted; inspect persisted overrides when disabling.
+- The CapRover helper does not implement HTTPS/WebSocket changes. Coolify generated labels/database are not editing shortcuts; use supported managed controls and never restart shared ingress automatically.
+- Item discovery is not autofill, authentication, a writer grant or effective permission. Profile selectors do not authenticate privileged callers; stale sessions do not authorize restarts.
+- Backup verification alone does not authorize extraction/restoration/cleanup. Structural integrity is not provenance or usable recovery.
 
 ## Verification
 
-Run the repository validator, catalog generator/check, diff check and catalog integrity tests. Run the package's offline contract tests with `python3 -m unittest discover -s skills/devops/vaultwarden-operations/tests -v`. These tests exercise source invariants, not real credential handling or a deployment.
+Run repository validator, catalog generation/check, manifest/file-inventory/neutrality checks, staged diff check and package tests:
 
-Before any operational use, verify independently:
+```sh
+python3 -B -m unittest discover -s skills/devops/vaultwarden-operations/tests -v
+```
 
-- [ ] Exact scope, owner authorization and confirmation are recorded outside public artifacts.
-- [ ] CapRover app/controller, image digest and secret-injection boundary are approved.
-- [ ] TLS, domain match, effective configuration, encryption, data mounts and policy have sanitized readback.
-- [ ] Credential use is isolated, exact-item, minimal-field and exact-target; all exit paths verify parent `locked`.
-- [ ] A reviewed wrapper has synthetic timeout, failure, duplicate-title and output-leak tests before real credentials are used.
-- [ ] Backup and isolated restore drill are separately authorized and documented; no recovery claim is based on backups alone.
-- [ ] Governance status and approval/install records match explicit grants; no live infrastructure change was inferred from skill approval.
+These are offline source/document/template invariants, **not executor, encryption or deployment safety proof**. Validate the selected template with actual platform tooling and synthetic inputs; runtime gates require their own evidence.
+
+- [ ] Exact owner scope and rollback recorded outside public artifacts; no authority inferred from merge/installation.
+- [ ] Selected platform/controller/resource, immutable image, encrypted mount/ownership and protected delivery approved.
+- [ ] TLS/canonical origin, effective policy, admin denial and no secret-bearing logs verified.
+- [ ] Human owner/MFA/org permissions/revocation, native-client sync and notifications verified before real data.
+- [ ] Any agent path separately reviewed with private results, actual identity/grant/permissions, isolated dedicated account and all cleanup/parent-lock paths.
+- [ ] Backup full remote check and isolated representative restoration specifically authorized/verified; no false green from running jobs.
+- [ ] Source registry/manifest/approval and installed runtime states distinguished; other profiles and existing credential managers untouched.
