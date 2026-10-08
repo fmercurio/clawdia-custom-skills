@@ -40,6 +40,10 @@ For separately approved metadata discovery, pass only the protected policy file 
 
 The bounded process reader accounts for stdout **and** stderr before JSON parsing, kills/waits the owned metadata child on error/timeout and never replays raw status/identity or errors. These tests cover that child, not every possible adversarial descendant or credential-bearing executor. Report only shape/expiry/status/identity-match/parent-lock booleans and fixed blocking codes. Caller authentication, destination permissions and private executor remain pending; neither configured profile names nor CLI `locked` prove them.
 
+## Synthetic private-consumer security core
+
+A [source-only core](private-consumer-core.md) now exercises signed caller proof, expiring exact-scope grants, atomic single-use admission and private fixed HTTPS consumption against a synthetic provider. It has no CLI/vault adapter, secure enrollment, private transport or installed runtime. Do not enable the existing preflight based on these tests. Actual Bitwarden identity/visibility, caller-key custody, worker isolation/all-descendant cleanup, cross-process provider locks and production destination approval remain blockers.
+
 ## Runtime executor still required
 
 Implement and independently review the worker/private consumer as a separate security slice, preserving the matrix in [Hermes integration](hermes-integration.md):

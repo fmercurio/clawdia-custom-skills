@@ -1,7 +1,7 @@
 ---
 name: vaultwarden-operations
 description: "Use when deploying or operating Vaultwarden safely."
-version: 0.3.0
+version: 0.4.0
 status: candidate
 author: "Repository contributors + Hermes Agent"
 license: MIT
@@ -13,7 +13,7 @@ metadata:
 
 # Vaultwarden Operations
 
-Plan and review Vaultwarden operations through **CapRover or Coolify** without turning an agent into a broad secret reader. The prior 0.2.0 procedural revision was maintainer-approved; this 0.3.0 source revision is a review candidate. It adds candidate backup/recovery helpers and metadata-only preflight, not an executable credential integration or a tested credential wrapper. Approval of the skill does not authorize live deployment, installation, enrollment or secret access.
+Plan and review Vaultwarden operations through **CapRover or Coolify** without turning an agent into a broad secret reader. The prior 0.2.0 procedural revision was maintainer-approved; this 0.4.0 source revision is a review candidate. It adds candidate backup/recovery helpers, metadata-only preflight and a [synthetic private-consumer core](references/private-consumer-core.md), not an executable vault credential integration or a tested Bitwarden credential wrapper. Approval of the skill does not authorize live deployment, installation, enrollment or secret access.
 
 ## When to Use
 

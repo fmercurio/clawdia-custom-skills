@@ -5,13 +5,13 @@
 skills:
   - name: vaultwarden-operations
     status: candidate
-    version: 0.3.0
+    version: 0.4.0
     category: devops
     description: >
       Plans CapRover or Coolify Vaultwarden operations with explicit approval gates,
       protected configuration, separately reviewed agent integration and encrypted
       off-host recovery. Candidate operational helpers and metadata-only access
-      preflight; no credential executor.
+      preflight and synthetic private-consumer core; no operational vault executor.
     source:
       type: internal
       origin: "Generalized from a reviewed self-hosted Vaultwarden implementation"
@@ -32,7 +32,7 @@ skills:
       security_status: "pending"
       findings:
         - "Candidate author identity and proposed runtime path generalized; public placeholders only"
-        - "Candidate backup/recovery and metadata-only preflight added; no credential executor or runtime promotion"
+        - "Candidate backup/recovery, metadata preflight and synthetic private-consumer core; no real vault adapter or runtime promotion"
         - "Exact-item worker contract requires isolated CLI state and restricted-account sync; no per-item sync claimed"
         - "Explicitly forbids export, broad inventory, long-lived sessions, and secret output"
         - "Distinct CapRover/Coolify native paths; encrypted mount and independent recovery gate first start"
@@ -43,16 +43,16 @@ skills:
       pitfalls_documented: true
     files:
       - path: "MANIFEST.sha256"
-        size_bytes: 1828
+        size_bytes: 2131
         status: "new"
       - path: "README.md"
-        size_bytes: 6073
+        size_bytes: 6537
         status: "new"
       - path: "SKILL.md"
-        size_bytes: 12294
+        size_bytes: 12384
         status: "new"
       - path: "references/agent-access-rollout.md"
-        size_bytes: 8119
+        size_bytes: 8698
         status: "new"
       - path: "references/coolify-deployment.md"
         size_bytes: 14162
@@ -63,6 +63,9 @@ skills:
       - path: "references/operational-learnings.md"
         size_bytes: 11889
         status: "new"
+      - path: "references/private-consumer-core.md"
+        size_bytes: 6628
+        status: "new"
       - path: "references/vaultwarden-implementation.md"
         size_bytes: 21233
         status: "new"
@@ -71,6 +74,9 @@ skills:
         status: "new"
       - path: "scripts/backup.py"
         size_bytes: 34032
+        status: "new"
+      - path: "scripts/private_consumer_core.py"
+        size_bytes: 13728
         status: "new"
       - path: "scripts/verify_signup_ui.py"
         size_bytes: 4186
@@ -97,12 +103,22 @@ skills:
         size_bytes: 16005
         status: "new"
       - path: "tests/test_contract.py"
-        size_bytes: 6009
+        size_bytes: 6110
         status: "new"
       - path: "tests/test_integration_contract.py"
         size_bytes: 9474
         status: "new"
+      - path: "tests/test_private_consumer_core.py"
+        size_bytes: 21966
+        status: "new"
     changelog:
+      - date: "2026-10-08"
+        action: "synthetic private-consumer security-core candidate"
+        details: >
+          Adds authenticated signed caller proofs, expiring single-use grants, exact
+          scope checks and private fixed HTTPS consumption with synthetic TLS tests.
+          Real vault adapter, secure transport/custody, worker supervision, enrollment,
+          runtime installation and activation remain unimplemented or gated.
       - date: "2026-10-08"
         action: "operational evidence generalization and dedicated-agent access candidate"
         details: >

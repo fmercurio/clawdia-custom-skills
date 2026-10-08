@@ -1,6 +1,6 @@
 # Vaultwarden operations: operator and agent handoff
 
-Version **0.3.0**, review candidate extending the previously approved 0.2.0 contract. A portable operational package for CapRover **or** Coolify. Candidate infrastructure backup/recovery and metadata-only agent-access preflight helpers are shipped; no credential executor, shared broker or account migration is shipped. Approval/merge does not enable agent access or imply a live deployment.
+Version **0.4.0**, review candidate extending the previously approved 0.2.0 contract. A portable operational package for CapRover **or** Coolify. Candidate infrastructure backup/recovery and metadata-only agent-access preflight helpers and a synthetic private-consumer core are shipped; no credential executor for real vaults, shared broker or account migration is shipped. Approval/merge does not enable agent access or imply a live deployment.
 
 ## Start with your agent
 
@@ -24,6 +24,7 @@ Version **0.3.0**, review candidate extending the previously approved 0.2.0 cont
 - [Operational learnings](references/operational-learnings.md): generalized bootstrap, signup UI, exact-resource backup/restore and native-engine quota gates.
 - [Agent-access rollout](references/agent-access-rollout.md): dedicated-account pilot, native-backend/source separation and remaining executor/enrollment gates.
 - [Backup candidate](scripts/backup.py) and [example configuration](templates/backup-config.example.json): explicit private configuration; default check; mutation requires deliberate apply and separate review/authorization.
+- [Private-consumer core](scripts/private_consumer_core.py) and [security-slice boundaries](references/private-consumer-core.md): synthetic signed-grant/private HTTPS execution only; no Bitwarden connector or runtime activation.
 - [Metadata-only preflight](scripts/agent_access_preflight.py) and [disabled policy example](templates/agent-access-policy.example.json): no login/unlock/sync/items/grants; always blocked for secret use.
 - [Native signup stylesheet](templates/user.vaultwarden.scss.hbs) and [fresh-browser verifier](scripts/verify_signup_ui.py): visual screen closure only; isolated synthetic DOM or actual deployed signup/register/login verification, never a human browser profile.
 - [Environment checklist](templates/vaultwarden.env.example): non-secret non-runnable contract.
@@ -31,7 +32,7 @@ Version **0.3.0**, review candidate extending the previously approved 0.2.0 cont
 
 ## Verify the source package
 
-From the repository root:
+From the repository root, using Python 3.12 (including SQLite serialization support) and the pinned test dependencies:
 
 ```sh
 python3 tools/validate_skill.py skills/devops/vaultwarden-operations/SKILL.md
@@ -40,7 +41,7 @@ python3 -B -m unittest discover -s skills/devops/vaultwarden-operations/tests -v
 git diff --check
 ```
 
-Verify every manifest hash and file inventory in addition to these gates. The suite combines documentary/template regressions and isolated synthetic archive/SQLite/WAL/age/metadata-child tests. It does not contact a real vault or run a credential executor, prove live storage encryption or validate a new real-controller restore. Install age and age-keygen to exercise both encryption subprocess tests rather than treating skips as proof.
+Verify every manifest hash and file inventory in addition to these gates. The suite combines documentary/template regressions and isolated synthetic archive/SQLite/WAL/age/metadata-child tests. It exercises a synthetic provider and real loopback HTTPS consumer, but does not contact a real vault or run an operational vault credential executor, prove live storage encryption or validate a new real-controller restore. Install age and age-keygen to exercise both encryption subprocess tests rather than treating skips as proof.
 
 ## Acceptance ledger
 

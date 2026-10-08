@@ -27,7 +27,7 @@ class ContractTests(unittest.TestCase):
     def test_candidate_extension_keeps_prior_approval_and_installation_separate(self):
         front = SKILL.read_text().split("---", 2)[1]
         self.assertRegex(front, r"(?m)^status: candidate$")
-        self.assertRegex(front, r"(?m)^version: 0\.3\.0$")
+        self.assertRegex(front, r"(?m)^version: 0\.4\.0$")
         self.assertIn('author: "Repository contributors + Hermes Agent"', front)
         registry = (REPO / "registry/skills-registry.yaml").read_text()
         entry = registry.split("  - name: vaultwarden-operations\n", 1)[1].split("\n  - name:", 1)[0]
@@ -84,7 +84,8 @@ class ContractTests(unittest.TestCase):
                          {"tests/test_contract.py", "tests/test_integration_contract.py",
                           "tests/test_backup.py", "tests/test_agent_access_preflight.py",
                           "scripts/backup.py", "scripts/agent_access_preflight.py",
-                          "scripts/verify_signup_ui.py"})
+                          "scripts/verify_signup_ui.py", "scripts/private_consumer_core.py",
+                          "tests/test_private_consumer_core.py"})
         readme = (ROOT / "README.md").read_text()
         self.assertIn("candidate", readme)
         self.assertIn("no credential executor", readme)
