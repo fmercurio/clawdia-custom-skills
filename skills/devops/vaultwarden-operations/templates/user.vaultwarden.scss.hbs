@@ -1,0 +1,14 @@
+/* Native Vaultwarden user stylesheet: UI-only, not an authorization boundary. */
+auth-registration-start > form,
+auth-registration-finish > form { display: none !important; }
+auth-registration-start,
+auth-registration-finish { display: block; }
+auth-registration-start::before,
+auth-registration-finish::before {
+  content: "Cadastro encerrado. Entre com sua conta existente.";
+  display: block;
+  margin-bottom: 1.5rem;
+  line-height: 1.5;
+}
+body:has(auth-registration-start) h1,
+body:has(auth-registration-finish) h1 { display: none !important; }

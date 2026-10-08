@@ -4,13 +4,14 @@
 
 skills:
   - name: vaultwarden-operations
-    status: approved
-    version: 0.2.0
+    status: candidate
+    version: 0.3.0
     category: devops
     description: >
       Plans CapRover or Coolify Vaultwarden operations with explicit approval gates,
       protected configuration, separately reviewed agent integration and encrypted
-      off-host recovery. Portable procedural contract; no credential executor.
+      off-host recovery. Candidate operational helpers and metadata-only access
+      preflight; no credential executor.
     source:
       type: internal
       origin: "Generalized from a reviewed self-hosted Vaultwarden implementation"
@@ -25,53 +26,92 @@ skills:
       repo_path: "skills/devops/vaultwarden-operations/"
       installed_date: null
       installed_by: null
-      note: "Procedural skill approved; deployment records are operator-local, not public installation state"
+      note: "Prior procedural revision approved; new helpers are review candidates, not installed runtime state"
     audit:
       security_review: "2026-10-07"
-      security_status: "passed"
+      security_status: "pending"
       findings:
         - "Candidate author identity and proposed runtime path generalized; public placeholders only"
-        - "No operational scripts; offline contract tests do not prove live deployment or wrapper safety"
+        - "Candidate backup/recovery and metadata-only preflight added; no credential executor or runtime promotion"
         - "Exact-item worker contract requires isolated CLI state and restricted-account sync; no per-item sync claimed"
         - "Explicitly forbids export, broad inventory, long-lived sessions, and secret output"
         - "Distinct CapRover/Coolify native paths; encrypted mount and independent recovery gate first start"
         - "Integration separates discovery, private results, writer layers, autofill and caller/session authority"
-        - "Bounded untrusted-backup validation and executor failure-causality matrix remain documentary requirements"
+        - "Bounded archive/SQLite/age/metadata-child tests exercise candidate code; agent executor acceptance remains pending"
       frontmatter_valid: true
       company_agnostic: true
       pitfalls_documented: true
     files:
       - path: "MANIFEST.sha256"
-        size_bytes: 843
+        size_bytes: 1828
         status: "new"
       - path: "README.md"
-        size_bytes: 4677
+        size_bytes: 6073
         status: "new"
       - path: "SKILL.md"
-        size_bytes: 11897
+        size_bytes: 12294
+        status: "new"
+      - path: "references/agent-access-rollout.md"
+        size_bytes: 8119
         status: "new"
       - path: "references/coolify-deployment.md"
         size_bytes: 14162
         status: "new"
       - path: "references/hermes-integration.md"
-        size_bytes: 9105
+        size_bytes: 9361
+        status: "new"
+      - path: "references/operational-learnings.md"
+        size_bytes: 11889
         status: "new"
       - path: "references/vaultwarden-implementation.md"
         size_bytes: 21233
         status: "new"
+      - path: "scripts/agent_access_preflight.py"
+        size_bytes: 9801
+        status: "new"
+      - path: "scripts/backup.py"
+        size_bytes: 34032
+        status: "new"
+      - path: "scripts/verify_signup_ui.py"
+        size_bytes: 4186
+        status: "new"
+      - path: "templates/agent-access-policy.example.json"
+        size_bytes: 468
+        status: "new"
+      - path: "templates/backup-config.example.json"
+        size_bytes: 1313
+        status: "new"
       - path: "templates/coolify.compose.yaml"
         size_bytes: 1580
+        status: "new"
+      - path: "templates/user.vaultwarden.scss.hbs"
+        size_bytes: 550
         status: "new"
       - path: "templates/vaultwarden.env.example"
         size_bytes: 1774
         status: "new"
+      - path: "tests/test_agent_access_preflight.py"
+        size_bytes: 8897
+        status: "new"
+      - path: "tests/test_backup.py"
+        size_bytes: 16005
+        status: "new"
       - path: "tests/test_contract.py"
-        size_bytes: 5623
+        size_bytes: 6009
         status: "new"
       - path: "tests/test_integration_contract.py"
-        size_bytes: 8832
+        size_bytes: 9474
         status: "new"
     changelog:
+      - date: "2026-10-08"
+        action: "operational evidence generalization and dedicated-agent access candidate"
+        details: >
+          Registers reusable backup/restore candidate code, native signup UI stylesheet,
+          temporary-bootstrap reconciliation, scheduler/quota and acceptance boundaries,
+          plus a dedicated-account metadata preflight and disabled exact-item policy.
+          Source and synthetic execution do not prove live credential access or grants.
+          Earlier 0.2.0 approval is preserved as history, not approval of new helpers.
+          No runtime installation, human-password sharing, automatic enrollment or merge.
       - date: "2026-10-07"
         action: "dual-platform and secure integration contract"
         details: >

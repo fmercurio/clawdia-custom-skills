@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "no_prune": true,
+  "credential_vault_name": "replace-with-approved-custody-vault",
+  "proton_wrapper": "/opt/operator/bin/approved-credential-wrapper",
+  "coolify_item": "replace-with-exact-approved-controller-item",
+  "age_recovery_item": "replace-with-exact-approved-recovery-item",
+  "coolify_url": "https://coolify.example.com/api/v1",
+  "resource_uuid": "replace-with-exact-resource",
+  "resource_name": "replace-with-exact-resource-name",
+  "expected_host": "replace-with-verified-host",
+  "ssh_argv": [
+    "ssh",
+    "-o",
+    "BatchMode=yes",
+    "-o",
+    "StrictHostKeyChecking=yes",
+    "replace-with-approved-ssh-alias"
+  ],
+  "data_path": "/srv/encrypted-vault/data",
+  "mount_path": "/srv/encrypted-vault",
+  "restore_parent": "/srv/encrypted-vault/restores",
+  "restore_domain": "https://vault.example.com",
+  "state_root": "/var/lib/vaultwarden-operator",
+  "image": "vaultwarden/server:1.37.4@sha256:efb3cde962015fcc036b2ea625242248611943b27212ebf4392841fb30fad055",
+  "rclone_bin": "/opt/operator/bin/rclone",
+  "age_bin": "/opt/operator/bin/age",
+  "age_recipient": "replace-with-independently-custodied-public-recipient",
+  "backup_remote": "approved-remote:dedicated-backups",
+  "max_archive_bytes": 104857600,
+  "max_expanded_bytes": 268435456,
+  "max_members": 10000
+}
