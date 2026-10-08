@@ -110,7 +110,8 @@ class IntegrationContractTests(unittest.TestCase):
 
     def test_entire_public_package_is_neutral_and_relative_links_resolve(self):
         allowed_hosts = {"vault.example.com", "github.com", "raw.githubusercontent.com", "bitwarden.com",
-                         "caprover.com", "coolify.io", "docs.docker.com", "www.sqlite.org"}
+                         "caprover.com", "coolify.io", "docs.docker.com", "www.sqlite.org",
+                         "hermes-agent.nousresearch.com"}
         sources = [p for p in ROOT.rglob("*") if p.is_file() and p.suffix in {".md", ".yaml", ".example"}]
         self.assertGreaterEqual(len(sources), 7)
         forbidden = (r"/(?:root|home|Users)/", r"~[/\\]", r"\b(?!0\.0\.0\.0\b)(?:\d{1,3}\.){3}\d{1,3}\b",
@@ -127,6 +128,15 @@ class IntegrationContractTests(unittest.TestCase):
                 for link in re.findall(r"\]\(([^)]+)\)", text):
                     if not link.startswith("https://"):
                         self.assertTrue((path.parent / link).is_file(), "broken local reference")
+
+    def test_dedicated_access_preflight_is_not_secrets_manager_or_executor(self):
+        text=(ROOT/'references/agent-access-rollout.md').read_text()
+        for phrase in ('secrets.bitwarden', 'bws', 'bw', 'autodetect',
+                       'same OS user', 'default-scope', 'always', 'not a secret executor'):
+            self.assertIn(phrase.lower(), text.lower())
+        policy=__import__('json').loads((ROOT/'templates/agent-access-policy.example.json').read_text())
+        self.assertIs(policy['enabled'],False)
+        self.assertEqual(policy['account_kind'],'dedicated')
 
     def test_manifest_covers_all_package_files_and_correct_bytes(self):
         manifest = ROOT / "MANIFEST.sha256"

@@ -1,8 +1,8 @@
 ---
 name: vaultwarden-operations
 description: "Use when deploying or operating Vaultwarden safely."
-version: 0.2.0
-status: approved
+version: 0.3.0
+status: candidate
 author: "Repository contributors + Hermes Agent"
 license: MIT
 metadata:
@@ -13,7 +13,7 @@ metadata:
 
 # Vaultwarden Operations
 
-Plan and review Vaultwarden operations through **CapRover or Coolify** without turning an agent into a broad secret reader. This maintainer-approved skill is a procedural contract, not an executable credential integration or a tested credential wrapper. Approval of the skill does not authorize live deployment, installation, enrollment or secret access.
+Plan and review Vaultwarden operations through **CapRover or Coolify** without turning an agent into a broad secret reader. The prior 0.2.0 procedural revision was maintainer-approved; this 0.3.0 source revision is a review candidate. It adds candidate backup/recovery helpers and metadata-only preflight, not an executable credential integration or a tested credential wrapper. Approval of the skill does not authorize live deployment, installation, enrollment or secret access.
 
 ## When to Use
 
@@ -48,7 +48,7 @@ Never request or expose secrets in chat, model-visible MCP/tool results, logs or
    - Completion: one authorized method applied; potentially partial writes reconciled through exact-target readback before retry/fallback.
 4. **Read back effective state.** Verify actual image/digest, canonical domain, TLS, proxy/notification behavior, encrypted mounted recovery unit/database, one writer, registration/invitations and absent/private administration. Persisted admin `config.json` may override env; key names alone prove nothing.
    - Completion: fixed sanitized outcomes match the approved design; enrollment, SMTP/send, native-client and persistence-write tests remain separately scoped.
-5. **Evaluate integration separately.** Distinguish package presence, independently reviewed installation, session availability, active grants and effective destination permission. Read-only MCP or a generic denial cannot prove absence of a writer; unknown remains unknown. No operational wrapper ships here.
+5. **Evaluate integration separately.** Distinguish package presence, independently reviewed installation, session availability, active grants and effective destination permission. Read-only MCP or a generic denial cannot prove absence of a writer; unknown remains unknown. No agent secret-consumption wrapper ships here. Candidate infrastructure helpers are documented separately in [operational learnings](references/operational-learnings.md); review [agent-access rollout](references/agent-access-rollout.md) before proposing enrollment.
    - Completion: private resolution/consumption, exact item/target and all worker cleanup/parent-lock gates independently tested before any real credential use. No broker or autofill fallback expands authority.
 6. **Back up and prove recovery.** Under specific approvals, make database-consistent encrypted off-host backups including required files/configuration; boundedly verify untrusted archives, then perform an isolated restore with no production outbound effects. Recovery key access must not depend on the failed vault/host.
    - Completion: remote artifact/snapshot full check, database integrity and authorized representative restored data/files/workflows verified; a running job is not recovery evidence.
@@ -86,7 +86,7 @@ Run repository validator, catalog generation/check, manifest/file-inventory/neut
 python3 -B -m unittest discover -s skills/devops/vaultwarden-operations/tests -v
 ```
 
-These are offline source/document/template invariants, **not executor, encryption or deployment safety proof**. Validate the selected template with actual platform tooling and synthetic inputs; runtime gates require their own evidence.
+Documentary checks and owned synthetic archive/SQLite/age/metadata-child tests are **not agent executor, live encryption or deployment safety proof**. Validate the selected template with actual platform tooling and synthetic inputs; runtime gates require their own evidence.
 
 - [ ] Exact owner scope and rollback recorded outside public artifacts; no authority inferred from merge/installation.
 - [ ] Selected platform/controller/resource, immutable image, encrypted mount/ownership and protected delivery approved.
