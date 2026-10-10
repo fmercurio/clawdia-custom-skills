@@ -26,7 +26,9 @@ The tests use generated synthetic signing keys, one explicitly fake bearer token
 
 ## Verification
 
-Use a real owned scratch directory on local runs (not a symlinked system temporary directory). CI can use its owned checkout as the synthetic fixture root when no explicit override is set. Directory ancestry restrictions are not relaxed to make a fixture pass.
+Use a real owned scratch directory on local runs (not a symlinked system temporary directory). Tests select explicit `VW_TEST_SCRATCH` first and otherwise the isolated fixture HOME, never the checkout or ambient `TMPDIR`. Preserve the selected path literally: an unsafe explicit scratch is rejected without fallback or symlink normalization. CI validates a private namespace outside checkout ancestry before preparing isolated fixtures; directory ancestry restrictions are never relaxed. Follow [new-instance onboarding](new-instance-onboarding.md) for the exact source gate and dependencies.
+
+The next worker/admission boundary is [source-only preparation, not an operational implementation](private-executor-next-slice.md).
 
 ```sh
 VW_TEST_SCRATCH=/approved/private/scratch python3 -B -m unittest discover \

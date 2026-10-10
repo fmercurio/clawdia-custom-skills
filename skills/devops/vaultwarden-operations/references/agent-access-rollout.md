@@ -46,7 +46,7 @@ A [source-only core](private-consumer-core.md) now exercises signed caller proof
 
 ## Runtime executor still required
 
-Implement and independently review the worker/private consumer as a separate security slice, preserving the matrix in [Hermes integration](hermes-integration.md):
+Implement and independently review the worker/private consumer as a separate security slice, preserving the matrix in [Hermes integration](hermes-integration.md). Start with the [proposed source-only admission/supervision slice](private-executor-next-slice.md), not a real vault adapter; its contract and documentary regressions do not implement or qualify native cleanup:
 
 - bind a real authenticated caller and non-forgeable, operation-specific expiring grant; authenticate before any unlock or external action;
 - enroll a least-visibility service identity, isolate CLI app-data/cache and verify exact parent `locked` without inherited session; `unauthenticated` is not parent-lock acceptance;

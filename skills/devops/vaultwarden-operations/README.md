@@ -26,6 +26,7 @@ Version **0.4.0**, review candidate extending the previously approved 0.2.0 cont
 - [Agent-access rollout](references/agent-access-rollout.md): dedicated-account pilot, native-backend/source separation and remaining executor/enrollment gates.
 - [Backup candidate](scripts/backup.py) and [example configuration](templates/backup-config.example.json): explicit private configuration; default check; mutation requires deliberate apply and separate review/authorization.
 - [Private-consumer core](scripts/private_consumer_core.py) and [security-slice boundaries](references/private-consumer-core.md): synthetic signed-grant/private HTTPS execution only; no Bitwarden connector or runtime activation.
+- [Next private-executor slice](references/private-executor-next-slice.md): proposed synthetic admission/supervision contract, interface choices and separate native/live acceptance gates; not a shipped adapter, CLI/API or activation.
 - [Metadata-only preflight](scripts/agent_access_preflight.py) and [disabled policy example](templates/agent-access-policy.example.json): no login/unlock/sync/items/grants; always blocked for secret use.
 - [Native signup stylesheet](templates/user.vaultwarden.scss.hbs) and [fresh-browser verifier](scripts/verify_signup_ui.py): visual screen closure only; isolated synthetic DOM or actual deployed signup/register/login verification, never a human browser profile.
 - [Environment checklist](templates/vaultwarden.env.example): non-secret non-runnable contract.

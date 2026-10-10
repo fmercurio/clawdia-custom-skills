@@ -43,16 +43,16 @@ skills:
       pitfalls_documented: true
     files:
       - path: "MANIFEST.sha256"
-        size_bytes: 2235
+        size_bytes: 2343
         status: "new"
       - path: "README.md"
-        size_bytes: 6776
+        size_bytes: 7010
         status: "new"
       - path: "SKILL.md"
-        size_bytes: 12721
+        size_bytes: 12908
         status: "new"
       - path: "references/agent-access-rollout.md"
-        size_bytes: 8698
+        size_bytes: 8908
         status: "new"
       - path: "references/coolify-deployment.md"
         size_bytes: 14162
@@ -67,7 +67,10 @@ skills:
         size_bytes: 11889
         status: "new"
       - path: "references/private-consumer-core.md"
-        size_bytes: 6628
+        size_bytes: 7093
+        status: "new"
+      - path: "references/private-executor-next-slice.md"
+        size_bytes: 11070
         status: "new"
       - path: "references/vaultwarden-implementation.md"
         size_bytes: 21233
@@ -106,7 +109,7 @@ skills:
         size_bytes: 16005
         status: "new"
       - path: "tests/test_contract.py"
-        size_bytes: 10189
+        size_bytes: 12836
         status: "new"
       - path: "tests/test_integration_contract.py"
         size_bytes: 9474
@@ -115,6 +118,14 @@ skills:
         size_bytes: 28322
         status: "new"
     changelog:
+      - date: "2026-10-10"
+        action: "source-only private-executor preparation and runbook alignment"
+        details: >
+          Corrects stale checkout-fixture guidance and adds discoverable proposed
+          admission/supervision boundaries, interface choices and documentary
+          regressions. Cross-process custody, hard deadlines and native descendant
+          qualification remain pending; source probes are not operational proof.
+          No core changes, adapter, enrollment, installation, grants or activation.
       - date: "2026-10-10"
         action: "source-only private fixture ancestry repair"
         details: >

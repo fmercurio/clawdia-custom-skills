@@ -80,6 +80,45 @@ class ContractTests(unittest.TestCase):
                        "not vault access"):
             self.assertIn(phrase.lower(), text.lower())
 
+    def test_core_runbook_never_uses_checkout_as_fixture_root(self):
+        text = (ROOT / "references/private-consumer-core.md").read_text()
+        for phrase in ("VW_TEST_SCRATCH", "isolated fixture HOME", "never the checkout",
+                       "unsafe explicit scratch is rejected", "new-instance-onboarding.md"):
+            self.assertIn(phrase.lower(), text.lower())
+        self.assertNotIn("CI can use its owned checkout", text)
+
+    def test_next_slice_contract_is_proposed_not_operational_acceptance(self):
+        guide = ROOT / "references/private-executor-next-slice.md"
+        self.assertTrue(guide.is_file(), "next-slice security contract is missing")
+        text = guide.read_text()
+        for phrase in ("proposed, not implemented", "source-only", "cross-process admission",
+                       "grant expiry is not cancellation", "private worker facade",
+                       "all descendants", "leader exit", "repeated cancellation",
+                       "cleanup uncertainty", "unknown remains unknown",
+                       "exact installed runtime", "no automatic retry", "distinct OS identity",
+                       "independent security review", "no enrollment", "no runtime activation",
+                       "not native process qualification", "parent locked", "not a new CLI or API"):
+            self.assertIn(phrase.lower(), text.lower())
+        for relative in ("SKILL.md", "README.md", "references/agent-access-rollout.md",
+                         "references/private-consumer-core.md"):
+            self.assertIn(guide.name, (ROOT / relative).read_text())
+        for link in re.findall(r"\]\(([^)]+)\)", text):
+            if not link.startswith("https://"):
+                self.assertTrue((guide.parent / link).is_file(), "broken next-slice reference")
+        for pattern in (r"/(?:root|home|Users)/", r"~[/\\]",
+                        r"\b(?:\d{1,3}\.){3}\d{1,3}\b",
+                        r"\b[0-9a-f]{40,64}\b",
+                        r"\b[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\b"):
+            self.assertIsNone(re.search(pattern, text), "non-neutral next-slice marker detected")
+        for url in re.findall(r"https?://[^\s)<>`]+", text):
+            parsed = urlsplit(url)
+            self.assertIn(parsed.hostname, {"hermes-agent.nousresearch.com", "bitwarden.com",
+                                           "github.com"})
+            if parsed.hostname == "github.com":
+                self.assertEqual(parsed.path,
+                                 "/torvalds/linux/blob/master/Documentation/admin-guide/cgroup-v2.rst")
+            self.assertIsNone(parsed.username)
+
     def test_catalog_fixture_harness_is_private_and_fail_closed(self):
         workflow = (REPO / ".github/workflows/catalog-and-validation.yml").read_text()
         step = workflow.split(
