@@ -61,7 +61,7 @@ skills:
         size_bytes: 9361
         status: "new"
       - path: "references/new-instance-onboarding.md"
-        size_bytes: 14511
+        size_bytes: 15839
         status: "new"
       - path: "references/operational-learnings.md"
         size_bytes: 11889
@@ -106,15 +106,23 @@ skills:
         size_bytes: 16005
         status: "new"
       - path: "tests/test_contract.py"
-        size_bytes: 8478
+        size_bytes: 10189
         status: "new"
       - path: "tests/test_integration_contract.py"
         size_bytes: 9474
         status: "new"
       - path: "tests/test_private_consumer_core.py"
-        size_bytes: 21966
+        size_bytes: 28322
         status: "new"
     changelog:
+      - date: "2026-10-10"
+        action: "source-only private fixture ancestry repair"
+        details: >
+          Decouples synthetic ledgers from potentially public checkout ancestry,
+          preserves literal scratch paths and the unchanged private-core gate,
+          validates CI fixture ancestry before isolated HOME/TMPDIR setup, and
+          adds real-core public-checkout, writable-parent and symlink regressions.
+          Candidate only; no operational adapter, installation, grants or activation.
       - date: "2026-10-09"
         action: "new-instance source-only onboarding documentation"
         details: >

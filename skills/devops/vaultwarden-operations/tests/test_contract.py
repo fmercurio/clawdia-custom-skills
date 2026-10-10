@@ -72,6 +72,33 @@ class ContractTests(unittest.TestCase):
                        "no gateway restart", "no credential access"):
             self.assertIn(phrase.lower(), text.lower())
 
+    def test_fixture_handoff_preserves_real_ancestry_and_no_fallback(self):
+        text = (ROOT / "references/new-instance-onboarding.md").read_text()
+        for phrase in ("0700", "root/operator-owned", "writable by group/others",
+                       "sticky", "directory-FD chain", "never the checkout",
+                       "unsafe explicit scratch is rejected", "outer `0700`",
+                       "not vault access"):
+            self.assertIn(phrase.lower(), text.lower())
+
+    def test_catalog_fixture_harness_is_private_and_fail_closed(self):
+        workflow = (REPO / ".github/workflows/catalog-and-validation.yml").read_text()
+        step = workflow.split(
+            "- name: Run Vaultwarden source and synthetic operational tests\n", 1)[1]
+        step = step.split("\n      - name:", 1)[0]
+        for phrase in ("shell: bash", "set -euo pipefail", "umask 077",
+                       'mktemp -d "${HOME:?}/vw-source.XXXXXXXX"',
+                       'trap \'rm -rf -- "$fixture_root"\' EXIT',
+                       "core.private_directory_fd", "os.close(fd)",
+                       'export HOME="$fixture_root/home"',
+                       'TMPDIR="$fixture_root/tmp" VW_TEST_SCRATCH="$fixture_root/tmp"',
+                       "env -u PYTHONPATH -u PYTHONHOME -u BW_SESSION",
+                       "python3 -B -m unittest discover"):
+            self.assertIn(phrase, step)
+        self.assertLess(step.index("core.private_directory_fd"), step.index("mkdir -m 700"))
+        self.assertLess(step.index("mkdir -m 700"), step.index("-m unittest discover"))
+        for forbidden in ("continue-on-error", "${{", "chmod", "|| true"):
+            self.assertNotIn(forbidden, step)
+
     def test_only_explicit_nonsecret_defaults(self):
         values = active_settings(TEMPLATE.read_text())
         self.assertEqual(values, {

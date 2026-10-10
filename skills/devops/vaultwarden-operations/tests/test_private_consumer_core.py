@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import secrets
+import shutil
 import ssl
 import subprocess
 import sys
@@ -19,7 +20,11 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location('private_consumer_core', ROOT/'scripts/private_consumer_core.py')
 assert SPEC is not None and SPEC.loader is not None
-SCRATCH = Path(os.environ.get('VW_TEST_SCRATCH', str(ROOT.parents[2]))).resolve()
+# The checkout can live below a public temporary ancestor. An explicit scratch
+# wins; otherwise use the isolated fixture HOME. The core still validates every
+# real ledger ancestor. Preserve the path literally: do not resolve a symlink
+# or replace an unsafe explicit path with a fallback.
+SCRATCH = Path(os.environ.get('VW_TEST_SCRATCH', str(Path.home())))
 ops = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = ops
 SPEC.loader.exec_module(ops)
@@ -281,6 +286,33 @@ class CoreTests(unittest.TestCase):
             with self.assertRaises(ops.Denied):
                 ops.Authority(secrets.token_bytes(32), {'pilot':self.caller_key}, directory)
 
+    def test_private_ledger_cannot_override_writable_ancestor(self):
+        # Permissive fixtures remain enclosed by the outer owned 0700 scratch.
+        parent = Path(self.tmp.name)/'ancestor'
+        parent.mkdir(mode=0o700)
+        ledger = parent/'ledger';ledger.mkdir(mode=0o700)
+        def open_authority():
+            return ops.Authority(self.issuer_key, {'pilot':self.caller_key}, ledger,
+                                 clock=lambda:self.now)
+        open_authority().close()
+        try:
+            for mode in (0o770, 0o707, 0o777, 0o1777):
+                with self.subTest(ancestor_mode=oct(mode)):
+                    parent.chmod(mode)
+                    self.assertEqual(ledger.stat().st_mode & 0o777, 0o700)
+                    with self.assertRaises(ops.Denied):open_authority()
+                    self.assertEqual(list(ledger.iterdir()), [])
+        finally:parent.chmod(0o700)
+        # Same path and synthetic keys; only restoring ancestry permits use.
+        authority = open_authority()
+        try:
+            grant = authority.issue(self.scope)
+            authority.claim(grant, ops.caller_proof(self.caller_key, grant), self.scope)
+            self.assertTrue(list(ledger.iterdir()))
+            for path in ledger.iterdir():
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        finally:authority.close()
+
     def test_two_authorities_race_for_one_nonce_only_one_claims(self):
         # Same trusted key and custody dir; O_EXCL is the cross-instance admission boundary.
         key = secrets.token_bytes(32)
@@ -432,6 +464,89 @@ class HTTPSFixtureTests(unittest.TestCase):
     def test_header_injection_rejected_before_connection(self):
         with self.assertRaises(ops.Denied):self.consumer(CANARY+'\r\nX-Evil: 1')
         self.assertEqual(self.requests, 0)
+
+
+class ScratchFixtureTests(unittest.TestCase):
+    @contextlib.contextmanager
+    def public_checkout(self):
+        with tempfile.TemporaryDirectory(prefix='vw-scratch-contract-', dir=SCRATCH) as tmp:
+            root = Path(tmp)
+            public = root/'public';public.mkdir(mode=0o700)
+            home = root/'home';home.mkdir(mode=0o700)
+            scratch = root/'scratch';scratch.mkdir(mode=0o700)
+            temp = root/'tmp';temp.mkdir(mode=0o700)
+            checkout = public/'checkout'
+            package = checkout/'skills/devops/vaultwarden-operations'
+            public.chmod(0o777)
+            try:
+                # Copy the actual test/core bytes, not a substitute implementation.
+                for relative in ('scripts/private_consumer_core.py',
+                                 'tests/test_private_consumer_core.py'):
+                    destination = package/relative
+                    destination.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+                    shutil.copyfile(ROOT/relative, destination)
+                    destination.chmod(0o600)
+                    self.assertEqual(destination.read_bytes(), (ROOT/relative).read_bytes())
+                yield checkout, package, home, scratch, temp, public
+            finally:public.chmod(0o700)
+
+    def run_core_suite(self, checkout, package, home, temp, *, scratch=None, full=True):
+        env = os.environ.copy()
+        for name in ('PYTHONPATH', 'PYTHONHOME', 'BW_SESSION', 'VW_TEST_SCRATCH'):
+            env.pop(name, None)
+        env.update(HOME=str(home), HERMES_HOME=str(home/'.hermes'), TMPDIR=str(temp),
+                   PYTHONDONTWRITEBYTECODE='1')
+        if scratch is not None:env['VW_TEST_SCRATCH'] = str(scratch)
+        cases = ['CoreTests', 'HTTPSFixtureTests'] if full else [
+            'CoreTests.test_success_consumes_privately_and_reports_only_fixed_booleans']
+        return subprocess.run(
+            [sys.executable, '-B', str(package/'tests/test_private_consumer_core.py'),
+             *cases, '-v'], cwd=checkout, env=env,
+            capture_output=True, text=True, timeout=60)
+
+    def assert_full_core_passed(self, result):
+        output = result.stdout+result.stderr
+        count = sum(unittest.defaultTestLoader.loadTestsFromTestCase(case).countTestCases()
+                    for case in (CoreTests, HTTPSFixtureTests))
+        self.assertEqual(result.returncode, 0, output)
+        self.assertIn(f'Ran {count} tests', output)
+        self.assertRegex(output, r'\nOK\s*$')
+        self.assertNotIn('skipped', output.lower())
+        self.assertNotIn('ERROR:', output)
+        self.assertNotIn('Traceback', output)
+        self.assertNotIn(CANARY, output)
+
+    def test_isolated_home_runs_real_suite_outside_public_checkout(self):
+        with self.public_checkout() as (checkout, package, home, scratch, temp, public):
+            self.assertEqual(public.stat().st_mode & 0o777, 0o777)
+            result = self.run_core_suite(checkout, package, home, temp)
+            self.assert_full_core_passed(result)
+            self.assertEqual(list(home.iterdir()), [])
+
+    def test_explicit_private_scratch_overrides_even_public_home(self):
+        with self.public_checkout() as (checkout, package, home, scratch, temp, public):
+            untrusted_home = public/'home';untrusted_home.mkdir(mode=0o700)
+            result = self.run_core_suite(checkout, package, untrusted_home, temp,
+                                         scratch=scratch)
+            self.assert_full_core_passed(result)
+            self.assertEqual(list(scratch.iterdir()), [])
+            self.assertEqual(list(untrusted_home.iterdir()), [])
+
+    def test_explicit_public_or_symlink_scratch_is_rejected_without_home_fallback(self):
+        with self.public_checkout() as (checkout, package, home, scratch, temp, public):
+            link = home.parent/'scratch-link';link.symlink_to(scratch)
+            for invalid in (public, link):
+                with self.subTest(scratch=invalid.name):
+                    result = self.run_core_suite(checkout, package, home, temp,
+                                                 scratch=invalid, full=False)
+                    output = result.stdout+result.stderr
+                    self.assertEqual(result.returncode, 1, output)
+                    self.assertIn('Ran 1 test', output)
+                    self.assertIn('FAILED (errors=1)', output)
+                    self.assertIn('private_consumer_core.Denied: authorization_denied', output)
+                    self.assertNotIn('skipped', output.lower())
+                    self.assertEqual(list(home.iterdir()), [])
+                    self.assertEqual(list(scratch.iterdir()), [])
 
 
 if __name__ == '__main__':unittest.main()
