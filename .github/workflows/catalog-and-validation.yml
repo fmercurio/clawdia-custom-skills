@@ -60,7 +60,34 @@ jobs:
 
       # Fixed repository-owned command; no interpolation of PR-controlled input.
       - name: Run Vaultwarden source and synthetic operational tests
-        run: PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s skills/devops/vaultwarden-operations/tests -p "test_*.py" -v
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          # CI-only runner HOME, not the checkout or public RUNNER_TEMP/TMPDIR.
+          fixture_root="$(mktemp -d "${HOME:?}/vw-source.XXXXXXXX")"
+          trap 'rm -rf -- "$fixture_root"' EXIT
+          export VW_TEST_SCRATCH="$fixture_root"
+          # Validate the real ancestry using the unchanged production gate.
+          env -u PYTHONPATH -u PYTHONHOME -u BW_SESSION python3 -B - <<'PY'
+          import importlib.util
+          import os
+          import sys
+          from pathlib import Path
+          spec = importlib.util.spec_from_file_location(
+              'private_consumer_core',
+              Path('skills/devops/vaultwarden-operations/scripts/private_consumer_core.py'))
+          core = importlib.util.module_from_spec(spec)
+          sys.modules[spec.name] = core
+          spec.loader.exec_module(core)
+          fd = core.private_directory_fd(Path(os.environ['VW_TEST_SCRATCH']))
+          os.close(fd)
+          PY
+          mkdir -m 700 "$fixture_root/home" "$fixture_root/tmp"
+          export HOME="$fixture_root/home" HERMES_HOME="$fixture_root/home/.hermes"
+          export TMPDIR="$fixture_root/tmp" VW_TEST_SCRATCH="$fixture_root/tmp"
+          env -u PYTHONPATH -u PYTHONHOME -u BW_SESSION PYTHONDONTWRITEBYTECODE=1 \
+            python3 -B -m unittest discover -s skills/devops/vaultwarden-operations/tests -p "test_*.py" -v
 
       - name: Run llm-wiki staging validator tests
         run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest skills/research/llm-wiki/tests/test_validate_staging.py -v

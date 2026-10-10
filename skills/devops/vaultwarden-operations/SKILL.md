@@ -1,7 +1,7 @@
 ---
 name: vaultwarden-operations
 description: "Use when deploying or operating Vaultwarden safely."
-version: 0.3.0
+version: 0.4.0
 status: candidate
 author: "Repository contributors + Hermes Agent"
 license: MIT
@@ -13,7 +13,7 @@ metadata:
 
 # Vaultwarden Operations
 
-Plan and review Vaultwarden operations through **CapRover or Coolify** without turning an agent into a broad secret reader. The prior 0.2.0 procedural revision was maintainer-approved; this 0.3.0 source revision is a review candidate. It adds candidate backup/recovery helpers and metadata-only preflight, not an executable credential integration or a tested credential wrapper. Approval of the skill does not authorize live deployment, installation, enrollment or secret access.
+Plan and review Vaultwarden operations through **CapRover or Coolify** without turning an agent into a broad secret reader. The prior 0.2.0 procedural revision was maintainer-approved; this 0.4.0 source revision is a review candidate. It adds candidate backup/recovery helpers, metadata-only preflight and a [synthetic private-consumer core](references/private-consumer-core.md), not an executable vault credential integration or a tested Bitwarden credential wrapper. Approval of the skill does not authorize live deployment, installation, enrollment or secret access.
 
 ## When to Use
 
@@ -24,10 +24,11 @@ Plan and review Vaultwarden operations through **CapRover or Coolify** without t
 
 ## Prerequisites
 
+- For a new host/profile, start with [new-instance onboarding](references/new-instance-onboarding.md): verify source/install/session/authority/destination independently, reproduce the isolated source gates and preserve missing executor/enrollment/runtime blockers. Repository presence or a loaded skill is not working credential access.
 - Owner authorization names the exact target, technical purpose, allowed effects, time window, confirmation and rollback in protected operator context, never public artifacts.
 - Maintainer approval for installation/promotion/publication and owner approval for live operations remain separate. Approval of source does not create a runtime grant.
 - Read [common implementation and CapRover](references/vaultwarden-implementation.md), including CLI limitations. For a Coolify target, also read [Coolify deployment](references/coolify-deployment.md); choose one platform path rather than combining controllers. Review companion capabilities at their exact selected revision; existence does not approve installation/use.
-- Read [Hermes integration boundaries](references/hermes-integration.md) before capability discovery, autofill or any proposed agent use. Discover existing reviewed connector/private consumer before inventing a wrapper; no secret reads merely to discover tooling.
+- Read [Hermes integration boundaries](references/hermes-integration.md) before capability discovery, autofill or any proposed agent use. Discover existing reviewed connector/private consumer before inventing a wrapper; no secret reads merely to discover tooling. For source development, use the [proposed next-slice contract](references/private-executor-next-slice.md); it does not implement a vault adapter, private transport or runtime supervisor.
 - Select the official `vaultwarden/server` image with a reviewed stable release and immutable digest; verify image/configuration/database/migration/notification contracts. Do not resolve `latest` during deployment.
 - Identify canonical HTTPS origin, encrypted persistent storage, host trust, supported database, protected delivery and independent recovery before first start.
 - Use [the environment checklist](templates/vaultwarden.env.example) and [Coolify candidate](templates/coolify.compose.yaml) only as non-secret contracts. Never populate a public file with live secrets/configuration. The [operator handoff](README.md) guides inspect → decisions → dry-run → apply.
