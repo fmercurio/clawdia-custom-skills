@@ -37,6 +37,41 @@ class ContractTests(unittest.TestCase):
         self.assertRegex(entry, r'(?m)^      approved: "[0-9]{4}-[0-9]{2}-[0-9]{2}"$')
         self.assertIn('approved_by: "Repository maintainer (explicit authorization)"', entry)
 
+    def test_new_instance_handoff_is_discoverable(self):
+        guide = ROOT / "references/new-instance-onboarding.md"
+        self.assertTrue(guide.is_file(), "new-instance handoff is missing")
+        self.assertIn("references/new-instance-onboarding.md", SKILL.read_text())
+        self.assertIn("references/new-instance-onboarding.md", (ROOT / "README.md").read_text())
+        self.assertIn("skills/devops/vaultwarden-operations/references/new-instance-onboarding.md",
+                      (REPO / "README.md").read_text())
+
+    def test_new_instance_handoff_separates_capability_layers(self):
+        text = (ROOT / "references/new-instance-onboarding.md").read_text()
+        for phrase in ("Source", "Installation", "Session", "Authority", "Destination",
+                       "candidate", "runtime_not_provisioned", "not a new CLI or API",
+                       "same OS user", "no automatic enrollment"):
+            self.assertIn(phrase.lower(), text.lower())
+
+    def test_new_instance_validation_declares_dependencies_and_expected_block(self):
+        text = (ROOT / "references/new-instance-onboarding.md").read_text()
+        for phrase in ("Python 3.12", "serialize", "requirements-dev.txt", "openssl",
+                       "age-keygen", "ACTIONLINT_BIN", "1.7.12", "VW_TEST_SCRATCH", "isolated HOME", "no skips",
+                       "expected exit 2", "--probe-cli", "always blocked"):
+            self.assertIn(phrase.lower(), text.lower())
+        for relative in ("scripts/agent_access_preflight.py", "templates/agent-access-policy.example.json",
+                         "scripts/backup.py", "scripts/private_consumer_core.py",
+                         "scripts/verify_signup_ui.py"):
+            self.assertIn(relative, text)
+            self.assertTrue((ROOT / relative).is_file())
+
+    def test_new_instance_handoff_requires_independent_live_acceptance(self):
+        text = (ROOT / "references/new-instance-onboarding.md").read_text()
+        for phrase in ("distinct OS identity", "secure enrollment", "all descendants",
+                       "cross-process", "parent locked", "off-host", "restore drill",
+                       "read-only build log", "exact head", "unknown", "not live Vaultwarden E2E",
+                       "no gateway restart", "no credential access"):
+            self.assertIn(phrase.lower(), text.lower())
+
     def test_only_explicit_nonsecret_defaults(self):
         values = active_settings(TEMPLATE.read_text())
         self.assertEqual(values, {

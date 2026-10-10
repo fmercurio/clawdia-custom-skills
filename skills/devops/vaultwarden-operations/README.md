@@ -17,6 +17,7 @@ Version **0.4.0**, review candidate extending the previously approved 0.2.0 cont
 
 ## Choose the correct path
 
+- [New-instance onboarding](references/new-instance-onboarding.md): dependency and source checks, five-layer availability ledger, explicit missing runtime/enrollment gates and CI disagreement handling; no automatic installation or access.
 - [Main skill](SKILL.md): safety gates and source of operational decisions.
 - [Common implementation and CapRover](references/vaultwarden-implementation.md): full CapRover flow, CLI limits, effective policy and bounded recovery.
 - [Coolify](references/coolify-deployment.md): native stack/control plane, encrypted-mount startup boundary, ingress/bootstrap and stateful acceptance.

@@ -24,6 +24,7 @@ Plan and review Vaultwarden operations through **CapRover or Coolify** without t
 
 ## Prerequisites
 
+- For a new host/profile, start with [new-instance onboarding](references/new-instance-onboarding.md): verify source/install/session/authority/destination independently, reproduce the isolated source gates and preserve missing executor/enrollment/runtime blockers. Repository presence or a loaded skill is not working credential access.
 - Owner authorization names the exact target, technical purpose, allowed effects, time window, confirmation and rollback in protected operator context, never public artifacts.
 - Maintainer approval for installation/promotion/publication and owner approval for live operations remain separate. Approval of source does not create a runtime grant.
 - Read [common implementation and CapRover](references/vaultwarden-implementation.md), including CLI limitations. For a Coolify target, also read [Coolify deployment](references/coolify-deployment.md); choose one platform path rather than combining controllers. Review companion capabilities at their exact selected revision; existence does not approve installation/use.

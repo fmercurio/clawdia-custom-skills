@@ -11,14 +11,18 @@ estão documentados em [`schemas/capability-catalog/v1/`](schemas/capability-cat
 
 ## Visão geral
 
-Este repo é a **fonte canônica** das skills desenvolvidas, melhoradas ou validadas pela equipe. Skills aqui passaram por auditoria de segurança, conformidade de frontmatter e aprovação humana antes de serem instaladas no runtime Hermes.
+Este repo é a **fonte canônica** das skills desenvolvidas, melhoradas ou validadas pela equipe. Contém revisões com diferentes status de governança, inclusive candidates e materiais ainda não aprovados para instalação. Presença no repositório, publicação e merge não comprovam instalação, disponibilidade na sessão ou autorização de uso no runtime Hermes.
+
+## Novas instâncias e disponibilidade de features
+
+Para Vaultwarden, comece pelo [guia de onboarding de novas instâncias](skills/devops/vaultwarden-operations/references/new-instance-onboarding.md). Ele separa fonte, instalação, sessão, autoridade e destino; lista dependências e verificações reproduzíveis; e explicita os gates de promoção, enrollment seguro, runtime e piloto real. A candidata 0.4.0 inclui helpers e um core sintético, **não** um adaptador operacional de cofre. Não há instalação, enrollment, grant ou ativação automática.
 
 ## Estrutura
 
 ```
 custom-skills/
 ├── README.md                        # Este arquivo
-├── skills/                          # Skills aprovadas, organizadas por categoria
+├── skills/                          # Skills curadas, com status explícito de governança
 │   └── <category>/
 │       └── <skill-name>/
 │           ├── SKILL.md             # Skill principal

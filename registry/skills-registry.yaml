@@ -43,13 +43,13 @@ skills:
       pitfalls_documented: true
     files:
       - path: "MANIFEST.sha256"
-        size_bytes: 2131
+        size_bytes: 2235
         status: "new"
       - path: "README.md"
-        size_bytes: 6537
+        size_bytes: 6776
         status: "new"
       - path: "SKILL.md"
-        size_bytes: 12384
+        size_bytes: 12721
         status: "new"
       - path: "references/agent-access-rollout.md"
         size_bytes: 8698
@@ -59,6 +59,9 @@ skills:
         status: "new"
       - path: "references/hermes-integration.md"
         size_bytes: 9361
+        status: "new"
+      - path: "references/new-instance-onboarding.md"
+        size_bytes: 14511
         status: "new"
       - path: "references/operational-learnings.md"
         size_bytes: 11889
@@ -103,7 +106,7 @@ skills:
         size_bytes: 16005
         status: "new"
       - path: "tests/test_contract.py"
-        size_bytes: 6110
+        size_bytes: 8478
         status: "new"
       - path: "tests/test_integration_contract.py"
         size_bytes: 9474
@@ -112,6 +115,12 @@ skills:
         size_bytes: 21966
         status: "new"
     changelog:
+      - date: "2026-10-09"
+        action: "new-instance source-only onboarding documentation"
+        details: >
+          Adds reproducible validation dependencies, five-layer availability evidence,
+          staged installation/enrollment/runtime/pilot gates and CI observer handling.
+          No source promotion, real vault adapter, grants or runtime activation.
       - date: "2026-10-08"
         action: "synthetic private-consumer security-core candidate"
         details: >
