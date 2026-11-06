@@ -650,9 +650,10 @@ def collect_metrics(
             examples,
         )
 
-    # Failed/body_only contexts.
+    # Transport failures, local-only annotations, and insufficient source text.
     failed_context_rows: List[Dict[str, Any]] = []
     body_only_context_rows: List[Dict[str, Any]] = []
+    insufficient_context_rows: List[Dict[str, Any]] = []
     if context_status_col:
         q = f"SELECT id, {context_link_key}, {context_status_col} FROM link_contexts"
         for row in conn.execute(q):
@@ -668,7 +669,7 @@ def collect_metrics(
                 ).fetchone()
                 link_id = int(link_ref[0]) if link_ref is not None else None
 
-            if status not in {"failed", "body_only"}:
+            if status not in {"failed", "body_only", "metadata_only", "insufficient_text", "empty", "unsupported_content_type"}:
                 continue
 
             url = conn.execute(
@@ -684,8 +685,10 @@ def collect_metrics(
                 entry["url"] = normalize_url(url[0])
             if status == "failed":
                 failed_context_rows.append(entry)
-            else:
+            elif status == "body_only":
                 body_only_context_rows.append(entry)
+            else:
+                insufficient_context_rows.append(entry)
 
     if failed_context_rows:
         append_finding(
@@ -707,6 +710,17 @@ def collect_metrics(
             "Some links were only captured from message body.",
             {"count": len(body_only_context_rows)},
             body_only_context_rows,
+        )
+
+    if insufficient_context_rows:
+        append_finding(
+            findings,
+            "attention",
+            "attention.insufficient_contexts",
+            "Insufficient source captures",
+            "Some captures have only metadata, insufficient text, or unsupported content.",
+            {"count": len(insufficient_context_rows)},
+            insufficient_context_rows,
         )
 
     # Recent + inbox window counts.
@@ -816,6 +830,7 @@ def collect_metrics(
         "duplicate_groups": duplicates,
         "failed_contexts": failed_context_rows,
         "body_only_contexts": body_only_context_rows,
+        "insufficient_contexts": insufficient_context_rows,
         "recent_items": {
             "window_days": days,
             "window_start": window_start.isoformat(),

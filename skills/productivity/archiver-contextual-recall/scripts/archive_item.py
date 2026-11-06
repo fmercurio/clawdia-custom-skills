@@ -15,6 +15,7 @@ from pathlib import Path
 from archiver_db import (
     DB,
     VAULT,
+    capture_context_fields,
     collect_urls_and_context,
     connect,
     ensure_private_directory,
@@ -48,16 +49,11 @@ def _context_from_link(url: str, body: str, source: str, context: str) -> tuple[
     return "Contexto da mensagem", url
 
 
-def _merge_summaries(base: str, addition: str | None) -> str:
-    base = base.strip()
-    if not addition:
-        return base
-    addition = addition.strip()
-    if not addition or addition == base:
-        return base
-    if not base:
-        return addition[:1500]
-    return f"{base}\n{addition}"[:1500]
+def _explicit_labels(values: list[str]) -> list[str]:
+    labels = list(dict.fromkeys(value.strip() for value in values if value.strip()))
+    if len(labels) > 32 or any(len(value) > 256 for value in labels):
+        raise ValueError("At most 32 labels of 256 characters are allowed per field")
+    return labels
 
 
 def main() -> int:
@@ -67,6 +63,8 @@ def main() -> int:
     parser.add_argument("--tags", default="")
     parser.add_argument("--body", default="")
     parser.add_argument("--status", default="inbox")
+    parser.add_argument("--capability", action="append", default=[], help="Explicit capability; repeatable, not inferred")
+    parser.add_argument("--use-case", action="append", default=[], help="Explicit use case; repeatable, not inferred")
     parser.add_argument("--no-extract", action="store_true", help="Desativa extração automática de contexto de links")
     parser.add_argument("--json", action="store_true", help="Emite saída JSON")
     args = parser.parse_args()
@@ -80,6 +78,8 @@ def main() -> int:
     body = args.body.strip() or "_Sem corpo ainda._"
     try:
         links = collect_urls_and_context(body, args.source)
+        capabilities = _explicit_labels(args.capability)
+        use_cases = _explicit_labels(args.use_case)
     except ValueError as exc:
         parser.error(str(exc))
 
@@ -91,6 +91,8 @@ title: {json.dumps(args.title, ensure_ascii=False)}
 created: {json.dumps(now)}
 source: {json.dumps(args.source, ensure_ascii=False)}
 tags: {yaml_list(tags)}
+capabilities: {yaml_list(capabilities)}
+use_cases: {yaml_list(use_cases)}
 status: {json.dumps(args.status)}
 ---
 
@@ -115,8 +117,8 @@ status: {json.dumps(args.status)}
     con = connect(DB)
     ensure_schema(con)
     cur = con.execute(
-        "INSERT INTO items(title, source, path, tags, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (args.title, args.source, str(path.relative_to(VAULT)), json.dumps(tags, ensure_ascii=False), args.status, now, now),
+        "INSERT INTO items(title, source, path, tags, status, created_at, updated_at, capabilities, use_cases) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (args.title, args.source, str(path.relative_to(VAULT)), json.dumps(tags, ensure_ascii=False), args.status, now, now, json.dumps(capabilities, ensure_ascii=False), json.dumps(use_cases, ensure_ascii=False)),
     )
     item_id = cur.lastrowid
     context_count = 0
@@ -141,29 +143,31 @@ status: {json.dumps(args.status)}
         error = None
         keywords: list[str] = []
         description = context_title
+        capture = capture_context_fields({
+            "capture_quality": "unknown",
+            "capture_coverage": "none",
+            "capture_metadata": {"schema": "archiver-capture.v1", "method": "not_requested"},
+        })
 
         if not args.no_extract:
             try:
                 result = extract_url_context(url, timeout=5)
+                capture = capture_context_fields(result)
                 extractor = result.get("extractor")
                 extracted_title = result.get("title") if isinstance(result.get("title"), str) else None
                 extracted_text = result.get("extracted_text") if isinstance(result.get("extracted_text"), str) else None
                 keywords = result.get("keywords") if isinstance(result.get("keywords"), list) else []
                 error = result.get("error")
                 status = str(result.get("context_status", "failed"))
+                context_status = status if status in {"extracted", "metadata_only", "insufficient_text", "failed", "unsupported_content_type", "empty"} else "failed"
+                description = result.get("description") if isinstance(result.get("description"), str) else context_title
                 if status == "extracted":
-                    context_status = "extracted"
-                    summary = _merge_summaries(summary, result.get("summary") if isinstance(result.get("summary"), str) else None)
-                    description = result.get("description") if isinstance(result.get("description"), str) else context_title
                     extracted_context_count += 1
-                elif status == "unsupported_content_type":
-                    context_status = "body_only"
-                else:
-                    context_status = "failed"
             except Exception as exc:  # pragma: no cover - defensive fallback
                 context_status = "failed"
                 extractor = "urllib.request"
                 error = str(exc)
+                capture = capture_context_fields({"capture_quality": "unknown", "capture_coverage": "none", "capture_metadata": {"schema": "archiver-capture.v1", "method": "failed"}})
 
         upsert_link_context(
             con,
@@ -177,6 +181,8 @@ status: {json.dumps(args.status)}
             extractor=extractor,
             error=error,
             keywords=keywords,
+            user_context=args.body.strip(),
+            **capture,
         )
         context_count += 1
 
@@ -190,9 +196,12 @@ status: {json.dumps(args.status)}
 
     if args.json:
         print(json.dumps({
+            "item_id": item_id,
             "title": args.title,
             "source": args.source,
             "tags": tags,
+            "capabilities": capabilities,
+            "use_cases": use_cases,
             "status": args.status,
             "path": str(path),
             "created_at": now,

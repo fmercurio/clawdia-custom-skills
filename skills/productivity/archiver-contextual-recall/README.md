@@ -2,6 +2,65 @@
 
 Profile-agnostic Archiver package with deterministic review artifacts and runtime-safe recovery checks.
 
+**v1.3.0 source candidate — not an instruction to deploy or migrate a live archive.**
+
+## Capture and recall foundation
+
+- HTML capture ignores executable/style/template and structural navigation noise while retaining visible technical code. Metadata-only/insufficient pages are not reported as useful extracted text. Plain text is not parsed as HTML.
+- Capture reports `capture_quality`, `capture_coverage`, and versioned `capture_metadata` with observed bounds/provenance. These are deterministic parser heuristics, not human review or factual validation. `extracted` alone on an old row does not prove useful content.
+- The automatic summary is a **prefix**, not an LLM or curated synthesis. New intake stores it as `source_summary`; `user_context` preserves the supplied annotation separately. Legacy mixed `summary` values remain unchanged and are not retroactively assigned authorship.
+- `--capability` and `--use-case` are repeatable explicit labels, stored on the item and in Markdown frontmatter. They are never inferred from keywords or treated as verified practical capabilities.
+- Recall searches titles (including the extracted title), descriptions, tags, keywords, annotations, source text and explicit labels. It uses the existing FTS5 index where available with a lexical fallback for old/missing indexes. It does not rebuild an index during search.
+- Query results keep relevance through SQLite/Markdown merging and expose matched fields, a bounded snippet and score. Empty-query listing remains chronological. Legacy capture quality/coverage stays `unknown`.
+- Search is lexical, accent-insensitive, and optionally assisted by FTS5/BM25; it is not semantic retrieval or automatic PT/EN translation. Up to 12 meaningful query tokens of 48 characters participate; snippets are at most 240 characters. The small-vault implementation scans eligible rows/notes before ranking instead of excluding old matches, so scan cost grows with the archive. Output honors the requested positive limit. Same-note results never borrow capture quality from a different source URL.
+- Read-only connections use SQLite URI `mode=ro` plus `query_only`, with no schema migration or chmod on read/close. These CLI helpers retain the existing descriptor-pinned connection lifecycle, which changes the process working directory until close; they are not a thread-safe connection-pool API. SQLite WAL reader coordination is not a promise of immutable live sidecar bytes.
+- Explicit re-extraction preserves an existing successful source capture if a new attempt fails or drops known quality. Weekly review flags metadata-only/insufficient/unsupported source captures. Backfill snapshots committed SQLite state, including WAL data, **before** adding schema columns.
+
+### Additive storage contract
+
+The writer adds `items.capabilities` / `use_cases` (JSON arrays), plus
+`link_contexts.user_context`, `source_summary`, `capture_quality`,
+`capture_coverage`, and `capture_metadata` (JSON object). New fields on legacy
+rows default to empty/unknown; migration does not re-fetch or fabricate evidence.
+The legacy `items`, `links`, `link_contexts`, IDs, URLs and notes remain.
+
+`capture_quality`: `usable`, `limited`, `metadata_only`, `empty`, `unknown`.
+`capture_coverage`: `bounded_text`, `truncated`, `metadata_only`, `none`, `unknown`.
+The metadata schema is `archiver-capture.v1`. It describes observed transport,
+parser method and truncation; it does not claim the entire page/site/video was
+read. Keep capture status separate from editorial review and evaluation/adoption.
+
+HTML capture is a static-parser heuristic, not a rendered-browser or CSS-cascade
+inspection. Obvious hidden ancestors remain excluded, even around a nested
+`main`/`article`; malformed wrappers are not guessed visible. Preferred empty
+regions fall back to other visible text. Visible text below 200 characters is
+`limited`, while known exact loading/JavaScript placeholders are
+`insufficient_text`. JavaScript execution, OCR, video inspection and full-site
+coverage are not provided. Invalid legacy quality/coverage labels return
+`unknown`, not review/adoption or complete-coverage claims.
+
+Example for an **isolated**, explicitly selected archive:
+
+```bash
+ARCHIVER_HOME=/path/to/disposable-archive \
+python3 "$ARCHIVER_SKILL_DIR/scripts/archive_item.py" \
+  --title "Video editing reference" --source "https://example.com/editor" \
+  --body "Potential candidate; not installed or tested." \
+  --capability "video editing" --use-case "improve a draft video" \
+  --no-extract --json
+```
+
+### Deliberately outside this slice
+
+No automatic duplicate merging, source-identity migration, append-only capture
+ledger, concurrent resend idempotency, embeddings, bulk refresh, runtime sync,
+or deployment. Intake still creates one item per invocation; check for an
+existing source before calling it. Distinct documentation/repository notes can
+legitimately reference the same product. Filesystem+database intake is not a
+cross-resource atomic transaction; operational recovery remains necessary after
+an interrupted writer. Do not present a source candidate as production-ready
+without a separately authorized backup/restore and promotion rehearsal.
+
 ## Overview (progressive disclosure)
 
 ### Install from Hermes Hub
@@ -106,8 +165,9 @@ All payloads are stable and written atomically with mode `0600`. Same-day re-run
 
 ```bash
 python3 tools/validate_skill.py skills/productivity/archiver-contextual-recall/SKILL.md
-python3 -m pytest skills/productivity/archiver-contextual-recall/tests/test_archive_weekly_review.py
+python3 -m pytest -q skills/productivity/archiver-contextual-recall/tests
 python3 -m py_compile \
   skills/productivity/archiver-contextual-recall/scripts/*.py \
-  skills/productivity/archiver-contextual-recall/tests/test_archive_weekly_review.py
+  skills/productivity/archiver-contextual-recall/tests/*.py
+python3 tools/generate_catalog.py --check
 ```

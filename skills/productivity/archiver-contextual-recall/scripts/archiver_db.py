@@ -9,7 +9,7 @@ import re
 import sqlite3
 import stat
 from pathlib import Path
-from typing import Literal
+from typing import Literal, TypedDict
 from urllib.parse import quote
 
 def _env_path(name: str, default: Path) -> Path:
@@ -63,7 +63,7 @@ def _secure_open_flags() -> tuple[int, int]:
     return os.O_RDONLY | nofollow, os.O_RDONLY | directory | nofollow
 
 
-def _open_private_directory(path: Path | str, *, create: bool) -> tuple[Path, int]:
+def _open_private_directory(path: Path | str, *, create: bool, restrict_permissions: bool = True) -> tuple[Path, int]:
     """Open ``path`` without following any component and return its descriptor."""
     target = _canonical_private_path(path)
     if target == Path(target.anchor):
@@ -101,7 +101,8 @@ def _open_private_directory(path: Path | str, *, create: bool) -> tuple[Path, in
             raise ValueError(f"Archiver path is not a real directory: {target}")
         if directory_stat.st_uid != os.geteuid():
             raise ValueError(f"Archiver directory must be owned by the effective user: {target}")
-        os.fchmod(current_fd, 0o700)
+        if restrict_permissions:
+            os.fchmod(current_fd, 0o700)
         return target, current_fd
     except Exception:
         os.close(current_fd)
@@ -208,6 +209,7 @@ class _PinnedArchiverConnection(sqlite3.Connection):
         self._archiver_parent_fd = kwargs.pop("archiver_parent_fd")
         self._archiver_restore_fd = kwargs.pop("archiver_restore_fd")
         self._archiver_db_name = kwargs.pop("archiver_db_name")
+        self._archiver_readonly = kwargs.pop("archiver_readonly")
         super().__init__(*args, **kwargs)
 
     def _release_directory(self) -> None:
@@ -223,12 +225,12 @@ class _PinnedArchiverConnection(sqlite3.Connection):
 
     def close(self) -> None:
         try:
-            if self._archiver_parent_fd is not None:
+            if self._archiver_parent_fd is not None and not self._archiver_readonly:
                 _restrict_sqlite_permissions_at(self._archiver_parent_fd, self._archiver_db_name)
             super().close()
         finally:
             try:
-                if self._archiver_parent_fd is not None:
+                if self._archiver_parent_fd is not None and not self._archiver_readonly:
                     _restrict_sqlite_permissions_at(self._archiver_parent_fd, self._archiver_db_name)
             finally:
                 self._release_directory()
@@ -245,7 +247,9 @@ def _connect_anchored(db: Path | str, *, readonly: bool) -> sqlite3.Connection:
     target = _canonical_private_path(db)
     if target.name in {"", ".", ".."}:
         raise ValueError(f"Archiver database name is unsafe: {target}")
-    _parent_path, parent_fd = _open_private_directory(target.parent, create=not readonly)
+    _parent_path, parent_fd = _open_private_directory(
+        target.parent, create=not readonly, restrict_permissions=not readonly
+    )
     restore_fd: int | None = None
     try:
         try:
@@ -272,6 +276,7 @@ def _connect_anchored(db: Path | str, *, readonly: bool) -> sqlite3.Connection:
                     archiver_parent_fd=parent_fd,
                     archiver_restore_fd=restore_fd,
                     archiver_db_name=target.name,
+                    archiver_readonly=readonly,
                     **kwargs,
                 )
 
@@ -282,6 +287,9 @@ def _connect_anchored(db: Path | str, *, readonly: bool) -> sqlite3.Connection:
         )
         if not readonly:
             _restrict_sqlite_permissions_at(parent_fd, target.name)
+            connection.execute("PRAGMA foreign_keys=ON")
+        else:
+            connection.execute("PRAGMA query_only=ON")
         return connection
     except Exception:
         if restore_fd is not None:
@@ -411,6 +419,11 @@ _LEGACY_LINK_CONTEXTS_MIGRATIONS: tuple[tuple[str, str], ...] = (
     ("error", "TEXT"),
     ("created_at", "TEXT"),
     ("updated_at", "TEXT"),
+    ("user_context", "TEXT"),
+    ("source_summary", "TEXT"),
+    ("capture_quality", "TEXT NOT NULL DEFAULT 'unknown'"),
+    ("capture_coverage", "TEXT NOT NULL DEFAULT 'unknown'"),
+    ("capture_metadata", "TEXT NOT NULL DEFAULT '{}'"),
 )
 
 
@@ -566,6 +579,10 @@ def _ensure_fts_contexts(con: sqlite3.Connection) -> None:
 
 def ensure_schema(con: sqlite3.Connection) -> None:
     _ensure_core_tables(con)
+    item_columns = set(table_columns(con, "items"))
+    for column in ("capabilities", "use_cases"):
+        if column not in item_columns:
+            con.execute(f"ALTER TABLE items ADD COLUMN {column} TEXT NOT NULL DEFAULT '[]'")
     _ensure_link_contexts(con)
     _migrate_legacy_link_contexts(con)
     _ensure_indexes(con)
@@ -579,6 +596,31 @@ def _normalize_keywords(keywords: list[str] | tuple[str, ...] | str | None) -> s
     if isinstance(keywords, str):
         return keywords
     return json.dumps([str(k) for k in keywords], ensure_ascii=False)
+
+
+CAPTURE_QUALITIES = frozenset({"usable", "limited", "metadata_only", "empty", "unknown"})
+CAPTURE_COVERAGES = frozenset({"bounded_text", "truncated", "metadata_only", "none", "unknown"})
+
+
+class CaptureContextFields(TypedDict):
+    source_summary: str | None
+    capture_quality: str
+    capture_coverage: str
+    capture_metadata: dict[str, object]
+
+
+def capture_context_fields(result: dict[str, object]) -> CaptureContextFields:
+    """Project parser observations without inventing provenance for old parsers."""
+    quality = result.get("capture_quality", "unknown")
+    coverage = result.get("capture_coverage", "unknown")
+    summary = result.get("summary")
+    metadata = result.get("capture_metadata")
+    return {
+        "source_summary": summary if isinstance(summary, str) else None,
+        "capture_quality": quality if isinstance(quality, str) and quality in CAPTURE_QUALITIES else "unknown",
+        "capture_coverage": coverage if isinstance(coverage, str) and coverage in CAPTURE_COVERAGES else "unknown",
+        "capture_metadata": metadata if isinstance(metadata, dict) else {},
+    }
 
 
 def upsert_link_context(
@@ -595,41 +637,40 @@ def upsert_link_context(
     extractor: str | None = None,
     error: str | None = None,
     now: str | None = None,
+    user_context: str | None = None,
+    source_summary: str | None = None,
+    capture_quality: str | None = None,
+    capture_coverage: str | None = None,
+    capture_metadata: dict[str, object] | None = None,
 ) -> None:
-    if not now:
-        now = now_iso()
+    """Upsert legacy fields; omitted additive metadata preserves prior values."""
+    if capture_quality is not None and capture_quality not in CAPTURE_QUALITIES:
+        raise ValueError("Invalid capture quality")
+    if capture_coverage is not None and capture_coverage not in CAPTURE_COVERAGES:
+        raise ValueError("Invalid capture coverage")
+    if capture_metadata is not None and not isinstance(capture_metadata, dict):
+        raise ValueError("Capture metadata must be an object")
+    now = now or now_iso()
+    values: dict[str, object] = {
+        "link_id": link_id, "url": url, "title": title, "description": description,
+        "extracted_text": extracted_text, "summary": summary,
+        "keywords": _normalize_keywords(keywords), "context_status": context_status,
+        "extractor": extractor, "error": error, "created_at": now, "updated_at": now,
+    }
+    optional: dict[str, object] = {
+        "user_context": user_context, "source_summary": source_summary,
+        "capture_quality": capture_quality, "capture_coverage": capture_coverage,
+        "capture_metadata": json.dumps(capture_metadata, ensure_ascii=False, allow_nan=False) if capture_metadata is not None else None,
+    }
+    values.update({key: value for key, value in optional.items() if value is not None})
+    # Identifiers come only from these fixed dictionaries; all data is bound.
+    columns = ", ".join(values)
+    placeholders = ", ".join("?" for _ in values)
+    updates = ", ".join(f"{key}=excluded.{key}" for key in values if key not in {"link_id", "created_at"})
     con.execute(
-        """
-        INSERT INTO link_contexts(
-            link_id, url, title, description, extracted_text, summary, keywords,
-            context_status, extractor, error, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(link_id) DO UPDATE SET
-            url = excluded.url,
-            title = excluded.title,
-            description = excluded.description,
-            extracted_text = excluded.extracted_text,
-            summary = excluded.summary,
-            keywords = excluded.keywords,
-            context_status = excluded.context_status,
-            extractor = excluded.extractor,
-            error = excluded.error,
-            updated_at = excluded.updated_at
-        """,
-        (
-            link_id,
-            url,
-            title,
-            description,
-            extracted_text,
-            summary,
-            _normalize_keywords(keywords),
-            context_status,
-            extractor,
-            error,
-            now,
-            now,
-        ),
+        f"INSERT INTO link_contexts({columns}) VALUES ({placeholders}) "
+        f"ON CONFLICT(link_id) DO UPDATE SET {updates}",
+        tuple(values.values()),
     )
 
 
