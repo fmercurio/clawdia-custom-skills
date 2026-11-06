@@ -89,6 +89,20 @@ class CapRoverCandidatesWorkflowContractTests(unittest.TestCase):
         end = documentation.index("```", start)
         return documentation[start:end]
 
+    def test_pins_supported_runner_for_pinned_playwright(self) -> None:
+        self.assertEqual(self.job["runs-on"], "ubuntu-24.04")
+        dependencies = self.steps_by_name["Install Python test dependencies"]["run"]
+        self.assertIn("playwright==1.58.0", dependencies)
+
+    def test_documents_browser_fixture_runner_compatibility(self) -> None:
+        documentation = CONTRIBUTING.read_text(encoding="utf-8")
+        heading = "### Fixtures de navegador do CapRover"
+        self.assertIn(heading, documentation)
+        section = documentation.split(heading, 1)[1].split("\n### ", 1)[0]
+        self.assertIn("`ubuntu-24.04`", section)
+        self.assertIn("`playwright==1.58.0`", section)
+        self.assertIn("`ubuntu-latest`", section)
+
     def test_pins_playwright_and_provisions_chromium_before_fixture_suites(self) -> None:
         self.assertIn("Install Playwright Chromium", self.steps_by_name)
         python_dependencies = self.steps_by_name["Install Python test dependencies"]

@@ -73,6 +73,20 @@ Rode também os testes relevantes à área modificada. Quando houver testes Pyte
 python3 -m pytest caminho/para/tests
 ```
 
+### Fixtures de navegador do CapRover
+
+O job `CapRover Local Fixtures` usa `ubuntu-24.04` com `playwright==1.58.0`.
+O sistema operacional é fixado porque `ubuntu-latest` pode avançar para uma
+versão ainda incompatível com o Playwright fixado. O suporte a Ubuntu 24.04
+está declarado na [matriz da versão 1.58.0](https://github.com/microsoft/playwright/blob/v1.58.0/packages/playwright-core/src/server/utils/hostPlatform.ts)
+e nas [dependências nativas dessa versão](https://github.com/microsoft/playwright/blob/v1.58.0/packages/playwright-core/src/server/registry/nativeDeps.ts).
+
+Ao atualizar Playwright, reavalie o pin do runner com a matriz da versão escolhida.
+Não substitua a correção de compatibilidade por `continue-on-error`, remoção de
+suites ou retries para obter verde. Os testes locais de contrato e `actionlint`
+não comprovam a instalação do Chromium nem a execução das fixtures no Linux:
+o CI do head final deve instalar o navegador e executar as suites completas.
+
 ### Validação semântica de workflows
 
 O CI usa `actionlint` 1.7.12 para validar a sintaxe, o schema e os contextos de

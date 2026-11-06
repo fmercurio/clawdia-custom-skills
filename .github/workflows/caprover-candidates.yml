@@ -12,7 +12,8 @@ permissions:
 jobs:
   caprover-local-fixtures:
     name: CapRover Local Fixtures
-    runs-on: ubuntu-latest
+    # Keep the runner OS within the pinned Playwright version's support matrix.
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
       CI: "1"
