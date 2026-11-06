@@ -88,6 +88,7 @@ class CapRoverCandidatesWorkflowContractTests(unittest.TestCase):
         return documentation[start:end]
 
     def test_pins_playwright_and_provisions_chromium_before_fixture_suites(self) -> None:
+        self.assertEqual(self.job["runs-on"], "ubuntu-24.04")
         self.assertIn("Install Playwright Chromium", self.steps_by_name)
         python_dependencies = self.steps_by_name["Install Python test dependencies"]
         browser_install = self.steps_by_name["Install Playwright Chromium"]
