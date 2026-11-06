@@ -1,7 +1,7 @@
 ---
 name: archiver-contextual-recall
-description: Use when you need generic Archiver intake, contextual recall, and deterministic weekly health reviews.
-version: 1.2.1
+description: Use when capturing or recalling archived references.
+version: 1.3.0
 author: Felippe M. and Skills Lab
 license: MIT
 metadata:
@@ -48,11 +48,15 @@ The complete executable bundle currently receives an expected `CAUTION` verdict 
 
 - Use `archive_item.py` for new notes/links.
 - Use `--no-extract` for deterministic ingestion in restricted environments.
+- Keep local annotation separate from the automatic source prefix. Capture quality and coverage are observations, not editorial review or practical evaluation.
+- Supply repeatable `--capability` / `--use-case` labels only when explicitly supported by the provided context; do not infer adoption from a vendor claim.
 
 3. **Recall**
 
 - Use `archiver_recall.py` for query-based retrieval.
 - Recall is read-only: `archiver_recall.py` opens the archive DB in read-only mode, performs dynamic column/table checks, and never mutates schema.
+- Verify the installed code rather than relying on this statement for legacy runtimes: older copies can initialize schema or change permissions during recall. Validate in an isolated copy first.
+- Rank queries by relevance across SQLite and Markdown; empty-query listings remain newest-first. Treat matches as references, never as proof that a resource was tested.
 
 4. **Review**
 
@@ -162,6 +166,16 @@ python3 "${ARCHIVER_SKILL_DIR}/scripts/backfill_link_contexts.py" --extract-exis
 - Index loading is fail-closed for malformed JSON or invalid schema unless `--recover-index` is explicitly set.
 - All artifacts are deterministic and written atomically with mode `0600` where applicable.
 - Same-day reruns replace only same-day review entries in `index.json`.
+
+## Candidate lifecycle and limits
+
+- Version 1.3.0 is a source candidate, not a runtime deployment. See README for the additive capture fields and verification contract.
+- Keep original URLs, item IDs and existing notes. Do not automatically consolidate duplicate URLs: separate notes may legitimately cite the same source.
+- Querying never upgrades legacy rows. Unknown quality/provenance stays unknown until separately authorized re-extraction or curation.
+- A writer initializes/adds its required columns. Back up and rehearse against a copy before allowing the new writer to touch an existing archive; source approval does not authorize migration or runtime synchronization.
+- New intake still creates an item per invocation. Source identity, append-only capture history, concurrent resend idempotency, and typed relations are a separate future slice.
+- A successful extraction is bounded text, not proof of a complete page, accurate claims, media inspection, installation, security audit, or adoption.
+- Keep copied archives, private evidence and local deployment details outside the public source package.
 
 ## Public/private boundary
 

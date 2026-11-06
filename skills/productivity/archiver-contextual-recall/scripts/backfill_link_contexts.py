@@ -12,6 +12,7 @@ from pathlib import Path
 from archiver_db import (
     DB,
     VAULT,
+    capture_context_fields,
     connect,
     connect_readonly,
     ensure_schema,
@@ -89,15 +90,6 @@ def collect_links_from_text(text: str, source: str) -> list[tuple[str, str]]:
     return collect_urls_and_context(text, source)
 
 
-def merge_summaries(base: str | None, addition: str | None) -> str:
-    base = (base or "").strip()
-    addition = (addition or "").strip()
-    if not addition or addition == base:
-        return base
-    if not base:
-        return addition[:1500]
-    return f"{base}\n{addition}"[:1500]
-
 
 def iter_notes(vault: Path):
     for md_path in vault.rglob("*.md"):
@@ -118,13 +110,17 @@ def add_backup(path: Path) -> str | None:
     if not path.exists() or path.is_symlink() or not path.is_file():
         return None
     stamp = dt.datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
-    content = path.read_bytes()
     counter = 1
     while True:
         suffix = "" if counter == 1 else f"-{counter}"
         backup = path.with_name(f"{path.name}.pre-context-{stamp}{suffix}.bak")
         try:
-            write_private_bytes_exclusive(backup, content)
+            # Copy a consistent SQLite snapshot, including committed WAL data,
+            # into an exclusively reserved private file before any migration.
+            write_private_bytes_exclusive(backup, b"")
+            with connect_readonly(path) as source:
+                with connect(backup) as target:
+                    source.backup(target)
             return str(backup)
         except FileExistsError:
             counter += 1
@@ -225,7 +221,7 @@ def extract_existing_contexts(
         join_sql = "LEFT JOIN link_contexts lc ON lc.link_id = l.id"
         where_clauses = ["l.id > ?"]
         if not force:
-            where_clauses.append("(lc.id IS NULL OR COALESCE(lc.context_status, '') IN ('pending', 'body_only', 'failed'))")
+            where_clauses.append("(lc.id IS NULL OR COALESCE(lc.context_status, '') IN ('pending', 'body_only', 'failed', 'metadata_only', 'insufficient_text', 'empty', 'unsupported_content_type'))")
     else:
         select_fields.extend(
             [
@@ -242,6 +238,10 @@ def extract_existing_contexts(
         )
         join_sql = ""
         where_clauses = ["l.id > ?"]
+
+    for column in ("user_context", "source_summary", "capture_quality", "capture_coverage", "capture_metadata"):
+        expression = f"lc.{column}" if has_context and column in context_cols else "NULL"
+        select_fields.append(f"{expression} AS existing_{column}")
 
     previous_factory = con.row_factory
     con.row_factory = sqlite3.Row
@@ -268,6 +268,8 @@ def extract_existing_contexts(
         "body_only_contexts": 0,
         "deferred_contexts": 0,
         "next_extract_after_id": None,
+        "preserved_contexts": 0,
+        "limited_contexts": 0,
     }
     if dry_run:
         return stats
@@ -298,6 +300,7 @@ def extract_existing_contexts(
         context_status = "body_only"
         extractor = existing_extractor
         error = None
+        result: dict[str, object] = {}
 
         try:
             result = extract_url_context(url, timeout=min(5, max(1, int(deadline - time.monotonic()))))
@@ -315,14 +318,12 @@ def extract_existing_contexts(
 
             if status == "extracted":
                 context_status = "extracted"
-                summary = merge_summaries(
-                    base_summary,
-                    result.get("summary") if isinstance(result.get("summary"), str) else None,
-                )
-                stats["extracted_contexts"] += 1
             elif status == "unsupported_content_type":
-                context_status = "body_only"
-                stats["body_only_contexts"] += 1
+                context_status = status
+                stats["limited_contexts"] += 1
+            elif status in {"metadata_only", "insufficient_text", "empty"}:
+                context_status = status
+                stats["limited_contexts"] += 1
             else:
                 context_status = "failed"
                 stats["failed_contexts"] += 1
@@ -331,6 +332,16 @@ def extract_existing_contexts(
             extractor = "urllib.request"
             error = str(exc)
             stats["failed_contexts"] += 1
+
+        capture = capture_context_fields(result)
+        if row["existing_context_status"] == "extracted" and existing_text and (
+            context_status != "extracted"
+            or (row["existing_capture_quality"] == "usable" and capture["capture_quality"] != "usable")
+        ):
+            # --force requests a fetch, not permission to destroy better evidence.
+            stats["preserved_contexts"] += 1
+            stats["next_extract_after_id"] = link_id
+            continue
 
         upsert_link_context(
             con,
@@ -345,7 +356,12 @@ def extract_existing_contexts(
             extractor=extractor,
             error=error,
             now=now_iso(),
+            # Do not invent user authorship for mixed legacy summaries.
+            user_context=row["existing_user_context"],
+            **capture,
         )
+        if context_status == "extracted":
+            stats["extracted_contexts"] += 1
         stats["next_extract_after_id"] = link_id
 
     return stats
@@ -491,9 +507,9 @@ def run_backfill(
             "force": force,
         }
 
+    backup_path = add_backup(DB)
     con = connect(DB)
     ensure_schema(con)
-    backup_path = add_backup(DB)
 
     for rel_path, meta, links in iter_notes(VAULT):
         item_created = item_created_from_meta(meta)
