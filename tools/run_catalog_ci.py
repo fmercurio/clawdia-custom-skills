@@ -122,6 +122,7 @@ GENERATED_FILES = (
 )
 UNIT_SUITES = (
     ("tools/tests", "test_*.py"),
+    ("skills/devops/vaultwarden-operations/tests", "test_*.py"),
     ("skills/research/llm-wiki/tests", "test_validate_staging.py"),
     ("tools/skill_deploy/tests", "test_*.py"),
 )
@@ -785,9 +786,12 @@ def gate_unit_contract(root: Path) -> dict:
     files = ["public-unit-suites"]
     try:
         with tempfile.TemporaryDirectory() as public_dir:
-            public_root = Path(public_dir)
+            public_root = Path(public_dir).resolve()
+            home = public_root / "home"
+            home.mkdir(mode=0o700)
             environment = {
                 "CLAWDIA_CI_PUBLIC": "1",
+                "HOME": str(home),
                 "LANG": "C.UTF-8",
                 "LC_ALL": "C.UTF-8",
                 "PATH": "/usr/bin:/bin",

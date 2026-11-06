@@ -65,12 +65,20 @@ def copy_generated_outputs(root: Path) -> None:
 
 
 def write_tiny_unit_suites(root: Path) -> None:
+    if root.resolve() == REPO_ROOT.resolve():
+        raise ValueError("tiny suites require a disposable fixture")
+    # Generation fixtures copy the package tree. Replace only its copied test
+    # directory so this unit-gate fixture does not run the real package suite.
+    copied_vaultwarden_tests = root / "skills/devops/vaultwarden-operations/tests"
+    if copied_vaultwarden_tests.exists():
+        shutil.rmtree(copied_vaultwarden_tests)
     (root / "registry").mkdir(parents=True, exist_ok=True)
     marker = root / "registry" / "skills-registry.yaml"
     if not marker.exists():
         marker.write_text("skills: []\n")
     suites = (
         root / "tools" / "tests" / "test_tiny.py",
+        root / "skills" / "devops" / "vaultwarden-operations" / "tests" / "test_tiny.py",
         root / "skills" / "research" / "llm-wiki" / "tests" / "test_validate_staging.py",
         root / "tools" / "skill_deploy" / "tests" / "test_tiny.py",
     )
@@ -85,6 +93,30 @@ def write_tiny_unit_suites(root: Path) -> None:
 
 
 class CatalogCIRunnerTests(unittest.TestCase):
+    def test_unit_contract_keeps_vaultwarden_baseline_coverage(self) -> None:
+        self.assertIn(
+            ("skills/devops/vaultwarden-operations/tests", "test_*.py"),
+            catalog_ci.UNIT_SUITES,
+        )
+
+    def test_vaultwarden_failure_blocks_public_unit_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            write_tiny_unit_suites(root)
+            suite = root / "skills/devops/vaultwarden-operations/tests/test_tiny.py"
+            suite.parent.mkdir(parents=True, exist_ok=True)
+            suite.write_text(
+                "import unittest\n"
+                "class VaultwardenTest(unittest.TestCase):\n"
+                "    def test_contract(self): self.assertTrue(True)\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(catalog_ci.gate_unit_contract(root)["status"], "passed")
+            suite.write_text(suite.read_text().replace("assertTrue(True)", "assertTrue(False)"))
+            result = catalog_ci.gate_unit_contract(root)
+            self.assertEqual(result["status"], "failed")
+            self.assertEqual(result["code"], "public-unit-failure")
+
     def test_unit_contract_rejects_altered_actionlint_before_suite_execution(self) -> None:
         source = Path(os.environ["ACTIONLINT_BIN"])
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -141,6 +173,9 @@ class CatalogCIRunnerTests(unittest.TestCase):
                 "    def test_verified_staged_tool_and_sanitized_environment(self):\n"
                 "        tool = Path(os.environ['ACTIONLINT_BIN'])\n"
                 "        self.assertEqual(tool, Path(os.environ['TMPDIR']) / 'actionlint')\n"
+                "        self.assertEqual(Path.home(), Path(os.environ['TMPDIR']) / 'home')\n"
+                "        self.assertTrue(Path.home().is_dir())\n"
+                "        self.assertEqual(Path(os.environ['TMPDIR']), Path(os.environ['TMPDIR']).resolve())\n"
                 "        self.assertEqual(os.environ['PATH'], '/usr/bin:/bin')\n"
                 "        self.assertNotIn('UNTRUSTED_AMBIENT_VALUE', os.environ)\n"
                 "        completed = subprocess.run(\n"
@@ -164,6 +199,34 @@ class CatalogCIRunnerTests(unittest.TestCase):
                 result = catalog_ci.gate_unit_contract(root)
 
         self.assertEqual(result["status"], "passed")
+
+    def test_unit_contract_canonicalizes_owned_temporary_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            test_dir = root / "tools/tests"
+            test_dir.mkdir(parents=True)
+            (test_dir / "test_canonical_temp.py").write_text(
+                "import os\n"
+                "from pathlib import Path\n"
+                "import unittest\n"
+                "class CanonicalTemporaryRootTest(unittest.TestCase):\n"
+                "    def test_canonical_root(self):\n"
+                "        root = Path(os.environ['TMPDIR'])\n"
+                "        self.assertEqual(root, root.resolve())\n"
+                "        self.assertEqual(Path.home(), root / 'home')\n",
+                encoding="utf-8",
+            )
+            real = root / "gate-real"
+            real.mkdir()
+            alias = root / "gate-alias"
+            alias.symlink_to(real, target_is_directory=True)
+            with (
+                mock.patch.object(catalog_ci.tempfile, "TemporaryDirectory") as temporary,
+                mock.patch.object(catalog_ci, "UNIT_SUITES", (("tools/tests", "test_*.py"),)),
+            ):
+                temporary.return_value.__enter__.return_value = str(alias)
+                result = catalog_ci.gate_unit_contract(root)
+            self.assertEqual(result["status"], "passed")
 
     def test_unit_contract_does_not_execute_unverified_tool_for_version(self) -> None:
         identity = (catalog_ci.platform.system(), catalog_ci.platform.machine())

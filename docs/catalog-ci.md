@@ -77,10 +77,13 @@ fixado, sem importar ou executar ferramentas vindas dela.
   symlinks e confere tamanho e SHA-256 contra identidades binárias fixas para Linux
   amd64 e Darwin arm64. Somente depois copia exatamente os bytes verificados para o
   diretório temporário controlado pelo gate, confere a versão 1.7.12 nessa cópia e
-  passa apenas esse caminho staged às suítes públicas em `tools/tests`, ao teste do
-  validador `llm-wiki` e a `tools/skill_deploy/tests`, exigindo pelo menos um teste
-  por suíte e sucesso de todas elas. Não há busca de fallback em `PATH`, nem checksum
-  fornecido pelo chamador, nem herança do ambiente externo.
+  passa apenas esse caminho staged às suítes públicas em `tools/tests`, à suíte
+  documental de `vaultwarden-operations`, ao teste do validador `llm-wiki` e a
+  `tools/skill_deploy/tests`, exigindo pelo menos um teste
+  por suíte e sucesso de todas elas. Cada execução recebe `HOME` descartável; a
+  raiz temporária controlada é canonicalizada antes de staging para não propagar
+  aliases de diretórios ao caminho do binário verificado. Não há busca de fallback
+  em `PATH`, nem checksum fornecido pelo chamador, nem herança do ambiente externo.
 
 Esses gates verificam dados, metadados, geração e testes públicos. Um resultado
 público verde não é inspeção clean-room da fonte, não examina o archive real a ser
@@ -89,8 +92,8 @@ privado.
 
 Os limites do runner são fechados: arquivos contratuais têm no máximo 1.000.000
 bytes; snapshots têm no máximo 4.096 arquivos, 64.000.000 bytes no total e caminhos
-relativos de até 512 bytes. Cada uma das três suítes de `unit-contract` tem timeout
-de 120 segundos. Seu log combinado de stdout/stderr é aceito até 1.000.000 bytes e
+relativos de até 512 bytes. Cada módulo descoberto nas quatro suítes de
+`unit-contract` tem timeout de 120 segundos. Seu log combinado de stdout/stderr é aceito até 1.000.000 bytes e
 o processo recebe limite de tamanho de arquivo de 8.388.609 bytes. O relatório usa
 diagnósticos de caminho específico quando a causa já corresponde a uma entrada
 fixa conhecida. Em `generated-drift`, output ausente, ilegível ou divergente informa
