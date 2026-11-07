@@ -49,8 +49,17 @@ jobs:
       - name: Run repository tooling unit tests
         run: python3 -m unittest discover -s tools/tests -p "test_*.py" -v
 
+      - name: Install required synthetic encryption test dependency
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes age
+          command -v age
+          command -v age-keygen
+
       # Fixed repository-owned command; no interpolation of PR-controlled input.
-      - name: Run Vaultwarden documentary contract tests
+      - name: Run Vaultwarden source and synthetic operational tests
         run: PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s skills/devops/vaultwarden-operations/tests -p "test_*.py" -v
 
       - name: Run llm-wiki staging validator tests

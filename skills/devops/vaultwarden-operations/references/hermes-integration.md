@@ -65,7 +65,7 @@ Acceptance: identity and grant checks bind the actual caller/session; stale avai
 
 ## 6. Executor acceptance matrix
 
-The package's tests are **offline/documentary, not runtime safety proof**. Before any future executor is approved, its owning component must independently exercise the implementation and preserve failed evidence:
+The integration-contract tests are **offline/documentary, not runtime safety proof**. Candidate infrastructure/preflight tests also exercise isolated synthetic SQLite/age/metadata children, not an agent credential executor. See [operational learnings](operational-learnings.md) and [agent-access rollout](agent-access-rollout.md). Before any future executor is approved, its owning component must independently exercise the implementation and preserve failed evidence:
 
 | Case | Required observable result |
 |---|---|

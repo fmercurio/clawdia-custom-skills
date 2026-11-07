@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "enabled": false,
+  "account_kind": "dedicated",
+  "server_origin": "https://vault.example.com",
+  "account_id": "synthetic-dedicated-account",
+  "cli_state_directory": "/var/lib/vaultwarden-agent-synthetic",
+  "expires_at": "1970-01-01T00:00:00Z",
+  "scopes": [
+    {
+      "profile": "pilot-profile",
+      "item_id": "00000000-0000-0000-0000-000000000000",
+      "consumer": "fixed_https_api",
+      "operation": "authenticated_read"
+    }
+  ]
+}
